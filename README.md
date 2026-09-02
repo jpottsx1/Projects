@@ -19,8 +19,9 @@ files in the PNG image format"* — the app's bundle does not advertise those
 document types even though it happily accepts them by drop. A drop never
 consults that list, and neither does the Apple Event. Two fallbacks follow it
 if the event is refused: addressing the app by name instead of by bundle ID,
-relaunching it with the paths in its `argv` (`open -n -a ImageOptim --args …`),
-then plain `open -a`.
+then plain `open -a`, then relaunching the app with the paths in its `argv`
+(`open -n -a ImageOptim --args …`) — last, because `-n` leaves a second copy of
+the app running.
 
 Nothing about the app is hardcoded. Which ImageOptim you have is settled by
 asking LaunchServices for it by name, and the bundle identifier is then read
@@ -189,6 +190,11 @@ script fell through to `open -a`. Run `send-to-imageoptim --check` to see which
 rung failed. If macOS is blocking Apple Events, allow the sender (Automator,
 or Terminal for CLI use) under System Settings > Privacy & Security >
 Automation.
+
+**`--check` says both `applescript` rungs were refused.** macOS gates Apple
+Events between apps. Allow the sender — Terminal for command-line use,
+Automator for the Quick Action — under System Settings > Privacy & Security >
+Automation. Without it the script still works, one rung down.
 
 **Nothing happens and no notification appears.** Notifications for Script
 Editor / Automator may be muted in System Settings → Notifications. Run the

@@ -175,18 +175,24 @@ handoff_applescript_name() {
     applescript_open "\"$app_name\"" "$@"
 }
 
-# ImageOptim also reads paths out of its own argv, but --args is only
-# delivered to a process being launched, hence the new instance.
+# ImageOptim reads paths out of its own argv, but --args is only delivered to
+# a process being launched -- so this leaves a second copy of the app running,
+# which is why it sits at the bottom of the list.
 handoff_launchargs() {
     /usr/bin/open -n -a "$app" --args "$@" >/dev/null 2>&1
 }
 
-# The obvious one, kept last: LaunchServices may refuse the file types.
+# Through LaunchServices, which checks the app's advertised document types --
+# fine for an app that declares them, refused outright by one that does not.
 handoff_openapp() {
     /usr/bin/open -a "$app" "$@" >/dev/null 2>&1
 }
 
-METHODS="applescript applescript_name launchargs openapp"
+# Order matters. The Apple Events come first: they are what a drop does, they
+# need no new process, and they work whether or not the app is already up.
+# `open -a` is next -- ImageOptim's own documented way in, and single-instance.
+# launchargs is last because -n means a second copy of the app every time.
+METHODS="applescript applescript_name openapp launchargs"
 
 handoff() {
     case $method in

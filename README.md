@@ -165,7 +165,25 @@ check the Services list in System Settings as above. Confirm the bundle is at
 `~/Applications`. If ImageOptim lives elsewhere, or Spotlight indexing is off
 for that volume, set `IMAGEOPTIM_APP` in the config file.
 
-**"ImageOptim cannot open files in the PNG image format."** That dialog comes
+**"ImageOptim cannot open files in the PNG image format," and `--check` says a
+method was accepted.** More than one app ships as "ImageOptim". The one on the
+Mac App Store (`com.luoxiao.ImageOptim`) declares no `CFBundleDocumentTypes` at
+all and takes files by drag-and-drop only: it accepts the Apple Event, then
+refuses the file with that dialog. Nothing in this script can work around an
+app with no way in. Get the real one and pin it:
+
+```sh
+mv /Applications/ImageOptim.app "/Applications/ImageOptim (App Store).app"
+brew install --cask imageoptim
+mkdir -p ~/.config/send-to-imageoptim
+echo 'IMAGEOPTIM_APP="/Applications/ImageOptim.app"' > ~/.config/send-to-imageoptim/config
+```
+
+`--check` prints the bundle identifier it resolved and warns when it is not
+`net.pornel.ImageOptim`.
+
+**"ImageOptim cannot open files in the PNG image format" with every method
+refused.** That dialog comes
 from LaunchServices, which means every Apple Event method was refused and the
 script fell through to `open -a`. Run `send-to-imageoptim --check` to see which
 rung failed. If macOS is blocking Apple Events, allow the sender (Automator,

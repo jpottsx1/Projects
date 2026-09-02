@@ -132,7 +132,8 @@ whole; ImageOptim walks them recursively. Files whose extension is not in
 IMAGEOPTIM_EXTS (default: png jpg jpeg gif svg) are skipped.
 
 --check reports which ImageOptim it found and sends it a test image it
-creates itself, printing which handoff method worked.
+creates itself, printing which handoff method the app accepted. Whether the
+app then actually opened it is something only looking at ImageOptim tells you.
 USAGE
 }
 
@@ -240,6 +241,12 @@ selftest() {
     local dir file candidate
     printf 'App       : %s\n' "$app"
     printf 'Bundle ID : %s\n' "${bundle_id:-(none in Info.plist)}"
+    if [ "$bundle_id" != "net.pornel.ImageOptim" ]; then
+        printf '\nNote: that is not imageoptim.com'"'"'s ImageOptim (net.pornel.ImageOptim).\n'
+        printf 'Other apps ship under the same name. At least one of them declares no\n'
+        printf 'document types and takes files by drag-and-drop only -- it will accept the\n'
+        printf 'handoff below and then refuse the file with a dialog of its own.\n\n'
+    fi
 
     dir=$(/usr/bin/mktemp -d "${TMPDIR:-/tmp}/send-to-imageoptim.XXXXXXXX") || return 1
     file=$dir/send-to-imageoptim-test.png
@@ -251,12 +258,17 @@ selftest() {
     for candidate in $METHODS; do
         printf '  %-18s' "$candidate"
         if "handoff_$candidate" "$file"; then
-            printf ' worked\n\nImageOptim should now be showing send-to-imageoptim-test.png.\n'
-            printf 'If it is, everything works -- pin it with IMAGEOPTIM_METHOD=%s\n' "$candidate"
-            printf 'in ~/.config/send-to-imageoptim/config if you like.\n'
+            printf ' accepted\n'
+            # Accepted means the app took the event without complaint. It does
+            # not prove the app opened the file -- only looking does.
+            printf '\nNow look at ImageOptim: it should be showing send-to-imageoptim-test.png.\n'
+            printf 'If it is, everything works. If it is not, or it put up an error, the app\n'
+            printf 'took the handoff and ignored the file, and no method here will fix that.\n'
+            printf '\nTo pin this method: IMAGEOPTIM_METHOD=%s in\n' "$candidate"
+            printf '~/.config/send-to-imageoptim/config\n'
             return 0
         fi
-        printf ' failed\n'
+        printf ' refused\n'
     done
 
     printf '\nNothing worked. Send the output above back to whoever asked for it.\n' &gt;&amp;2

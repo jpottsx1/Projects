@@ -6,15 +6,20 @@ onto the Dock icon. Select images in Finder, right-click, **Quick Actions →
 Send to ImageOptim**, and they land in ImageOptim's queue exactly as if you had
 dropped them on the window.
 
-ImageOptim has no scripting interface, but it does accept files as launch
-arguments, which is the same code path drag-and-drop uses:
+ImageOptim has no scripting interface, so the files are handed over the way a
+drop does: an "open documents" Apple Event sent straight to the app.
 
 ```sh
-open -a ImageOptim file1.png file2.jpg
+osascript -e 'tell application id "net.pornel.ImageOptim" to open {POSIX file "/path/a.png"}'
 ```
 
-That one line is the whole trick; the rest of this repo is the plumbing that
-puts it on the Finder context menu, safely, for any selection.
+The obvious `open -a ImageOptim a.png` is *not* used, because it goes through
+LaunchServices, which on some builds refuses with *"ImageOptim cannot open
+files in the PNG image format"* — the app's bundle does not advertise those
+document types even though it happily accepts them by drop. A drop never
+consults that list, and neither does the Apple Event. Two fallbacks follow it
+if the event is refused: relaunching the app with the paths in its `argv`
+(`open -n -a ImageOptim --args …`), then plain `open -a`.
 
 ## Requirements
 
@@ -73,9 +78,12 @@ IMAGEOPTIM_APP="$HOME/Applications/ImageOptim.app"
 
 # no notification when a selection has nothing to optimize
 IMAGEOPTIM_QUIET=1
+
+# pin the handoff instead of trying applescript, launchargs, openapp in order
+IMAGEOPTIM_METHOD="applescript"
 ```
 
-The same three names work as environment variables and take precedence over the
+The same names work as environment variables and take precedence over the
 config file.
 
 ## Command line
@@ -131,6 +139,18 @@ check the Services list in System Settings as above. Confirm the bundle is at
 `net.pornel.ImageOptim` via Spotlight, then in `/Applications` and
 `~/Applications`. If ImageOptim lives elsewhere, or Spotlight indexing is off
 for that volume, set `IMAGEOPTIM_APP` in the config file.
+
+**"ImageOptim cannot open files in the PNG image format."** That dialog comes
+from LaunchServices, which means the Apple Event handoff was refused and the
+script fell through to `open -a`. Check that the Apple Event route works on
+its own:
+
+```sh
+osascript -e 'tell application id "net.pornel.ImageOptim" to open {POSIX file "/path/to/real.png"}'
+```
+
+If macOS is blocking Apple Events, allow the sender (Automator, or Terminal
+for CLI use) under System Settings > Privacy & Security > Automation.
 
 **Nothing happens and no notification appears.** Notifications for Script
 Editor / Automator may be muted in System Settings → Notifications. Run the

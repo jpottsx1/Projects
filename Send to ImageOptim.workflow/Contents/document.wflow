@@ -63,10 +63,13 @@
 #
 # send-to-imageoptim -- hand a set of files (or folders) to ImageOptim.app
 #
-# ImageOptim has no real CLI, but it does accept files as launch arguments,
-# which is exactly what drag-and-drop does under the hood:
-#
-#     open -a ImageOptim file1.png file2.jpg
+# ImageOptim has no real CLI, so the files are handed over the same way a
+# drag-and-drop does: an "open documents" Apple Event sent straight to the app.
+# `open -a ImageOptim file.png` looks like the obvious way to do it, but it
+# goes through LaunchServices, which refuses with "ImageOptim cannot open
+# files in the PNG image format" on builds whose bundle does not advertise
+# those document types. A drop never consults that list, and neither does the
+# Apple Event. Two cruder fallbacks follow it; see handoff() below.
 #
 # This script is the body of the "Send to ImageOptim" Finder Quick Action and
 # also works standalone:  send-to-imageoptim ~/Pictures/*.png
@@ -77,6 +80,9 @@
 #   IMAGEOPTIM_APP   full path to the .app bundle (default: located with
 #                    Spotlight, then /Applications and ~/Applications)
 #   IMAGEOPTIM_QUIET set to 1 to suppress the "nothing to do" notification
+#   IMAGEOPTIM_METHOD pin the handoff: applescript | launchargs | openapp
+#                    (default: try them in that order, keep the first that
+#                    works)
 #
 # The same three can be set in ~/.config/send-to-imageoptim/config, which is
 # sourced as shell -- handy for tuning the installed Quick Action without
@@ -88,6 +94,7 @@ set -u
 env_exts=${IMAGEOPTIM_EXTS:-}
 env_app=${IMAGEOPTIM_APP:-}
 env_quiet=${IMAGEOPTIM_QUIET:-}
+env_method=${IMAGEOPTIM_METHOD:-}
 
 config=${XDG_CONFIG_HOME:-$HOME/.config}/send-to-imageoptim/config
 # shellcheck source=/dev/null
@@ -95,6 +102,7 @@ config=${XDG_CONFIG_HOME:-$HOME/.config}/send-to-imageoptim/config
 
 exts=${env_exts:-${IMAGEOPTIM_EXTS:-"png jpg jpeg gif svg"}}
 quiet=${env_quiet:-${IMAGEOPTIM_QUIET:-0}}
+method=${env_method:-${IMAGEOPTIM_METHOD:-}}
 
 notify() {
     # $1 = message, $2 = title
@@ -156,8 +164,7 @@ matches_ext() {
 
 sent=0
 skipped=0
-tmp=$(/usr/bin/mktemp "${TMPDIR:-/tmp}/send-to-imageoptim.XXXXXXXX") || die "could not create a temporary file"
-trap 'rm -f "$tmp"' EXIT
+files=()
 
 for path in "$@"; do
     # Always hand `open` an absolute path: Finder gives us those anyway, and it
@@ -167,7 +174,7 @@ for path in "$@"; do
          *) path=$PWD/$path ;;
     esac
     if [ -e "$path" ] &amp;&amp; { [ -d "$path" ] || matches_ext "$path"; }; then
-        printf '%s\0' "$path" &gt;&gt;"$tmp"
+        files+=("$path")
         sent=$((sent + 1))
     else
         skipped=$((skipped + 1))
@@ -186,11 +193,58 @@ if [ "$sent" -eq 0 ]; then
 fi
 
 # --- hand off ---------------------------------------------------------------
-# xargs splits the list so a huge selection cannot blow past ARG_MAX; each
-# batch is appended to ImageOptim's queue.
-if ! /usr/bin/xargs -0 /usr/bin/open -a "$app" &lt;"$tmp"; then
-    die "ImageOptim could not be launched."
-fi
+bundle_id=$(/usr/bin/defaults read "$app/Contents/Info" CFBundleIdentifier 2&gt;/dev/null) || bundle_id=""
+[ -z "$bundle_id" ] &amp;&amp; bundle_id="net.pornel.ImageOptim"
+
+# What a drop does: an open-documents Apple Event to the running (or
+# newly launched) app. No LaunchServices document-type check, no second copy.
+handoff_applescript() {
+    /usr/bin/osascript - "$@" &gt;/dev/null 2&gt;&amp;1 &lt;&lt;APPLESCRIPT
+on run argv
+    set theFiles to {}
+    repeat with thePath in argv
+        set end of theFiles to POSIX file (thePath as text)
+    end repeat
+    tell application id "$bundle_id"
+        activate
+        open theFiles
+    end tell
+end run
+APPLESCRIPT
+}
+
+# ImageOptim also reads paths out of its own argv, but --args is only
+# delivered to a process being launched, hence the new instance.
+handoff_launchargs() {
+    /usr/bin/open -n -a "$app" --args "$@" &gt;/dev/null 2&gt;&amp;1
+}
+
+# The obvious one, kept last: LaunchServices may refuse the file types.
+handoff_openapp() {
+    /usr/bin/open -a "$app" "$@" &gt;/dev/null 2&gt;&amp;1
+}
+
+handoff() {
+    case $method in
+        applescript|launchargs|openapp) "handoff_$method" "$@"; return $? ;;
+    esac
+    local candidate
+    for candidate in applescript launchargs openapp; do
+        if "handoff_$candidate" "$@"; then
+            method=$candidate   # stick with whatever worked for later batches
+            return 0
+        fi
+    done
+    return 1
+}
+
+# Send in batches so a selection of thousands cannot blow past ARG_MAX.
+batch=200
+index=0
+while [ "$index" -lt "$sent" ]; do
+    handoff "${files[@]:index:batch}" || die "ImageOptim would not accept the files."
+    index=$((index + batch))
+done
 
 exit 0
 </string>

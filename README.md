@@ -10,7 +10,7 @@ ImageOptim has no scripting interface, so the files are handed over the way a
 drop does: an "open documents" Apple Event sent straight to the app.
 
 ```sh
-osascript -e 'tell application id "net.pornel.ImageOptim" to open {POSIX file "/path/a.png"}'
+osascript -e 'tell application "ImageOptim" to open {POSIX file "/path/a.png"}'
 ```
 
 The obvious `open -a ImageOptim a.png` is *not* used, because it goes through
@@ -18,8 +18,14 @@ LaunchServices, which on some builds refuses with *"ImageOptim cannot open
 files in the PNG image format"* — the app's bundle does not advertise those
 document types even though it happily accepts them by drop. A drop never
 consults that list, and neither does the Apple Event. Two fallbacks follow it
-if the event is refused: relaunching the app with the paths in its `argv`
-(`open -n -a ImageOptim --args …`), then plain `open -a`.
+if the event is refused: addressing the app by name instead of by bundle ID,
+relaunching it with the paths in its `argv` (`open -n -a ImageOptim --args …`),
+then plain `open -a`.
+
+Nothing about the app is hardcoded. Which ImageOptim you have is settled by
+asking LaunchServices for it by name, and the bundle identifier is then read
+out of that bundle — more than one shipping app is called ImageOptim, and they
+do not share an identifier.
 
 ## Requirements
 
@@ -28,13 +34,19 @@ if the event is refused: relaunching the app with the paths in its `argv`
 
 ## Install
 
+One script, nothing else needed:
+
 ```sh
-git clone <this repo>
-cd projects
-./install.sh
+./setup.sh
 ```
 
-`install.sh` copies `Send to ImageOptim.workflow` into `~/Library/Services` and
+It writes the command to `~/.local/bin`, installs the Quick Action that calls
+it, refreshes the Services cache, and then sends ImageOptim a test image it
+creates itself, reporting which handoff method worked. `./setup.sh --uninstall`
+removes both. Everything it installs is baked into that one file, so it can be
+copied to a machine on its own.
+
+If you would rather install from the checkout, `install.sh` copies `Send to ImageOptim.workflow` into `~/Library/Services` and
 flushes the Services cache. Add `--cli` to also symlink the command into
 `/usr/local/bin` (or `--cli ~/bin` for somewhere else).
 
@@ -103,6 +115,8 @@ batched instead of overflowing the argument limit.
 ```
 src/send-to-imageoptim.sh        the actual logic (also the CLI)
 tools/build-workflow.py          generates the .workflow from that script
+tools/build-setup.py             generates setup.sh from that script
+setup.sh                         the generated one-shot installer
 Send to ImageOptim.workflow/     the generated Quick Action, committed
 install.sh / uninstall.sh        copy it into (and out of) ~/Library/Services
 ```
@@ -113,7 +127,7 @@ second, hand-edited copy of the script pasted into a plist, the bundle is
 generated. After editing `src/send-to-imageoptim.sh`:
 
 ```sh
-python3 tools/build-workflow.py && ./install.sh
+python3 tools/build-workflow.py && python3 tools/build-setup.py && ./setup.sh
 ```
 
 The generator uses fixed UUIDs, so rebuilding an unchanged script produces no
@@ -129,6 +143,17 @@ Removes the Quick Action from `~/Library/Services` and any `send-to-imageoptim`
 symlink pointing back at this checkout. The config file, if you made one, is
 left alone.
 
+## Checking it works
+
+```sh
+send-to-imageoptim --check
+```
+
+Prints which ImageOptim it found and its bundle identifier, then sends it a
+1x1 PNG it writes itself — no path for you to get wrong — and reports which of
+the four handoff methods was accepted. This is the first thing to run when
+something is off.
+
 ## Troubleshooting
 
 **The menu item never appears.** Services are cached. `killall Finder`, then
@@ -141,16 +166,11 @@ check the Services list in System Settings as above. Confirm the bundle is at
 for that volume, set `IMAGEOPTIM_APP` in the config file.
 
 **"ImageOptim cannot open files in the PNG image format."** That dialog comes
-from LaunchServices, which means the Apple Event handoff was refused and the
-script fell through to `open -a`. Check that the Apple Event route works on
-its own:
-
-```sh
-osascript -e 'tell application id "net.pornel.ImageOptim" to open {POSIX file "/path/to/real.png"}'
-```
-
-If macOS is blocking Apple Events, allow the sender (Automator, or Terminal
-for CLI use) under System Settings > Privacy & Security > Automation.
+from LaunchServices, which means every Apple Event method was refused and the
+script fell through to `open -a`. Run `send-to-imageoptim --check` to see which
+rung failed. If macOS is blocking Apple Events, allow the sender (Automator,
+or Terminal for CLI use) under System Settings > Privacy & Security >
+Automation.
 
 **Nothing happens and no notification appears.** Notifications for Script
 Editor / Automator may be muted in System Settings → Notifications. Run the

@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Send to ImageOptim — Support</title>
+<meta name="description" content="Support site for Send to ImageOptim, a macOS Finder Quick Action that sends selected images to ImageOptim.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14' font-size='14'>🗜️</text></svg>">
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #fbfaf8;
+    --panel: #ffffff;
+    --ink: #1d1c1a;
+    --muted: #5f5c56;
+    --rule: #e4e0d8;
+    --accent: #9a4a1e;
+    --accent-ink: #ffffff;
+    --code-bg: #f2efe9;
+    --warn-bg: #fdf5e6;
+    --warn-rule: #d8a44a;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #17161a;
+      --panel: #1f1e23;
+      --ink: #eceae6;
+      --muted: #a29e97;
+      --rule: #34323a;
+      --accent: #e39264;
+      --accent-ink: #17161a;
+      --code-bg: #262429;
+      --warn-bg: #2a2318;
+      --warn-rule: #8a6a2c;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font: 16px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    -webkit-text-size-adjust: 100%;
+  }
+  .wrap { max-width: 47rem; margin: 0 auto; padding: 0 20px; }
+  header { padding-block: 3.5rem 2rem; border-bottom: 1px solid var(--rule); }
+  h1 { font-size: clamp(1.9rem, 5vw, 2.6rem); line-height: 1.15; margin: 0 0 .5rem; letter-spacing: -0.02em; }
+  .tagline { color: var(--muted); margin: 0; font-size: 1.05rem; }
+  h2 {
+    font-size: 1.3rem; letter-spacing: -0.01em;
+    margin: 3rem 0 .75rem; padding-top: 1.5rem; border-top: 1px solid var(--rule);
+  }
+  h3 { font-size: 1rem; margin: 1.75rem 0 .4rem; }
+  p, li { color: var(--ink); }
+  a { color: var(--accent); text-underline-offset: 2px; }
+  code, pre, kbd {
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    font-size: .88em;
+  }
+  code { background: var(--code-bg); padding: .15em .35em; border-radius: 4px; }
+  pre {
+    background: var(--code-bg); border: 1px solid var(--rule); border-radius: 8px;
+    padding: .9rem 1rem; overflow-x: auto; margin: .8rem 0;
+  }
+  pre code { background: none; padding: 0; }
+  kbd {
+    background: var(--panel); border: 1px solid var(--rule); border-bottom-width: 2px;
+    border-radius: 4px; padding: .1em .4em;
+  }
+  .support {
+    background: var(--panel); border: 1px solid var(--rule);
+    border-left: 4px solid var(--accent); border-radius: 10px;
+    padding: 1.25rem 1.35rem; margin: 2rem 0 0;
+  }
+  .support h2 { margin: 0 0 .5rem; padding: 0; border: 0; font-size: 1.15rem; }
+  .btn {
+    display: inline-block; margin-top: .85rem;
+    background: var(--accent); color: var(--accent-ink);
+    text-decoration: none; font-weight: 600;
+    padding: .6rem 1.1rem; border-radius: 7px;
+  }
+  .btn:hover { filter: brightness(1.08); }
+  .url { word-break: break-all; }
+  table { border-collapse: collapse; width: 100%; margin: .8rem 0; font-size: .95rem; }
+  th, td { text-align: left; padding: .5rem .6rem; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; }
+  .note {
+    background: var(--warn-bg); border: 1px solid var(--warn-rule);
+    border-radius: 8px; padding: .8rem 1rem; margin: 1rem 0;
+  }
+  .note p { margin: 0; }
+  dl.faq dt { font-weight: 600; margin-top: 1.5rem; }
+  dl.faq dd { margin: .35rem 0 0; }
+  footer {
+    margin-top: 3.5rem; padding-block: 1.5rem 3rem;
+    border-top: 1px solid var(--rule); color: var(--muted); font-size: .9rem;
+  }
+  footer a { color: var(--muted); }
+  .toc { padding-left: 1.1rem; color: var(--muted); }
+  .toc a { color: var(--accent); }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap">
+    <h1>Send to ImageOptim</h1>
+    <p class="tagline">Support for the macOS Finder Quick Action that sends your selected images straight to ImageOptim.</p>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <section class="support" id="support">
+    <h2>Get support</h2>
+    <p>
+      Questions, bug reports and feature requests all go to the issue tracker.
+      It is the support address for this project, and it is read by a person.
+    </p>
+    <p>
+      Support website:
+      <a class="url" href="https://github.com/jpottsx1/Projects/issues">https://github.com/jpottsx1/Projects/issues</a>
+    </p>
+    <p>
+      Before opening an issue, run <code>send-to-imageoptim --check</code> in Terminal
+      and paste its full output — it names the copy of ImageOptim that was found, its
+      bundle identifier, and which handoff method the app accepted. That output answers
+      most of what would otherwise be a round of questions.
+    </p>
+    <a class="btn" href="https://github.com/jpottsx1/Projects/issues/new">Open an issue</a>
+  </section>
+
+  <h2 id="what">What it does</h2>
+  <p>
+    Select images in Finder, right-click, <strong>Quick Actions → Send to ImageOptim</strong>,
+    and they land in ImageOptim's queue exactly as if you had dropped them on its window.
+    No drag-and-drop, no dragging a folder onto the Dock icon.
+  </p>
+  <p>
+    ImageOptim has no scripting interface, so the files are handed over the way a drop
+    does: an "open documents" Apple Event sent straight to the app. If that is refused,
+    the script falls back through three cruder routes, in order — the same event addressed
+    by name, <code>open -a</code>, and finally relaunching the app with the paths in its
+    <code>argv</code>.
+  </p>
+
+  <h2 id="requirements">Requirements</h2>
+  <ul>
+    <li>macOS — tested on Ventura and later; the Services mechanism itself is far older.</li>
+    <li><a href="https://imageoptim.com">ImageOptim.app</a> installed.</li>
+  </ul>
+
+  <h2 id="install">Install</h2>
+  <p>One script, nothing else needed:</p>
+  <pre><code>./setup.sh</code></pre>
+  <p>
+    It writes the command to <code>~/.local/bin</code>, installs the Quick Action that
+    calls it, refreshes the Services cache, and then sends ImageOptim a test image it
+    creates itself, reporting which handoff method worked. <code>./setup.sh --uninstall</code>
+    removes both.
+  </p>
+  <p>Then, in Finder: select some images → right-click → <strong>Quick Actions → Send to ImageOptim</strong>. Older macOS versions list it under <strong>Services</strong> instead.</p>
+
+  <h2 id="sent">What gets sent</h2>
+  <table>
+    <thead><tr><th>Selection</th><th>Behaviour</th></tr></thead>
+    <tbody>
+      <tr><td><code>.png .jpg .jpeg .gif .svg</code> (any capitalisation)</td><td>sent to ImageOptim</td></tr>
+      <tr><td>A folder</td><td>sent whole; ImageOptim walks it recursively</td></tr>
+      <tr><td>Anything else</td><td>silently skipped</td></tr>
+    </tbody>
+  </table>
+  <div class="note">
+    <p>
+      <strong>ImageOptim rewrites files in place.</strong> It is lossless by default, but if
+      you have configured lossy settings inside ImageOptim, the originals are gone. Keep that
+      in mind before pointing it at a folder of masters.
+    </p>
+  </div>
+
+  <h2 id="configuration">Configuration</h2>
+  <p>
+    Create <code>~/.config/send-to-imageoptim/config</code>. It is sourced by the script, so
+    no rebuild or reinstall is needed after a change:
+  </p>
+  <pre><code># only touch bitmaps, leave SVGs alone
+IMAGEOPTIM_EXTS="png jpg jpeg gif"
+
+# a copy of ImageOptim somewhere unusual
+IMAGEOPTIM_APP="$HOME/Applications/ImageOptim.app"
+
+# no notification when a selection has nothing to optimize
+IMAGEOPTIM_QUIET=1
+
+# pin the handoff instead of trying applescript, launchargs, openapp in order
+IMAGEOPTIM_METHOD="applescript"</code></pre>
+  <p>The same names work as environment variables and take precedence over the config file.</p>
+
+  <h2 id="troubleshooting">Troubleshooting</h2>
+  <p>
+    Start with <code>send-to-imageoptim --check</code>. It prints which ImageOptim it found
+    and its bundle identifier, then sends it a 1×1 PNG it writes itself — no path for you to
+    get wrong — and reports which of the four handoff methods was accepted.
+  </p>
+
+  <dl class="faq">
+    <dt>The menu item never appears.</dt>
+    <dd>
+      Services are cached. Run <code>killall Finder</code>, then check
+      <strong>System Settings → Keyboard → Keyboard Shortcuts → Services → Files and Folders</strong>
+      and tick <strong>Send to ImageOptim</strong>. That is also where you can give it a shortcut such as
+      <kbd>⌃⌥⌘O</kbd>. Confirm the bundle is at <code>~/Library/Services/Send to ImageOptim.workflow</code>.
+    </dd>
+
+    <dt>"ImageOptim is not installed."</dt>
+    <dd>
+      The script asks LaunchServices for the app by name, then looks in <code>/Applications</code>
+      and <code>~/Applications</code>. If ImageOptim lives elsewhere, or Spotlight indexing is off
+      for that volume, set <code>IMAGEOPTIM_APP</code> in the config file.
+    </dd>
+
+    <dt>"ImageOptim cannot open files in the PNG image format" — and <code>--check</code> says a method was accepted.</dt>
+    <dd>
+      More than one app ships as "ImageOptim". The one on the Mac App Store
+      (<code>com.luoxiao.ImageOptim</code>) declares no document types at all and takes files by
+      drag-and-drop only: it accepts the Apple Event, then refuses the file with that dialog.
+      Nothing in this script can work around an app with no way in. Get the real one and pin it:
+      <pre><code>mv /Applications/ImageOptim.app "/Applications/ImageOptim (App Store).app"
+brew install --cask imageoptim
+mkdir -p ~/.config/send-to-imageoptim
+echo 'IMAGEOPTIM_APP="/Applications/ImageOptim.app"' &gt; ~/.config/send-to-imageoptim/config</code></pre>
+      <code>--check</code> prints the bundle identifier it resolved and warns when it is not
+      <code>net.pornel.ImageOptim</code>.
+    </dd>
+
+    <dt>Both <code>applescript</code> rungs are refused.</dt>
+    <dd>
+      macOS gates Apple Events between apps. Allow the sender — Terminal for command-line use,
+      Automator for the Quick Action — under
+      <strong>System Settings → Privacy &amp; Security → Automation</strong>.
+      Without it the script still works, one rung down.
+    </dd>
+
+    <dt>Nothing happens and no notification appears.</dt>
+    <dd>
+      Notifications for Script Editor / Automator may be muted in
+      <strong>System Settings → Notifications</strong>. Run the same selection through
+      <code>send-to-imageoptim</code> in Terminal to see the error text directly.
+    </dd>
+
+    <dt>Still stuck.</dt>
+    <dd>
+      Open an issue at
+      <a class="url" href="https://github.com/jpottsx1/Projects/issues">https://github.com/jpottsx1/Projects/issues</a>
+      with the full <code>--check</code> output, your macOS version, and how ImageOptim was installed.
+    </dd>
+  </dl>
+
+  <h2 id="uninstall">Uninstall</h2>
+  <pre><code>./setup.sh --uninstall</code></pre>
+  <p>
+    Removes the Quick Action from <code>~/Library/Services</code> and the installed command.
+    The config file, if you made one, is left alone.
+  </p>
+
+</main>
+
+<footer class="wrap">
+  <p>
+    Support:
+    <a class="url" href="https://github.com/jpottsx1/Projects/issues">https://github.com/jpottsx1/Projects/issues</a>
+    · Source: <a href="https://github.com/jpottsx1/Projects">github.com/jpottsx1/Projects</a>
+    · ImageOptim itself: <a href="https://imageoptim.com">imageoptim.com</a>
+  </p>
+</footer>
+
+</body>
+</html>

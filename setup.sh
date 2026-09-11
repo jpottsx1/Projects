@@ -46,6 +46,8 @@ cat >"$command_path" <<'SEND_TO_IMAGEOPTIM_SCRIPT'
 # This script is the body of the "Send to ImageOptim" Finder Quick Action and
 # also works standalone:  send-to-imageoptim ~/Pictures/*.png
 #
+# Support website: https://github.com/jpottsx1/Projects/issues
+#
 # Configuration (environment variables):
 #   IMAGEOPTIM_EXTS  space-separated list of extensions to accept
 #                    (default: png jpg jpeg gif svg)
@@ -62,6 +64,11 @@ cat >"$command_path" <<'SEND_TO_IMAGEOPTIM_SCRIPT'
 # rebuilding it, e.g.  IMAGEOPTIM_EXTS="png jpg jpeg"
 
 set -u
+
+# The support website. Printed by --help and by --check when every handoff was
+# refused, so the address is in front of whoever has the problem rather than
+# only in the README.
+SUPPORT_URL="https://github.com/jpottsx1/Projects/issues"
 
 # Environment wins over the config file, which wins over these defaults.
 env_exts=${IMAGEOPTIM_EXTS:-}
@@ -107,6 +114,7 @@ IMAGEOPTIM_EXTS (default: png jpg jpeg gif svg) are skipped.
 creates itself, printing which handoff method the app accepted. Whether the
 app then actually opened it is something only looking at ImageOptim tells you.
 USAGE
+    printf '\nSupport: %s\n' "$SUPPORT_URL"
 }
 
 do_check=0
@@ -249,7 +257,8 @@ selftest() {
         printf ' refused\n'
     done
 
-    printf '\nNothing worked. Send the output above back to whoever asked for it.\n' >&2
+    printf '\nNothing worked. Open an issue with the output above, your macOS\n' >&2
+    printf 'version, and how ImageOptim was installed:\n%s\n' "$SUPPORT_URL" >&2
     return 1
 }
 

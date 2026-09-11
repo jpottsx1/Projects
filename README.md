@@ -115,6 +115,7 @@ batched instead of overflowing the argument limit.
 
 ```
 src/send-to-imageoptim.sh        the actual logic (also the CLI)
+docs/index.html                  the support website, served by GitHub Pages
 tools/build-workflow.py          generates the .workflow from that script
 tools/build-setup.py             generates setup.sh from that script
 setup.sh                         the generated one-shot installer
@@ -154,6 +155,24 @@ Prints which ImageOptim it found and its bundle identifier, then sends it a
 1x1 PNG it writes itself — no path for you to get wrong — and reports which of
 the four handoff methods was accepted. This is the first thing to run when
 something is off.
+
+## Support
+
+The support website for this project is its issue tracker:
+
+**<https://github.com/jpottsx1/Projects/issues>**
+
+That address is printed by `send-to-imageoptim --help`, and again by `--check`
+when every handoff method was refused — so it is in front of whoever has the
+problem rather than only here. Include the full `--check` output, your macOS
+version, and how ImageOptim was installed.
+
+`docs/index.html` is that support website: one self-contained page carrying the
+install, configuration and troubleshooting notes below, with the support URL at
+the top of it. To publish it, enable **Settings → Pages → Deploy from a branch**
+on this repository, choose the default branch and the `/docs` folder; it then
+serves at <https://jpottsx1.github.io/Projects/>. Nothing builds it — edit the
+HTML and push.
 
 ## Troubleshooting
 

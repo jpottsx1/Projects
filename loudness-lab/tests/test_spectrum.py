@@ -78,6 +78,21 @@ class TestKnownSpectra(unittest.TestCase):
                                        delta=0.2, msg=f"{band} Hz")
 
 
+class TestBandConstants(unittest.TestCase):
+    def test_report_band_selections_exist_in_the_band_table(self):
+        """A hardcoded 32.0 matches nothing: the nominal centre is 31.5."""
+        from loudnesslab import report
+        for band in report.LOW_SHAPE_BANDS:
+            self.assertIn(band, spectrum.BAND_CENTRES, f"{band} Hz")
+        self.assertTrue(report.LOW_SHAPE_BANDS)
+
+    def test_low_band_cutoff_selects_real_bands(self):
+        low = [b for b in spectrum.BAND_CENTRES
+               if b <= spectrum.LOW_BAND_MAX_HZ]
+        self.assertEqual(low[-1], 315.0)
+        self.assertEqual(len(low), 13)
+
+
 class TestLowEndDiagnostics(unittest.TestCase):
     def _two_channel_pink(self) -> np.ndarray:
         return np.stack([pink(RATE * SECONDS, 2), pink(RATE * SECONDS, 3)], axis=1)

@@ -34,7 +34,7 @@ def _progress_printer(start: float):
 def cmd_analyze(args: argparse.Namespace) -> int:
     start = time.monotonic()
     counts = analyze.run(
-        root=args.path, db_path=args.db, jobs=args.jobs,
+        roots=args.path, db_path=args.db, jobs=args.jobs,
         force=args.force, limit=args.limit,
         progress=None if args.quiet else _progress_printer(start),
     )
@@ -57,6 +57,8 @@ def cmd_report(args: argparse.Namespace) -> int:
             print(report.loudness_report(conn))
         elif args.kind == "lowend":
             print(report.lowend_report(conn, reference=args.reference))
+        elif args.kind == "folders":
+            print(report.folders_report(conn))
         elif args.kind == "tracks":
             print(report.tracks_report(conn, estimator=args.estimator,
                                        target=args.target, limit=args.limit))
@@ -122,23 +124,36 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     print(f"  cpus             {os.cpu_count()}  "
           f"(default --jobs {analyze.default_jobs()})")
 
-    if args.path is None:
+    if not args.path:
         print()
-        print("Pass a folder to check it too:")
-        print('  ./loudness-lab doctor "/Volumes/Card/DJ Music/Converted Wedding"')
+        print("Pass one or more folders to check them too:")
+        print('  ./loudness-lab doctor "/Volumes/Card/Dance Music/Dance"')
         return 0
 
-    print()
-    print(f"Library  {args.path}")
-    if not args.path.exists():
+    worst = 0
+    for index, path in enumerate(args.path):
+        print()
+        worst = max(worst, _doctor_library(path, first=(index == 0)))
+    if len(args.path) > 1:
+        print()
+        print(f"To analyse all {len(args.path)} folders into one database:")
+        quoted = " ".join(f'"{p}"' for p in args.path)
+        print(f"  ./loudness-lab analyze {quoted} --db library.db")
+    return worst
+
+
+def _doctor_library(path: Path, first: bool = True) -> int:
+    """Check one folder. Returns non-zero if it is unusable."""
+    print(f"Library  {path}")
+    if not path.exists():
         print("  NOT FOUND. If the path has spaces it needs quoting, and if "
               "it is an external\n  volume, check it is still mounted.")
         return 1
-    if not os.access(args.path, os.R_OK):
+    if not os.access(path, os.R_OK):
         print("  EXISTS BUT IS NOT READABLE by this user.")
         return 1
 
-    found = decode.survey(args.path)
+    found = decode.survey(path)
     files = found["audio"]
 
     if found["single_file"]:
@@ -153,7 +168,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         print("  terminal app.")
 
     if not files:
-        print(f"  no audio files found under this path")
+        print("  no audio files found under this path")
         if found["skipped"]:
             print("  but these other file types are present:")
             for suffix, count in sorted(found["skipped"].items(),
@@ -163,13 +178,13 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         return 1
 
     counts, total = {}, 0
-    for path in files:
-        counts[path.suffix.lower()] = counts.get(path.suffix.lower(), 0) + 1
+    for audio in files:
+        counts[audio.suffix.lower()] = counts.get(audio.suffix.lower(), 0) + 1
         try:
-            total += path.stat().st_size
+            total += audio.stat().st_size
         except OSError:
             pass
-    where = (f" across {found['folders']} folders" if found["folders"] > 1 else "")
+    where = f" across {found['folders']} folders" if found["folders"] > 1 else ""
     print(f"  {len(files)} audio files{where}, {total / 1e9:.2f} GB")
     for suffix, count in sorted(counts.items(), key=lambda kv: -kv[1]):
         print(f"    {suffix:<8} {count}")
@@ -178,38 +193,37 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         print("  ignored (not recognised as audio): "
               + ", ".join(f"{suffix} x{count}" for suffix, count in ignored))
 
-    print()
-    print("Decoding ONE file as a check -- doctor does not analyse anything.")
-    first = files[0]
-    print(f"  {first.name}")
+    # Only decode a probe file for the first folder; the point is to prove the
+    # codec path works and estimate throughput, not to repeat it per folder.
+    if not first:
+        return 0
+
+    print("  decoding ONE file as a check -- doctor does not analyse anything")
+    probe_file = files[0]
     try:
-        meta = decode.probe(first)
+        meta = decode.probe(probe_file)
         started = time.monotonic()
-        samples = decode.decode(first)
+        samples = decode.decode(probe_file)
         elapsed = time.monotonic() - started
     except Exception as exc:
-        print(f"  FAILED: {exc}")
+        print(f"    {probe_file.name}: FAILED: {exc}")
         return 1
     seconds = samples.shape[0] / decode.TARGET_RATE
-    print(f"  ok: {meta['codec']}, {meta['source_channels']}ch, "
+    print(f"    {probe_file.name}")
+    print(f"    ok: {meta['codec']}, {meta['source_channels']}ch, "
           f"{meta['source_rate']} Hz, {seconds / 60:.1f} min")
     if elapsed > 0:
         speed = seconds / elapsed
-        print(f"  decoded at {speed:.0f}x realtime")
         minutes = len(files) * (seconds / speed) / analyze.default_jobs() / 60
         estimate = ("under a minute" if minutes < 1
                     else f"{minutes:.0f} min" if minutes < 90
                     else f"{minutes / 60:.1f} h")
-        print(f"  rough estimate for all {len(files)} files: {estimate} "
-              f"at the default job count")
+        print(f"    decoded at {speed:.0f}x realtime; this folder is roughly "
+              f"{estimate}")
         if speed < 20:
-            print("  that is slow for a decode -- if this folder sits on an "
-                  "SD card or network\n  volume, copying it to the internal "
-                  "disk first will be much faster")
-
-    print()
-    print(f"To actually analyse all {len(files)} files, run:")
-    print(f'  ./loudness-lab analyze "{args.path}" --db library.db')
+            print("    that is slow for a decode -- if this sits on an SD card "
+                  "or network\n    volume, copying it to the internal disk "
+                  "first will be much faster")
     return 0
 
 
@@ -222,7 +236,8 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     run = subparsers.add_parser("analyze", help="analyse a folder into a database")
-    run.add_argument("path", type=Path, help="file or folder to walk")
+    run.add_argument("path", type=Path, nargs="+",
+                     help="one or more files or folders to walk")
     run.add_argument("--db", type=Path, default=Path("library.db"))
     run.add_argument("--jobs", type=int, default=None,
                      help=f"worker processes (default: {analyze.default_jobs()} here)")
@@ -234,7 +249,8 @@ def build_parser() -> argparse.ArgumentParser:
     run.set_defaults(func=cmd_analyze)
 
     show = subparsers.add_parser("report", help="print a report")
-    show.add_argument("kind", choices=("loudness", "lowend", "tracks", "errors"))
+    show.add_argument("kind",
+                      choices=("loudness", "lowend", "folders", "tracks", "errors"))
     show.add_argument("--db", type=Path, default=Path("library.db"))
     show.add_argument("--estimator", default="s_p95", choices=report.ESTIMATORS,
                       help="tracks: which loudness statistic to normalise on")
@@ -247,8 +263,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     check = subparsers.add_parser(
         "doctor", help="check the environment and a library path")
-    check.add_argument("path", type=Path, nargs="?",
-                       help="optional folder to check for readable audio")
+    check.add_argument("path", type=Path, nargs="*",
+                       help="optional folders to check for readable audio")
     check.set_defaults(func=cmd_doctor)
 
     dump = subparsers.add_parser("export", help="dump results to CSV")

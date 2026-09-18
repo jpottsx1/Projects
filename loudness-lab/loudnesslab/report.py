@@ -21,7 +21,8 @@ import sqlite3
 
 import numpy as np
 
-from .spectrum import LOW_BAND_MAX_HZ, MIN_SHAPE_FOR_WIDTH_DB
+from .spectrum import (BAND_CENTRES, LOW_BAND_MAX_HZ,
+                       MIN_SHAPE_FOR_WIDTH_DB)
 
 ERAS = (
     ("pre-1980", 0, 1979),
@@ -248,6 +249,99 @@ def lowend_report(conn: sqlite3.Connection, reference: str = REFERENCE_ERA) -> s
             out.append(f"  {era:<10s}{counts.get(era, 0):6d}{cells}")
         out.append("  '.' = the band is more than 40 dB down; width there is "
                    "filter residue, not music.")
+    return "\n".join(out)
+
+
+# The bands where restoring an old record's low end is actually feasible:
+# above the vinyl-era roll-off, below where it stops being sub. Derived from
+# BAND_CENTRES rather than written out, because the nominal centre is 31.5 Hz
+# and a hardcoded 32.0 silently matches nothing.
+LOW_SHAPE_BANDS = tuple(b for b in BAND_CENTRES if 31.0 <= b <= 63.0)
+
+
+def folders_report(conn: sqlite3.Connection) -> str:
+    """Loudness and low-end shape grouped by the folder each track sits in.
+
+    Useful whenever a library is sorted into folders that mean something. If
+    those folders are Camelot keys, this is the direct test of whether
+    1/3-octave shape tracks the KEY of the music rather than its mastering --
+    which is the thing that would make spectral matching dangerous, because
+    an EQ fitted to it would be 'correcting' tracks for being in F.
+    """
+    rows = conn.execute(
+        "SELECT t.path, t.year, l.lufs_i, l.s_p95, l.lra, l.true_peak_dbtp "
+        "FROM tracks t JOIN loudness l ON l.track_id = t.id "
+        "WHERE t.status = 'ok' AND l.lufs_i IS NOT NULL"
+    ).fetchall()
+    if not rows:
+        return "No analysed tracks with loudness results yet."
+
+    from pathlib import Path as _Path
+
+    grouped: dict[str, dict[str, list]] = {}
+    for row in rows:
+        folder = _Path(row["path"]).parent.name or "(root)"
+        bucket = grouped.setdefault(folder, {"lufs_i": [], "s_p95": [],
+                                             "lra": [], "tp": [], "year": []})
+        for key, column in (("lufs_i", "lufs_i"), ("s_p95", "s_p95"),
+                            ("lra", "lra"), ("tp", "true_peak_dbtp")):
+            if row[column] is not None:
+                bucket[key].append(row[column])
+        if row["year"] is not None:
+            bucket["year"].append(row["year"])
+
+    band_rows = conn.execute(
+        "SELECT t.path, b.band_hz, b.shape_db FROM bands b "
+        "JOIN tracks t ON t.id = b.track_id "
+        "WHERE t.status = 'ok' AND b.shape_db IS NOT NULL "
+        f"AND b.band_hz IN ({', '.join(str(b) for b in LOW_SHAPE_BANDS)})"
+    ).fetchall()
+    shapes: dict[str, dict[float, list]] = {}
+    for row in band_rows:
+        folder = _Path(row["path"]).parent.name or "(root)"
+        shapes.setdefault(folder, {}).setdefault(row["band_hz"], []).append(
+            row["shape_db"])
+
+    out = [f"FOLDERS  ({len(rows)} tracks in {len(grouped)} folders)", "=" * 88,
+           "  Medians per folder. The last four columns are 1/3-octave shape,",
+           "  in dB relative to each track's own broadband level.", "",
+           f"  {'folder':<14s}{'n':>5s}{'yr':>6s}{'LUFS-I':>9s}{'s_p95':>8s}"
+           f"{'LRA':>7s}{'dBTP':>7s}"
+           + "".join(f"{band:>8.0f}" for band in LOW_SHAPE_BANDS)]
+
+    def median(values: list) -> float | None:
+        return float(np.median(values)) if values else None
+
+    for folder in sorted(grouped):
+        bucket = grouped[folder]
+        curve = shapes.get(folder, {})
+        cells = "".join(
+            f"{median(curve[band]):8.1f}" if curve.get(band) else "       -"
+            for band in LOW_SHAPE_BANDS)
+        year = median(bucket["year"])
+        out.append(
+            f"  {folder[:13]:<14s}{len(bucket['lufs_i']):5d}"
+            f"{('' if year is None else f'{year:.0f}'):>6s}"
+            f"{_fmt(median(bucket['lufs_i'])):>9s}{_fmt(median(bucket['s_p95'])):>8s}"
+            f"{_fmt(median(bucket['lra'])):>7s}{_fmt(median(bucket['tp'])):>7s}{cells}")
+
+    spread = {}
+    for band in LOW_SHAPE_BANDS:
+        per_folder = [median(shapes[f][band]) for f in shapes
+                      if shapes[f].get(band)]
+        if len(per_folder) > 1:
+            spread[band] = max(per_folder) - min(per_folder)
+    if spread:
+        out += ["",
+                "  Spread of the folder medians in each band (max - min):",
+                "    " + "   ".join(f"{band:.0f} Hz: {value:.1f} dB"
+                                    for band, value in spread.items()),
+                "",
+                "  If these folders are musical keys and this spread is large,",
+                "  low-end shape is tracking the key, not the mastering -- and a",
+                "  spectral match fitted to it would 'correct' tracks for the key",
+                "  they are in. Broad smoothing is what protects against that.",
+                "  A small spread means the risk is not real in this library."]
     return "\n".join(out)
 
 

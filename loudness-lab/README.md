@@ -44,12 +44,21 @@ the virtual environment by itself, so there is nothing to activate. Re-running
 # Analyse. Resumable -- re-running skips files that have not changed.
 ./loudness-lab analyze ~/Music/Serato --db library.db
 
+# Several folders into one database. A file reachable from more than one of
+# them is analysed once.
+./loudness-lab analyze "~/Music/Dance/1A" "~/Music/Dance/1B" --db library.db
+
 # Try it on 200 tracks first.
 ./loudness-lab analyze ~/Music/Serato --db library.db --limit 200
 
 # The two reports that matter.
 ./loudness-lab report loudness --db library.db
 ./loudness-lab report lowend   --db library.db
+
+# Grouped by the folder each track sits in. If the folders are Camelot keys,
+# this is the test of whether low-end shape tracks the KEY rather than the
+# mastering -- which is what would make spectral matching dangerous.
+./loudness-lab report folders --db library.db
 
 # What a given normalisation would do, per track. Writes nothing.
 ./loudness-lab report tracks --db library.db --estimator s_p95 --target -14

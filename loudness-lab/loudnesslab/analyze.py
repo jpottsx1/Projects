@@ -71,14 +71,26 @@ def default_jobs() -> int:
     return max(1, (os.cpu_count() or 2) // 2)
 
 
-def run(root: Path, db_path: Path, jobs: int | None = None,
+def run(roots: Path | list[Path], db_path: Path, jobs: int | None = None,
         force: bool = False, limit: int | None = None,
         progress=None) -> dict:
-    """Analyse everything under `root` into `db_path`. Resumable."""
+    """Analyse everything under `roots` into `db_path`. Resumable.
+
+    Several roots share one database, and a file reachable from more than one
+    of them is analysed once -- passing both a parent and its subfolder is a
+    normal thing to do by accident.
+    """
     decode.require_tools()
+    if isinstance(roots, Path):
+        roots = [roots]
     conn = db.connect(db_path)
     try:
-        candidates = decode.find_audio(root)
+        candidates, seen = [], set()
+        for root in roots:
+            for path in decode.find_audio(root):
+                if str(path) not in seen:
+                    seen.add(str(path))
+                    candidates.append(path)
         pending = []
         for path in candidates:
             try:

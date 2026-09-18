@@ -212,6 +212,29 @@ class TestPipeline(unittest.TestCase):
         expected = f"{-14.0 - rows[0]['lufs_i']:+.1f}"
         self.assertIn(expected, text)
 
+    def test_parallel_run_through_the_real_launcher(self):
+        """The launcher must survive being re-imported by a spawned worker.
+
+        macOS spawns rather than forks, so every worker re-imports the
+        launcher script. Without a __main__ guard each one restarts the whole
+        CLI and the pool dies with "An attempt has been made to start a new
+        process before the current process has finished its bootstrapping
+        phase". Linux forks by default and never saw it, which is exactly why
+        this drives the real script with real workers instead of calling
+        analyze.run() in-process.
+        """
+        launcher = Path(__file__).resolve().parents[1] / "loudness-lab"
+        with tempfile.TemporaryDirectory() as tmp:
+            result = subprocess.run(
+                [sys.executable, str(launcher), "analyze", str(self.root),
+                 "--db", str(Path(tmp) / "parallel.db"),
+                 "--jobs", "2", "--quiet"],
+                capture_output=True, text=True)
+        self.assertNotIn("bootstrapping phase", result.stderr)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("analysed 3", result.stdout)
+        self.assertIn("errors 0", result.stdout)
+
     def test_piping_into_head_is_not_an_error(self):
         """A closed pipe is how `| head` works; it must not print an error."""
         launcher = Path(__file__).resolve().parents[1] / "loudness-lab"

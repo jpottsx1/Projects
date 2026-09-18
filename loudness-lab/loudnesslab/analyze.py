@@ -8,6 +8,7 @@ multiprocessing do not mix well in the other direction.
 from __future__ import annotations
 
 import datetime as dt
+import multiprocessing
 import os
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
@@ -102,7 +103,13 @@ def run(root: Path, db_path: Path, jobs: int | None = None,
             for done, result in enumerate(results, 1):
                 _record(conn, result, counts, done, len(pending), progress)
         else:
-            with ProcessPoolExecutor(max_workers=workers) as pool:
+            # "spawn" explicitly rather than the platform default. macOS and
+            # Windows spawn anyway, and forking a process that has already
+            # loaded numpy/Accelerate is not safe on macOS. Pinning it means
+            # the behaviour under test on Linux is the behaviour users get.
+            with ProcessPoolExecutor(
+                    max_workers=workers,
+                    mp_context=multiprocessing.get_context("spawn")) as pool:
                 results = pool.map(analyse_file, [str(p) for p in pending],
                                    chunksize=1)
                 for done, result in enumerate(results, 1):

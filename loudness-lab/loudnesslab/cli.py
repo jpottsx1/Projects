@@ -197,8 +197,11 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         speed = seconds / elapsed
         print(f"  decoded at {speed:.0f}x realtime")
         minutes = len(files) * (seconds / speed) / analyze.default_jobs() / 60
-        print(f"  rough estimate for all {len(files)} files: "
-              f"{minutes:.0f} min at the default job count")
+        estimate = ("under a minute" if minutes < 1
+                    else f"{minutes:.0f} min" if minutes < 90
+                    else f"{minutes / 60:.1f} h")
+        print(f"  rough estimate for all {len(files)} files: {estimate} "
+              f"at the default job count")
         if speed < 20:
             print("  that is slow for a decode -- if this folder sits on an "
                   "SD card or network\n  volume, copying it to the internal "

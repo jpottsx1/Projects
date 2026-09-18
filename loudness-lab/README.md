@@ -61,10 +61,17 @@ the virtual environment by itself, so there is nothing to activate. Re-running
 
 Quote any path containing spaces.
 
-`doctor` reports the Python, numpy, scipy and ffmpeg it found, counts the
-audio files under a path, decodes the first one, and extrapolates how long the
-full run will take. Run it first; it is also the most useful thing to paste
-when something goes wrong.
+`doctor` is a preflight check, not the analysis. It reports the Python,
+numpy, scipy and ffmpeg it found, counts the audio files under a path
+(recursively) and the folders they sit in, names the file types it passed
+over, then decodes **one** file to prove the codec path works and extrapolate
+the full run time. `analyze` is what processes everything. Run `doctor` first;
+it is also the most useful thing to paste when something goes wrong.
+
+If a library comes back smaller than expected, `doctor` says which of the
+three causes it is: an extension not in the recognised list, a folder that
+could not be read, or a path that pointed at a single file rather than a
+folder.
 
 Roughly 50-100x realtime per core, decode-bound. A 20,000-track library is a
 few hours on 8 cores and only has to run once. `--jobs` defaults to half the

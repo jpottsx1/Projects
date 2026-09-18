@@ -138,10 +138,28 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         print("  EXISTS BUT IS NOT READABLE by this user.")
         return 1
 
-    files = decode.find_audio(args.path)
+    found = decode.survey(args.path)
+    files = found["audio"]
+
+    if found["single_file"]:
+        print("  this is a single FILE, not a folder. Pass the folder that")
+        print("  contains your music to analyse all of it.")
+    if found["errors"]:
+        print(f"  {len(found['errors'])} folder(s) could not be read:")
+        for problem in found["errors"][:5]:
+            print(f"    {problem}")
+        print("  macOS may be withholding access: System Settings > Privacy &")
+        print("  Security > Files and Folders (or Full Disk Access) for your")
+        print("  terminal app.")
+
     if not files:
-        print(f"  readable, but no audio files found "
-              f"(looking for {', '.join(sorted(decode.AUDIO_SUFFIXES))})")
+        print(f"  no audio files found under this path")
+        if found["skipped"]:
+            print("  but these other file types are present:")
+            for suffix, count in sorted(found["skipped"].items(),
+                                        key=lambda kv: -kv[1])[:10]:
+                print(f"    {suffix:<8} {count}")
+        print(f"  recognised audio types: {', '.join(sorted(decode.AUDIO_SUFFIXES))}")
         return 1
 
     counts, total = {}, 0
@@ -151,12 +169,17 @@ def cmd_doctor(args: argparse.Namespace) -> int:
             total += path.stat().st_size
         except OSError:
             pass
-    print(f"  {len(files)} audio files, {total / 1e9:.2f} GB")
+    where = (f" across {found['folders']} folders" if found["folders"] > 1 else "")
+    print(f"  {len(files)} audio files{where}, {total / 1e9:.2f} GB")
     for suffix, count in sorted(counts.items(), key=lambda kv: -kv[1]):
         print(f"    {suffix:<8} {count}")
+    if found["skipped"]:
+        ignored = sorted(found["skipped"].items(), key=lambda kv: -kv[1])[:6]
+        print("  ignored (not recognised as audio): "
+              + ", ".join(f"{suffix} x{count}" for suffix, count in ignored))
 
     print()
-    print("Decoding the first file as a check...")
+    print("Decoding ONE file as a check -- doctor does not analyse anything.")
     first = files[0]
     print(f"  {first.name}")
     try:
@@ -173,13 +196,17 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     if elapsed > 0:
         speed = seconds / elapsed
         print(f"  decoded at {speed:.0f}x realtime")
-        hours = len(files) * (seconds / speed) / analyze.default_jobs() / 3600
-        print(f"  rough estimate for all {len(files)} files: {hours:.1f} h "
-              f"at the default job count")
+        minutes = len(files) * (seconds / speed) / analyze.default_jobs() / 60
+        print(f"  rough estimate for all {len(files)} files: "
+              f"{minutes:.0f} min at the default job count")
         if speed < 20:
             print("  that is slow for a decode -- if this folder sits on an "
                   "SD card or network\n  volume, copying it to the internal "
                   "disk first will be much faster")
+
+    print()
+    print(f"To actually analyse all {len(files)} files, run:")
+    print(f'  ./loudness-lab analyze "{args.path}" --db library.db')
     return 0
 
 

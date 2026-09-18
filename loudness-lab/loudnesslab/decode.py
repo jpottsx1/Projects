@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -11,7 +12,10 @@ from pathlib import Path
 import numpy as np
 
 TARGET_RATE = 48000
-AUDIO_SUFFIXES = {".mp3", ".flac", ".aiff", ".aif", ".wav", ".m4a", ".aac", ".ogg", ".wv"}
+AUDIO_SUFFIXES = {
+    ".mp3", ".flac", ".aiff", ".aif", ".aifc", ".wav", ".m4a", ".aac",
+    ".ogg", ".opus", ".wv", ".wma", ".caf", ".alac",
+}
 
 _YEAR = re.compile(r"(19|20)\d{2}")
 
@@ -89,13 +93,62 @@ def decode(path: Path, rate: int = TARGET_RATE) -> np.ndarray:
     return samples[: samples.size // 2 * 2].reshape(-1, 2)
 
 
-def find_audio(root: Path) -> list[Path]:
+def survey(root: Path) -> dict:
+    """Walk `root` once, reporting what was found AND what was passed over.
+
+    A library that comes back smaller than expected is nearly always one of
+    three things: an extension not in AUDIO_SUFFIXES, a folder the walk could
+    not read, or a path that pointed at a single file. Counting all three
+    here means `doctor` can say which, instead of silently finding nothing.
+    """
     if root.is_file():
-        return [root]
-    return sorted(
-        p for p in root.rglob("*")
-        if p.is_file() and p.suffix.lower() in AUDIO_SUFFIXES and not p.name.startswith("._")
-    )
+        suffix = root.suffix.lower()
+        return {
+            "audio": [root] if suffix in AUDIO_SUFFIXES else [],
+            "skipped": {} if suffix in AUDIO_SUFFIXES else {suffix: 1},
+            "folders": 0,
+            "errors": [],
+            "single_file": True,
+        }
+
+    audio: list[Path] = []
+    skipped: dict[str, int] = {}
+    errors: list[str] = []
+    folders = 0
+    seen: set[str] = set()
+
+    def on_error(exc: OSError) -> None:
+        errors.append(f"{getattr(exc, 'filename', '?')}: {exc.strerror or exc}")
+
+    # followlinks=True because a library folder is quite often a symlink to
+    # somewhere else; `seen` keeps that from looping on a cycle.
+    for dirpath, dirnames, filenames in os.walk(root, onerror=on_error,
+                                                followlinks=True):
+        real = os.path.realpath(dirpath)
+        if real in seen:
+            dirnames[:] = []
+            continue
+        seen.add(real)
+        folders += 1
+        # Skip dot-directories: .Trashes and .Spotlight-V100 live on every
+        # removable volume and contain nothing we want.
+        dirnames[:] = sorted(d for d in dirnames if not d.startswith("."))
+        for name in sorted(filenames):
+            # ._Foo.mp3 are AppleDouble resource forks, not audio.
+            if name.startswith("."):
+                continue
+            suffix = Path(name).suffix.lower()
+            if suffix in AUDIO_SUFFIXES:
+                audio.append(Path(dirpath) / name)
+            elif suffix:
+                skipped[suffix] = skipped.get(suffix, 0) + 1
+
+    return {"audio": audio, "skipped": skipped, "folders": folders,
+            "errors": errors, "single_file": False}
+
+
+def find_audio(root: Path) -> list[Path]:
+    return survey(root)["audio"]
 
 
 def _int(value) -> int | None:

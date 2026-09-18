@@ -14,7 +14,7 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from loudnesslab import analyze, db, report  # noqa: E402
+from loudnesslab import analyze, db, decode, report  # noqa: E402
 
 RATE = 48000
 HAVE_FFMPEG = shutil.which("ffmpeg") is not None and shutil.which("ffprobe") is not None
@@ -36,6 +36,66 @@ def write_wav(path: Path, x: np.ndarray) -> None:
         handle.setsampwidth(2)
         handle.setframerate(RATE)
         handle.writeframes((np.clip(x, -1, 1) * 32767).astype("<i2").tobytes())
+
+
+class TestSurvey(unittest.TestCase):
+    """Walking the library. A library that comes back smaller than the user
+    expected must be explainable, not silent."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        self.addCleanup(self.tmp.cleanup)
+
+    def touch(self, *relative: str) -> None:
+        for name in relative:
+            path = self.root / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b"")
+
+    def test_recurses_into_subfolders(self):
+        self.touch("a.mp3", "Disco 12s/b.mp3", "Disco 12s/deep/c.flac")
+        found = decode.survey(self.root)
+        self.assertEqual(len(found["audio"]), 3)
+        self.assertEqual(found["folders"], 3)
+
+    def test_ignores_dot_directories_and_appledouble(self):
+        """Removable volumes always carry .Trashes and ._ resource forks."""
+        self.touch("real.mp3", ".Trashes/ghost.mp3",
+                   ".Spotlight-V100/index.mp3", "._real.mp3")
+        names = [p.name for p in decode.survey(self.root)["audio"]]
+        self.assertEqual(names, ["real.mp3"])
+
+    def test_counts_what_it_passed_over(self):
+        self.touch("a.mp3", "art.jpg", "b.mp2", "c.mp2", "list.m3u")
+        skipped = decode.survey(self.root)["skipped"]
+        self.assertEqual(skipped[".mp2"], 2)
+        self.assertEqual(skipped[".jpg"], 1)
+        self.assertNotIn(".mp3", skipped)
+
+    def test_uppercase_extensions_are_audio(self):
+        self.touch("LOUD.MP3", "Old.AIFF")
+        self.assertEqual(len(decode.survey(self.root)["audio"]), 2)
+
+    def test_a_single_file_is_flagged_as_such(self):
+        self.touch("only.mp3")
+        found = decode.survey(self.root / "only.mp3")
+        self.assertTrue(found["single_file"])
+        self.assertEqual(len(found["audio"]), 1)
+
+    def test_symlinked_folders_are_followed_without_looping(self):
+        self.touch("music/a.mp3")
+        (self.root / "link").symlink_to(self.root / "music",
+                                        target_is_directory=True)
+        (self.root / "music" / "loop").symlink_to(self.root,
+                                                  target_is_directory=True)
+        found = decode.survey(self.root)  # must terminate
+        self.assertGreaterEqual(len(found["audio"]), 1)
+
+    def test_empty_folder_is_not_an_error(self):
+        found = decode.survey(self.root)
+        self.assertEqual(found["audio"], [])
+        self.assertEqual(found["errors"], [])
 
 
 @unittest.skipUnless(HAVE_FFMPEG, "ffmpeg/ffprobe not installed")

@@ -1,8 +1,31 @@
 #!/usr/bin/env python3
+"""Launcher. Re-executes inside the project's virtual environment if one
+exists, so there is nothing for the user to activate."""
+
 import os
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from loudnesslab.cli import main
+HERE = os.path.dirname(os.path.abspath(__file__))
+VENV = os.path.join(HERE, ".venv")
+VENV_PYTHON = os.path.join(VENV, "bin", "python3")
+
+# sys.prefix is the venv root when running inside one, so this is an exact
+# "am I already in our venv" test and cannot loop. The environment variable
+# is a second belt in case a platform reports prefixes unexpectedly.
+in_our_venv = os.path.realpath(sys.prefix) == os.path.realpath(VENV)
+if (os.path.exists(VENV_PYTHON) and not in_our_venv
+        and os.environ.get("LOUDNESS_LAB_REEXEC") != "1"):
+    os.environ["LOUDNESS_LAB_REEXEC"] = "1"
+    os.execv(VENV_PYTHON, [VENV_PYTHON, os.path.abspath(__file__)] + sys.argv[1:])
+
+sys.path.insert(0, HERE)
+
+try:
+    from loudnesslab.cli import main
+except ImportError as exc:
+    sys.stderr.write(
+        f"error: {exc}\n\n"
+        "Dependencies are not installed. Run:\n\n    ./setup.sh\n\n")
+    sys.exit(1)
 
 sys.exit(main())

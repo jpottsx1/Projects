@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import argparse
 import csv
+import os
+import shutil
+import subprocess
 import sys
 import time
 from pathlib import Path
 
-from . import __version__, analyze, db, report
+from . import __version__, analyze, db, decode, report
 
 
 def _progress_printer(start: float):
@@ -92,6 +95,94 @@ def cmd_export(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_doctor(args: argparse.Namespace) -> int:
+    """Check the environment, and optionally a library path, before a long run.
+
+    Printing this is the fastest way to diagnose a machine I cannot see.
+    """
+    print(f"loudness-lab {__version__}")
+    print()
+    print("Environment")
+    print(f"  python           {sys.version.split()[0]}  ({sys.executable})")
+    in_venv = sys.prefix != sys.base_prefix
+    print(f"  virtualenv       {'yes' if in_venv else 'no (using system python)'}")
+    for module in ("numpy", "scipy"):
+        try:
+            print(f"  {module:<16} {__import__(module).__version__}")
+        except ImportError:
+            print(f"  {module:<16} MISSING -- run ./setup.sh")
+    for tool in ("ffmpeg", "ffprobe"):
+        path = shutil.which(tool)
+        if path is None:
+            print(f"  {tool:<16} MISSING -- brew install ffmpeg")
+            continue
+        version = subprocess.run([tool, "-version"], capture_output=True,
+                                 text=True).stdout.split()[2]
+        print(f"  {tool:<16} {version}  ({path})")
+    print(f"  cpus             {os.cpu_count()}  "
+          f"(default --jobs {analyze.default_jobs()})")
+
+    if args.path is None:
+        print()
+        print("Pass a folder to check it too:")
+        print('  ./loudness-lab doctor "/Volumes/Card/DJ Music/Converted Wedding"')
+        return 0
+
+    print()
+    print(f"Library  {args.path}")
+    if not args.path.exists():
+        print("  NOT FOUND. If the path has spaces it needs quoting, and if "
+              "it is an external\n  volume, check it is still mounted.")
+        return 1
+    if not os.access(args.path, os.R_OK):
+        print("  EXISTS BUT IS NOT READABLE by this user.")
+        return 1
+
+    files = decode.find_audio(args.path)
+    if not files:
+        print(f"  readable, but no audio files found "
+              f"(looking for {', '.join(sorted(decode.AUDIO_SUFFIXES))})")
+        return 1
+
+    counts, total = {}, 0
+    for path in files:
+        counts[path.suffix.lower()] = counts.get(path.suffix.lower(), 0) + 1
+        try:
+            total += path.stat().st_size
+        except OSError:
+            pass
+    print(f"  {len(files)} audio files, {total / 1e9:.2f} GB")
+    for suffix, count in sorted(counts.items(), key=lambda kv: -kv[1]):
+        print(f"    {suffix:<8} {count}")
+
+    print()
+    print("Decoding the first file as a check...")
+    first = files[0]
+    print(f"  {first.name}")
+    try:
+        meta = decode.probe(first)
+        started = time.monotonic()
+        samples = decode.decode(first)
+        elapsed = time.monotonic() - started
+    except Exception as exc:
+        print(f"  FAILED: {exc}")
+        return 1
+    seconds = samples.shape[0] / decode.TARGET_RATE
+    print(f"  ok: {meta['codec']}, {meta['source_channels']}ch, "
+          f"{meta['source_rate']} Hz, {seconds / 60:.1f} min")
+    if elapsed > 0:
+        speed = seconds / elapsed
+        print(f"  decoded at {speed:.0f}x realtime")
+        hours = len(files) * (seconds / speed) / analyze.default_jobs() / 3600
+        print(f"  rough estimate for all {len(files)} files: {hours:.1f} h "
+              f"at the default job count")
+        if speed < 20:
+            print("  that is slow for a decode -- if this folder sits on an "
+                  "SD card or network\n  volume, copying it to the internal "
+                  "disk first will be much faster")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="loudness-lab",
@@ -124,6 +215,12 @@ def build_parser() -> argparse.ArgumentParser:
                       help="lowend: era to use as the reference curve")
     show.set_defaults(func=cmd_report)
 
+    check = subparsers.add_parser(
+        "doctor", help="check the environment and a library path")
+    check.add_argument("path", type=Path, nargs="?",
+                       help="optional folder to check for readable audio")
+    check.set_defaults(func=cmd_doctor)
+
     dump = subparsers.add_parser("export", help="dump results to CSV")
     dump.add_argument("--db", type=Path, default=Path("library.db"))
     dump.add_argument("--out", type=Path, required=True)
@@ -137,6 +234,11 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
         return args.func(args)
+    except BrokenPipeError:
+        # `| head` closing the pipe is normal, not an error. Redirect stdout
+        # to devnull so Python's interpreter shutdown does not complain too.
+        os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
+        return 0
     except KeyboardInterrupt:
         sys.stderr.write("\ninterrupted; results so far are saved\n")
         return 130

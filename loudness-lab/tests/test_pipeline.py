@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import sys
@@ -150,6 +151,21 @@ class TestPipeline(unittest.TestCase):
             conn.close()
         expected = f"{-14.0 - rows[0]['lufs_i']:+.1f}"
         self.assertIn(expected, text)
+
+    def test_piping_into_head_is_not_an_error(self):
+        """A closed pipe is how `| head` works; it must not print an error."""
+        launcher = Path(__file__).resolve().parents[1] / "loudness-lab"
+        report_cmd = subprocess.Popen(
+            [sys.executable, str(launcher), "report", "loudness",
+             "--db", str(self.db)],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            env={**os.environ, "LOUDNESS_LAB_REEXEC": "1"})
+        head = subprocess.Popen(["head", "-2"], stdin=report_cmd.stdout,
+                                stdout=subprocess.DEVNULL)
+        report_cmd.stdout.close()
+        head.wait()
+        stderr = report_cmd.communicate()[1].decode()
+        self.assertNotIn("error:", stderr, stderr)
 
     def test_unknown_estimator_is_rejected(self):
         conn = db.connect(self.db)

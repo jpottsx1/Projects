@@ -24,13 +24,23 @@ two questions that decide whether the rest of the project is worth building:
 ## Install
 
 ```sh
-brew install ffmpeg          # macOS; the only external dependency
-pip3 install -r requirements.txt
+brew install ffmpeg          # the only external dependency
+./setup.sh
 ```
+
+`setup.sh` creates a private `.venv` and installs numpy and scipy into it,
+then runs the test suite. It does not touch your system Python -- recent
+macOS and Homebrew Pythons refuse a plain `pip3 install` with
+`externally-managed-environment` anyway. The `./loudness-lab` launcher finds
+the virtual environment by itself, so there is nothing to activate. Re-running
+`setup.sh` is safe.
 
 ## Use
 
 ```sh
+# Check the environment and the library before committing to a long run.
+./loudness-lab doctor "/Volumes/Card/DJ Music/Converted Wedding"
+
 # Analyse. Resumable -- re-running skips files that have not changed.
 ./loudness-lab analyze ~/Music/Serato --db library.db
 
@@ -48,6 +58,13 @@ pip3 install -r requirements.txt
 ./loudness-lab export --db library.db --out tracks.csv --what tracks
 ./loudness-lab export --db library.db --out bands.csv  --what bands
 ```
+
+Quote any path containing spaces.
+
+`doctor` reports the Python, numpy, scipy and ffmpeg it found, counts the
+audio files under a path, decodes the first one, and extrapolates how long the
+full run will take. Run it first; it is also the most useful thing to paste
+when something goes wrong.
 
 Roughly 50-100x realtime per core, decode-bound. A 20,000-track library is a
 few hours on 8 cores and only has to run once. `--jobs` defaults to half the
@@ -142,8 +159,9 @@ files must preserve them byte-for-byte or cue points and beatgrids are lost.
 ## Development
 
 ```sh
-python3 -m unittest discover -s tests -t .
-python3 tools/make_fixtures.py /tmp/fixtures   # synthetic library
+./setup.sh                                     # also runs the suite
+.venv/bin/python3 -m unittest discover -s tests -t .
+.venv/bin/python3 tools/make_fixtures.py /tmp/fixtures   # synthetic library
 ```
 
 The fixtures encode known properties -- missing sub, mono bass, congested
@@ -154,7 +172,8 @@ representative of real music; they exist to exercise the pipeline.
 ## Layout
 
 ```
-loudness-lab              CLI entry point
+setup.sh                  One-command local setup (venv + deps + self-test)
+loudness-lab              CLI entry point, re-execs into .venv
 loudnesslab/bs1770.py     BS.1770-4 loudness, LRA, true peak, clipping
 loudnesslab/spectrum.py   1/3-octave LTAS, modulation, stereo width
 loudnesslab/decode.py     ffmpeg/ffprobe wrappers (read-only)

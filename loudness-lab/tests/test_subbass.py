@@ -155,6 +155,79 @@ class TestEnhancement(unittest.TestCase):
         self.assertAlmostEqual(report["applied_db"], 0.0, places=3)
 
 
+class TestAttackShaping(unittest.TestCase):
+    """The three properties that separate a transient shaper from an expander
+    and from an EQ. All three are checked, because failing any one of them
+    means the thing is mislabelled."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.x, _ = programme(seconds=20.0)
+        cls.kicks, _ = subbass.detect_kicks(cls.x, RATE)
+
+    def _shaped(self, punch_db):
+        out, _ = subbass.enhance(self.x, RATE, amount_db=0.0, punch_db=punch_db)
+        return out
+
+    def test_attack_contrast_rises_with_the_setting(self):
+        before = subbass.attack_contrast(self.x, RATE, self.kicks)
+        results = [subbass.attack_contrast(self._shaped(db), RATE, self.kicks)
+                   for db in (3.0, 6.0, 9.0)]
+        self.assertGreater(results[0], before + 0.5)
+        self.assertGreater(results[1], results[0])
+        self.assertGreater(results[2], results[1])
+
+    def test_loudness_range_is_untouched(self):
+        """An expander would move this. That is the distinction."""
+        from loudnesslab import bs1770
+        before = bs1770.measure(self.x)["lra"]
+        after = bs1770.measure(self._shaped(9.0))["lra"]
+        self.assertAlmostEqual(before, after, delta=0.3)
+
+    def test_the_long_term_spectrum_does_not_move(self):
+        """Without renormalising the band this would be a treble boost with a
+        transient shaper's name on it."""
+        from loudnesslab import spectrum
+        before = {r["band_hz"]: r["shape_db"]
+                  for r in spectrum.analyse(self.x, RATE)}
+        after = {r["band_hz"]: r["shape_db"]
+                 for r in spectrum.analyse(self._shaped(9.0), RATE)}
+        for hz in (2000.0, 2500.0, 3150.0, 4000.0, 5000.0):
+            self.assertAlmostEqual(before[hz], after[hz], delta=0.5, msg=f"{hz} Hz")
+
+    def test_global_crest_barely_moves(self):
+        """Documents why crest is the wrong metric here: a band-limited change
+        lasting 8 ms cannot shift a track's overall peak-to-loudness ratio,
+        and it staying put is the desirable outcome."""
+        from loudnesslab import bs1770
+        before = bs1770.measure(self.x)["crest_db"]
+        after = bs1770.measure(self._shaped(9.0))["crest_db"]
+        self.assertAlmostEqual(before, after, delta=0.6)
+
+    def test_bands_outside_the_shaped_range_are_left_alone(self):
+        from loudnesslab import spectrum
+        before = {r["band_hz"]: r["shape_db"]
+                  for r in spectrum.analyse(self.x, RATE)}
+        after = {r["band_hz"]: r["shape_db"]
+                 for r in spectrum.analyse(self._shaped(9.0), RATE)}
+        for hz in (100.0, 400.0, 12500.0):
+            self.assertAlmostEqual(before[hz], after[hz], delta=0.4, msg=f"{hz} Hz")
+
+    def test_zero_punch_is_a_no_op(self):
+        """Asking for nothing must return the audio unchanged, whether or not
+        it comes back as the same object."""
+        out, report = subbass.enhance(self.x, RATE, amount_db=0.0, punch_db=0.0)
+        self.assertEqual(report["punch_db"], 0.0)
+        self.assertTrue(np.allclose(out, self.x, atol=1e-7))
+
+    def test_sub_and_punch_compose(self):
+        out, report = subbass.enhance(self.x * 0.4, RATE, amount_db=4.0,
+                                      punch_db=5.0)
+        self.assertAlmostEqual(report["applied_db"], 4.0, places=2)
+        self.assertEqual(report["punch_db"], 5.0)
+        self.assertLess(report["sustain_trim_db"], 0.0)
+
+
 @unittest.skipUnless(HAVE_FFMPEG, "ffmpeg not installed")
 class TestComparisonPairs(unittest.TestCase):
     """An unmatched A/B mostly measures which file is louder, and louder wins

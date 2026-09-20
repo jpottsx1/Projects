@@ -280,14 +280,17 @@ Only `.mp3` is supported: the trick is specific to the MPEG Layer III
 bitstream. Lossless formats need no such trick, and re-encoding anything else
 would defeat the purpose.
 
-## Sub-bass prototype
+## Kick prototype: sub-bass and attack
 
 `subbass` is the one stage that is lossy and irreversible. It exists to be
 listened to, not to be run over a library.
 
 ```sh
-./loudness-lab subbass "~/Music/Eighties" --amount 5 --limit 10
+./loudness-lab subbass "~/Music/Eighties" --amount 5 --punch 4 --limit 10
 ```
+
+`--amount` adds sub under the kick; `--punch` emphasises its attack. Both use
+the same kick detection, so a track is decoded and analysed once.
 
 It analyses, picks the ten tracks whose 31.5-63 Hz octave measures thinnest,
 adds a kick-synchronised sub to each, and writes FLAC into
@@ -327,6 +330,32 @@ by listening:
 The gain is the root of a quadratic rather than a ratio of powers, because a
 burst deliberately aligned with the kick is correlated with what is already
 there. It hits the requested figure to 0.01 dB.
+
+### Attack shaping (`--punch`)
+
+A transient shaper, not an expander, and the distinction is the whole point.
+An expander keys on absolute level over tens of milliseconds and so changes
+how loud passages sit against quiet ones -- it raises loudness range, which
+is precisely what makes tracks disagree with each other. This keys on where
+the kicks already are, acts over a few milliseconds, and adds no energy at
+all: the band is renormalised to the level it started at, so the emphasis is
+paid for out of the sustain.
+
+Three properties are tested, because failing any one means it is mislabelled:
+
+| Property | Why |
+|---|---|
+| Attack contrast rises | The effect |
+| Loudness range unchanged | An expander would move it |
+| Long-term spectrum unchanged | Without renormalising, this is a treble boost |
+
+Note that **global crest factor barely moves, and that is correct**. A
+band-limited change lasting eight milliseconds cannot shift a track's overall
+peak-to-loudness ratio; crest read +0.02 dB while the attacks were plainly
+being emphasised. Crest staying put says the track's dynamic character is
+intact and only the micro-detail moved. The metric that does respond is
+`attack_contrast` -- how far the band leaps above its usual level at each
+kick -- reported as `snap` in the output.
 
 Run the level pass again afterwards: adding energy moves loudness, so
 whatever happens last has to be the levelling.

@@ -52,6 +52,15 @@ def cmd_analyze(args: argparse.Namespace) -> int:
     return 0
 
 
+def _label(args: argparse.Namespace) -> str:
+    parts = []
+    if args.amount > 0:
+        parts.append(f"sub{args.amount:+.0f}dB")
+    if args.punch > 0:
+        parts.append(f"punch{args.punch:+.0f}dB")
+    return " ".join(parts) or "unchanged"
+
+
 def cmd_subbass(args: argparse.Namespace) -> int:
     """PROTOTYPE: kick-synchronised sub-bass, for listening to.
 
@@ -86,9 +95,10 @@ def cmd_subbass(args: argparse.Namespace) -> int:
         return 1
 
     out_dir.mkdir(parents=True, exist_ok=True)
-    print(f"SUB-BASS PROTOTYPE  amount={args.amount:+.1f} dB in "
+    print(f"KICK PROTOTYPE  sub={args.amount:+.1f} dB in "
           f"{subbass.SUB_LOW_HZ:.0f}-{subbass.SUB_HIGH_HZ:.0f} Hz  "
-          f"freq={args.freq:.0f} Hz  decay={args.decay:.2f}s")
+          f"punch={args.punch:+.1f} dB in "
+          f"{subbass.PUNCH_LOW_HZ / 1000:.0f}-{subbass.PUNCH_HIGH_HZ / 1000:.0f} kHz")
     print("=" * 104)
     print("  Lossy and irreversible, unlike the gain pass. Originals are never")
     print("  touched; these are new FLAC files to listen to and compare.")
@@ -100,7 +110,7 @@ def cmd_subbass(args: argparse.Namespace) -> int:
     print("  other a sum of energies.")
     print()
     print(f"  {'artist / title':<40s}{'kicks/min':>10s}{'shape was':>11s}"
-          f"{'now':>8s}{'added':>8s}{'trim':>7s}{'dBTP':>7s}{'match':>8s}")
+          f"{'now':>8s}{'added':>8s}{'trim':>7s}{'dBTP':>7s}{'match':>8s}{'snap':>7s}")
 
     written = 0
     for row in rows:
@@ -109,7 +119,12 @@ def cmd_subbass(args: argparse.Namespace) -> int:
             audio = decode.decode(source)
             after, info = subbass.enhance(audio, decode.TARGET_RATE,
                                           amount_db=args.amount,
-                                          freq=args.freq, decay_s=args.decay)
+                                          freq=args.freq, decay_s=args.decay,
+                                          punch_db=args.punch,
+                                          punch_decay_ms=args.punch_decay)
+            kicks, _ = subbass.detect_kicks(audio, decode.TARGET_RATE)
+            snap_before = subbass.attack_contrast(audio, decode.TARGET_RATE, kicks)
+            snap_after = subbass.attack_contrast(after, decode.TARGET_RATE, kicks)
             before_bands = {b["band_hz"]: b["shape_db"]
                             for b in spectrum.analyse(audio, decode.TARGET_RATE)}
             after_bands = {b["band_hz"]: b["shape_db"]
@@ -136,7 +151,7 @@ def cmd_subbass(args: argparse.Namespace) -> int:
                 subbass.write_flac(out_dir / f"{source.stem} -- A original.flac",
                                    a, decode.TARGET_RATE, source)
                 subbass.write_flac(
-                    out_dir / f"{source.stem} -- B sub{args.amount:+.0f}dB.flac",
+                    out_dir / f"{source.stem} -- B {_label(args)}.flac",
                     b, decode.TARGET_RATE, source)
                 peak = bs1770.measure(b)["true_peak_dbtp"]
         except Exception as exc:
@@ -153,7 +168,8 @@ def cmd_subbass(args: argparse.Namespace) -> int:
         print(f"  {name[:39]:<40s}{info['kicks_per_minute']:>10.0f}"
               f"{mean_low(before_bands):>11.1f}{mean_low(after_bands):>8.1f}"
               f"{info['applied_db']:>+8.2f}{info['safety_trim_db']:>+7.2f}"
-              f"{peak:>+7.2f}{match_db:>+8.2f}{note}")
+              f"{peak:>+7.2f}{match_db:>+8.2f}{snap_after - snap_before:>+7.2f}"
+              f"{note}")
         written += 1
 
     print()
@@ -623,6 +639,14 @@ def build_parser() -> argparse.ArgumentParser:
                      help="where the FLACs go (default: subbass-preview/)")
     sub.add_argument("--amount", type=float, default=5.0,
                      help="dB to add in the 31.5-63 Hz octave (default: 5)")
+    sub.add_argument("--punch", type=float, default=0.0,
+                     help="dB of attack emphasis on each kick, in "
+                          "2-6 kHz (default: 0, off). Adds no energy: the band "
+                          "is renormalised, so this redistributes rather than "
+                          "boosts")
+    sub.add_argument("--punch-decay", type=float,
+                     default=subbass.DEFAULT_PUNCH_DECAY_MS,
+                     help="ms the attack emphasis decays over (default: 8)")
     sub.add_argument("--freq", type=float, default=subbass.DEFAULT_FREQ_HZ)
     sub.add_argument("--decay", type=float, default=subbass.DEFAULT_DECAY_S)
     sub.add_argument("--limit", type=int, default=10,

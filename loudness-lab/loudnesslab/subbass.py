@@ -34,6 +34,11 @@ KICK_LOW_HZ, KICK_HIGH_HZ = 30.0, 100.0
 SUB_FLOOR_HZ = 28.0
 SUB_CEILING_HZ = 75.0
 
+# Where a kick's "snap" lives: the beater click, not the body.
+PUNCH_LOW_HZ, PUNCH_HIGH_HZ = 2000.0, 6000.0
+DEFAULT_PUNCH_DECAY_MS = 8.0
+PUNCH_RAMP_S = 0.001
+
 DEFAULT_FREQ_HZ = 45.0
 DEFAULT_DECAY_S = 0.12
 MIN_KICK_SPACING_S = 0.12      # 500 BPM; beyond that it is not a kick pattern
@@ -159,9 +164,96 @@ def _lay_bursts(n: int, rate: int, kicks: np.ndarray, strengths: np.ndarray,
     return sosfilt(butter(4, SUB_CEILING_HZ, btype="low", fs=rate, output="sos"), sub)
 
 
+def attack_contrast(x: np.ndarray, rate: int, kicks: np.ndarray,
+                    low: float = PUNCH_LOW_HZ, high: float = PUNCH_HIGH_HZ,
+                    window_s: float = 0.015) -> float:
+    """How far the band leaps above its usual level at each kick, in dB.
+
+    The metric for attack work. Global crest factor is not: a band-limited
+    change lasting eight milliseconds does not move a track's overall
+    peak-to-loudness ratio at all, which is why crest read +0.02 dB while the
+    attacks were plainly being emphasised. Crest staying put is in fact the
+    desirable outcome -- it says the track's overall dynamic character is
+    untouched and only the micro-detail moved.
+    """
+    if kicks.size == 0:
+        return float("nan")
+    band = sosfiltfilt(butter(4, [low, high], btype="band", fs=rate,
+                              output="sos"), x.mean(axis=1))
+    envelope = sosfiltfilt(butter(2, 200.0, btype="low", fs=rate, output="sos"),
+                           np.abs(band))
+    baseline = float(np.median(envelope))
+    if baseline <= 0:
+        return float("nan")
+    span = int(window_s * rate)
+    peaks = [float(envelope[k:min(k + span, envelope.size)].max())
+             for k in kicks if k + 8 < envelope.size]
+    if not peaks:
+        return float("nan")
+    return float(20 * np.log10(np.median(peaks) / baseline))
+
+
+def shape_attacks(x: np.ndarray, rate: int, kicks: np.ndarray,
+                  strengths: np.ndarray, boost_db: float,
+                  decay_ms: float = DEFAULT_PUNCH_DECAY_MS,
+                  low: float = PUNCH_LOW_HZ,
+                  high: float = PUNCH_HIGH_HZ) -> tuple[np.ndarray, dict]:
+    """Emphasise the attack of each kick, WITHOUT adding energy to the band.
+
+    This is a transient shaper, not an expander, and the difference is the
+    whole point. An expander keys on absolute level over tens of milliseconds
+    and so changes how loud passages sit against quiet ones -- it raises
+    loudness range, which is exactly what makes tracks disagree with each
+    other. This keys on where the kicks are, acts over a few milliseconds,
+    and leaves loudness range alone.
+
+    The band is renormalised afterwards to the energy it started with, so
+    what changes is the distribution of that energy in time and not how much
+    of it there is. Without that step this would be a treble boost wearing a
+    transient shaper's name, and the long-term spectrum would show it.
+    """
+    info = {"punch_db": boost_db, "band_level_change_db": 0.0,
+            "sustain_trim_db": 0.0}
+    if boost_db <= 0 or kicks.size == 0:
+        info["punch_db"] = 0.0
+        return x, info
+
+    sos = butter(4, [low, high], btype="band", fs=rate, output="sos")
+    # Zero-phase, so that (x - band) is a true complement and recombining
+    # cannot leave a phase-shifted residue behind.
+    band = sosfiltfilt(sos, x, axis=0)
+    rest = x - band
+
+    envelope = np.ones(x.shape[0], dtype=np.float64)
+    decay = decay_ms / 1000.0
+    length = max(2, int(decay * 5 * rate))
+    t = np.arange(length) / rate
+    shape = (10 ** (boost_db / 20) - 1.0) * np.exp(-t / decay)
+    ramp = int(PUNCH_RAMP_S * rate)
+    if ramp > 1:
+        shape[:ramp] *= 0.5 - 0.5 * np.cos(np.pi * np.arange(ramp) / ramp)
+    for offset, strength in zip(kicks, strengths):
+        end = min(x.shape[0], offset + length)
+        if end > offset:
+            envelope[offset:end] += shape[:end - offset] * strength
+
+    shaped = band * envelope[:, None]
+    before = float(np.mean(band.astype(np.float64) ** 2))
+    after = float(np.mean(shaped.astype(np.float64) ** 2))
+    if before > 0 and after > 0:
+        trim = np.sqrt(before / after)
+        shaped = shaped * trim
+        info["sustain_trim_db"] = float(20 * np.log10(trim))
+        info["band_level_change_db"] = float(
+            10 * np.log10(np.mean(shaped.astype(np.float64) ** 2) / before))
+    return (rest + shaped).astype(np.float32), info
+
+
 def enhance(x: np.ndarray, rate: int, amount_db: float = 5.0,
             freq: float = DEFAULT_FREQ_HZ,
-            decay_s: float = DEFAULT_DECAY_S) -> tuple[np.ndarray, dict]:
+            decay_s: float = DEFAULT_DECAY_S,
+            punch_db: float = 0.0,
+            punch_decay_ms: float = DEFAULT_PUNCH_DECAY_MS) -> tuple[np.ndarray, dict]:
     """Add `amount_db` of energy to the 31.5-63 Hz octave, under the kicks.
 
     Returns the new audio and a report of what was actually done, because the
@@ -178,9 +270,18 @@ def enhance(x: np.ndarray, rate: int, amount_db: float = 5.0,
         "safety_trim_db": 0.0,
         "note": None,
     }
+    report["punch_db"] = 0.0
+    report["sustain_trim_db"] = 0.0
+    report["band_level_change_db"] = 0.0
     if kicks.size < 8:
         report["note"] = "too few kick onsets to work from"
         return x, report
+
+    if amount_db <= 0 and punch_db > 0:
+        out, punch_info = shape_attacks(x, rate, kicks, strengths, punch_db,
+                                        punch_decay_ms)
+        report.update(punch_info)
+        return out, report
 
     sub = _lay_bursts(x.shape[0], rate, kicks, strengths, freq, decay_s)
     if float(np.mean(sub ** 2)) <= 0:
@@ -213,6 +314,13 @@ def enhance(x: np.ndarray, rate: int, amount_db: float = 5.0,
 
     # Adding energy raises the peak. Keep the file writable; the level pass
     # that follows sets the final loudness anyway.
+    # Punch after the sub: the sub is part of the kick now, and shaping the
+    # attack of the finished kick is what the ear is judging.
+    if punch_db > 0:
+        out, punch_info = shape_attacks(out, rate, kicks, strengths, punch_db,
+                                        punch_decay_ms)
+        report.update(punch_info)
+
     peak = float(np.abs(out).max())
     if peak > 0.99:
         trim = 0.99 / peak

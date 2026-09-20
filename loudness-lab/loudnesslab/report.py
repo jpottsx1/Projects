@@ -358,6 +358,35 @@ def lowend_report(conn: sqlite3.Connection, reference: str = REFERENCE_ERA) -> s
 LOW_SHAPE_BANDS = tuple(b for b in BAND_CENTRES if 31.0 <= b <= 63.0)
 
 
+def _folder_labels(paths) -> dict:
+    """Map each track path to a folder label that is actually distinctive.
+
+    Grouping on the immediate parent name alone merges unrelated folders:
+    two different compilations each with a CD1 would land in one row. Labels
+    are taken relative to the common prefix of every path in the database, so
+    "Now Yearbook 99 (2026)/CD1" stays separate from "NOW 100 Hits Party/CD1".
+    """
+    import os
+
+    unique = sorted(set(paths))
+    if not unique:
+        return {}
+    parents = [os.path.dirname(path) for path in unique]
+    try:
+        base = os.path.commonpath(parents) if len(set(parents)) > 1 else \
+            os.path.dirname(parents[0])
+    except ValueError:            # different drives, or relative vs absolute
+        base = ""
+    labels = {}
+    for path in unique:
+        parent = os.path.dirname(path)
+        relative = os.path.relpath(parent, base) if base else parent
+        if relative in (".", "", os.sep):
+            relative = os.path.basename(parent) or "(root)"
+        labels[path] = relative
+    return labels
+
+
 def folders_report(conn: sqlite3.Connection) -> str:
     """Loudness and low-end shape grouped by the folder each track sits in.
 
@@ -375,11 +404,11 @@ def folders_report(conn: sqlite3.Connection) -> str:
     if not rows:
         return "No analysed tracks with loudness results yet."
 
-    from pathlib import Path as _Path
+    labels = _folder_labels([row["path"] for row in rows])
 
     grouped: dict[str, dict[str, list]] = {}
     for row in rows:
-        folder = _Path(row["path"]).parent.name or "(root)"
+        folder = labels.get(row["path"], "(root)")
         bucket = grouped.setdefault(folder, {"lufs_i": [], "s_p95": [],
                                              "lra": [], "tp": [], "year": []})
         for key, column in (("lufs_i", "lufs_i"), ("s_p95", "s_p95"),
@@ -397,14 +426,14 @@ def folders_report(conn: sqlite3.Connection) -> str:
     ).fetchall()
     shapes: dict[str, dict[float, list]] = {}
     for row in band_rows:
-        folder = _Path(row["path"]).parent.name or "(root)"
+        folder = labels.get(row["path"], "(root)")
         shapes.setdefault(folder, {}).setdefault(row["band_hz"], []).append(
             row["shape_db"])
 
-    out = [f"FOLDERS  ({len(rows)} tracks in {len(grouped)} folders)", "=" * 88,
+    out = [f"FOLDERS  ({len(rows)} tracks in {len(grouped)} folders)", "=" * 112,
            "  Medians per folder. The last four columns are 1/3-octave shape,",
            "  in dB relative to each track's own broadband level.", "",
-           f"  {'folder':<14s}{'n':>5s}{'yr':>6s}{'LUFS-I':>9s}{'s_p95':>8s}"
+           f"  {'folder':<38s}{'n':>5s}{'yr':>6s}{'LUFS-I':>9s}{'s_p95':>8s}"
            f"{'LRA':>7s}{'dBTP':>7s}"
            + "".join(f"{band:>8.0f}" for band in LOW_SHAPE_BANDS)]
 
@@ -419,7 +448,7 @@ def folders_report(conn: sqlite3.Connection) -> str:
             for band in LOW_SHAPE_BANDS)
         year = median(bucket["year"])
         out.append(
-            f"  {folder[:13]:<14s}{len(bucket['lufs_i']):5d}"
+            f"  {folder[-37:]:<38s}{len(bucket['lufs_i']):5d}"
             f"{('' if year is None else f'{year:.0f}'):>6s}"
             f"{_fmt(median(bucket['lufs_i'])):>9s}{_fmt(median(bucket['s_p95'])):>8s}"
             f"{_fmt(median(bucket['lra'])):>7s}{_fmt(median(bucket['tp'])):>7s}{cells}")

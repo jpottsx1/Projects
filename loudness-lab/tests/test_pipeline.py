@@ -42,6 +42,28 @@ def write_wav(path: Path, x: np.ndarray) -> None:
         handle.writeframes((np.clip(x, -1, 1) * 32767).astype("<i2").tobytes())
 
 
+class TestFolderLabels(unittest.TestCase):
+    """Two compilations each containing a CD1 must not merge into one row."""
+
+    def test_same_named_subfolders_stay_separate(self):
+        labels = report._folder_labels([
+            "/music/Now Yearbook 99 (2026)/CD1/a.mp3",
+            "/music/Now Yearbook 99 (2026)/CD2/b.mp3",
+            "/music/NOW 100 Hits Party/CD1/c.mp3",
+        ])
+        self.assertEqual(len(set(labels.values())), 3)
+        self.assertIn("Now Yearbook 99 (2026)/CD1", labels.values())
+        self.assertIn("NOW 100 Hits Party/CD1", labels.values())
+
+    def test_a_flat_folder_keeps_its_own_name(self):
+        labels = report._folder_labels(["/music/Party/a.mp3",
+                                        "/music/Party/b.mp3"])
+        self.assertEqual(set(labels.values()), {"Party"})
+
+    def test_empty_input(self):
+        self.assertEqual(report._folder_labels([]), {})
+
+
 class TestNormalisationGuard(unittest.TestCase):
     """A library that has been through a loudness normaliser is fine to
     level but useless as a reference, because its crest, LRA and true peak

@@ -156,6 +156,39 @@ class TestEnhancement(unittest.TestCase):
 
 
 @unittest.skipUnless(HAVE_FFMPEG, "ffmpeg not installed")
+class TestComparisonPairs(unittest.TestCase):
+    """An unmatched A/B mostly measures which file is louder, and louder wins
+    regardless of whether it is better. The pair must be loudness-matched."""
+
+    def test_pair_is_loudness_matched_and_differs_only_in_the_low_end(self):
+        from loudnesslab import bs1770, cli, decode, spectrum
+        x, _ = programme(seconds=8.0)
+        with tempfile.TemporaryDirectory() as tmp:
+            root, out = Path(tmp) / "src", Path(tmp) / "out"
+            root.mkdir()
+            wav = root / "track.wav"
+            subbass.write_flac(root / "track.flac", x, RATE)
+            code = cli.main(["subbass", str(root), "--db", str(Path(tmp) / "s.db"),
+                             "--out", str(out), "--amount", "3", "--limit", "1",
+                             "--jobs", "1", "--quiet"])
+            self.assertEqual(code, 0)
+            a = next(out.glob("*A original.flac"))
+            b = next(out.glob("*B sub*.flac"))
+            xa, xb = decode.decode(a), decode.decode(b)
+
+        self.assertAlmostEqual(bs1770.measure(xa)["lufs_i"],
+                               bs1770.measure(xb)["lufs_i"], places=1)
+        low = [31.5, 40.0, 50.0, 63.0]
+        sa = {r["band_hz"]: r["shape_db"] for r in spectrum.analyse(xa, RATE)}
+        sb = {r["band_hz"]: r["shape_db"] for r in spectrum.analyse(xb, RATE)}
+        lifted = sum(sb[k] for k in low) / 4 - sum(sa[k] for k in low) / 4
+        self.assertGreater(lifted, 1.5)
+        # Everything above the sub octave must be left alone.
+        for band in (250.0, 1000.0, 4000.0):
+            self.assertAlmostEqual(sa[band], sb[band], delta=0.4, msg=f"{band} Hz")
+
+
+@unittest.skipUnless(HAVE_FFMPEG, "ffmpeg not installed")
 class TestFlacOutput(unittest.TestCase):
     def test_writes_a_readable_flac(self):
         x, _ = programme(seconds=4.0)

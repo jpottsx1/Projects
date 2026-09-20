@@ -100,7 +100,7 @@ def cmd_subbass(args: argparse.Namespace) -> int:
     print("  other a sum of energies.")
     print()
     print(f"  {'artist / title':<40s}{'kicks/min':>10s}{'shape was':>11s}"
-          f"{'now':>8s}{'added':>8s}{'trim':>7s}{'dBTP':>7s}")
+          f"{'now':>8s}{'added':>8s}{'trim':>7s}{'dBTP':>7s}{'match':>8s}")
 
     written = 0
     for row in rows:
@@ -114,9 +114,31 @@ def cmd_subbass(args: argparse.Namespace) -> int:
                             for b in spectrum.analyse(audio, decode.TARGET_RATE)}
             after_bands = {b["band_hz"]: b["shape_db"]
                            for b in spectrum.analyse(after, decode.TARGET_RATE)}
-            peak = bs1770.measure(after)["true_peak_dbtp"]
-            destination = out_dir / (source.stem + ".flac")
-            subbass.write_flac(destination, after, decode.TARGET_RATE, source)
+            processed = bs1770.measure(after)
+            peak = processed["true_peak_dbtp"]
+
+            if args.no_compare:
+                subbass.write_flac(out_dir / (source.stem + ".flac"), after,
+                                   decode.TARGET_RATE, source)
+                match_db = 0.0
+            else:
+                # Level-match the pair, or the comparison just measures which
+                # is louder: adding sub raises loudness, and louder wins every
+                # blind test regardless of whether it is better. Both are
+                # brought DOWN to whichever is quieter, so neither can clip.
+                original_lufs = bs1770.measure(audio)["lufs_i"]
+                target = min(original_lufs, processed["lufs_i"])
+                a = audio * (10 ** ((target - original_lufs) / 20))
+                b = after * (10 ** ((target - processed["lufs_i"]) / 20))
+                match_db = target - original_lufs
+                # Both written as FLAC from the same decode, so no codec
+                # difference can creep into the comparison.
+                subbass.write_flac(out_dir / f"{source.stem} -- A original.flac",
+                                   a, decode.TARGET_RATE, source)
+                subbass.write_flac(
+                    out_dir / f"{source.stem} -- B sub{args.amount:+.0f}dB.flac",
+                    b, decode.TARGET_RATE, source)
+                peak = bs1770.measure(b)["true_peak_dbtp"]
         except Exception as exc:
             print(f"  {source.name[:39]:<40s}  FAILED: {type(exc).__name__}: {exc}")
             continue
@@ -131,11 +153,20 @@ def cmd_subbass(args: argparse.Namespace) -> int:
         print(f"  {name[:39]:<40s}{info['kicks_per_minute']:>10.0f}"
               f"{mean_low(before_bands):>11.1f}{mean_low(after_bands):>8.1f}"
               f"{info['applied_db']:>+8.2f}{info['safety_trim_db']:>+7.2f}"
-              f"{peak:>+7.2f}{note}")
+              f"{peak:>+7.2f}{match_db:>+8.2f}{note}")
         written += 1
 
     print()
-    print(f"  {written} file(s) written to {out_dir}/ as FLAC.")
+    if args.no_compare:
+        print(f"  {written} file(s) written to {out_dir}/ as FLAC.")
+    else:
+        print(f"  {written} pair(s) written to {out_dir}/ as FLAC: 'A original'")
+        print("  and 'B sub', LEVEL-MATCHED so the comparison is about the bass")
+        print("  and not about which is louder. 'match' is the dB both were")
+        print("  brought down by to meet; neither was boosted, so neither clips.")
+        print()
+        print("  Knowing which is which biases you. Have someone else shuffle")
+        print("  the names, or at least listen to B first on half of them.")
     print("  Listen against the originals before deciding this is worth a")
     print("  generation. Re-run the level pass afterwards: adding energy moves")
     print("  loudness, so whatever happens last has to be the levelling.")
@@ -596,6 +627,9 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_argument("--decay", type=float, default=subbass.DEFAULT_DECAY_S)
     sub.add_argument("--limit", type=int, default=10,
                      help="how many of the thinnest tracks to do (default: 10)")
+    sub.add_argument("--no-compare", action="store_true",
+                     help="write only the processed file, not a level-matched "
+                          "A/B pair")
     sub.add_argument("--jobs", type=int, default=None)
     sub.add_argument("--quiet", action="store_true")
     sub.set_defaults(func=cmd_subbass)

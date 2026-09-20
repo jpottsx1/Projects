@@ -293,6 +293,14 @@ It analyses, picks the ten tracks whose 31.5-63 Hz octave measures thinnest,
 adds a kick-synchronised sub to each, and writes FLAC into
 `subbass-preview/`. Originals are never touched.
 
+Each track comes out as a **level-matched pair** -- `-- A original` and
+`-- B sub+3dB` -- so they sort next to each other. Matching is the point: the
+added sub raises loudness, and in any comparison the louder file wins whether
+or not it is better, so an unmatched A/B would mostly measure level. Both are
+brought down to whichever is quieter, so neither is boosted and neither
+clips, and both are written as FLAC from the same decode so no codec
+difference can creep in. `--no-compare` writes only the processed file.
+
 **Why kicks rather than a subharmonic divider.** The measurements say 1980s
 material sits 10-15 dB below modern in the 31.5-63 Hz octave while matching
 it from 80 Hz up -- the shape a dbx 120 was built for. But a divider

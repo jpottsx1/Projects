@@ -95,6 +95,7 @@ def cmd_gain(args: argparse.Namespace) -> int:
             print("no .mp3 files found under those paths")
             return 1
 
+        unsupported = apply_gain.unsupported_audio(args.path)
         usable = [p for p in proposals if p.ok]
         blocked = [p for p in proposals if not p.ok]
         moving = [p for p in usable if p.plan.steps != 0]
@@ -152,6 +153,17 @@ def cmd_gain(args: argparse.Namespace) -> int:
                 print("  data. Attenuating only the rest would change the "
                       "track's own dynamics,")
                 print("  which is the one thing this tool will not do.")
+        if unsupported:
+            total = sum(unsupported.values())
+            listed = ", ".join(f"{suffix} x{count}" for suffix, count
+                               in sorted(unsupported.items(), key=lambda kv: -kv[1]))
+            print()
+            print(f"  {total} audio file(s) are NOT mp3 and will be left "
+                  f"untouched: {listed}")
+            print("  The global_gain trick only exists in the MPEG Layer III")
+            print("  bitstream. Levelling everything else while leaving these")
+            print("  alone makes the library systematically uneven, so handle")
+            print("  them separately before you rely on the result.")
         if blocked:
             print()
             print(f"  {len(blocked)} file(s) cannot be processed:")
@@ -182,6 +194,9 @@ def cmd_gain(args: argparse.Namespace) -> int:
             return 1
         if not args.in_place:
             print(f"Originals untouched. Modified copies are in: {out_dir}/")
+        else:
+            print(f"Originals were rewritten. {database} is now the ONLY way")
+            print("to undo this -- back it up before you need it.")
         print("Serato's stored auto-gain and waveform overview for these tracks")
         print("are now stale -- let it re-analyse them, and turn its own")
         print("auto-gain off if you want this tool to own loudness.")

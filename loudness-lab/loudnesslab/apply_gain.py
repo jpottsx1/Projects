@@ -44,6 +44,23 @@ class Proposal:
         return self.plan.applied_db - self.wanted_db
 
 
+def unsupported_audio(roots: list[Path]) -> dict:
+    """Audio files found that this command cannot touch, counted by extension.
+
+    The global_gain trick is specific to the MPEG Layer III bitstream, so
+    anything else is left alone. Silently is the wrong way to do that: a
+    library half at the target and half untouched is worse than one that was
+    merely uneven, because the gap is now systematic.
+    """
+    counts: dict[str, int] = {}
+    for root in roots:
+        for path in decode.find_audio(root):
+            suffix = path.suffix.lower()
+            if suffix not in SUPPORTED_SUFFIXES:
+                counts[suffix] = counts.get(suffix, 0) + 1
+    return counts
+
+
 def _stale(row, path: Path) -> str | None:
     try:
         stat = path.stat()

@@ -510,6 +510,19 @@ class TestPipeline(unittest.TestCase):
             self.assertIsNone(proposal.peak_capped_from)
             self.assertLess(proposal.wanted_db, 0)
 
+    def test_non_mp3_audio_is_counted_not_dropped(self):
+        """A library half levelled and half untouched is worse than one that
+        was merely uneven, so what cannot be processed must be reported."""
+        counts = apply_gain.unsupported_audio([self.root])
+        self.assertEqual(counts.get(".wav"), 2)
+        self.assertNotIn(".mp3", counts)
+
+    def test_an_all_mp3_folder_reports_nothing_unsupported(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "a.mp3").write_bytes(b"")
+            self.assertEqual(apply_gain.unsupported_audio([root]), {})
+
     def test_piping_into_head_is_not_an_error(self):
         """A closed pipe is how `| head` works; it must not print an error."""
         launcher = Path(__file__).resolve().parents[1] / "loudness-lab"

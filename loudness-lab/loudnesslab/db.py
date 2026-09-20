@@ -72,7 +72,8 @@ CREATE TABLE IF NOT EXISTS gain_log (
     applied_db  REAL NOT NULL,
     in_place    INTEGER NOT NULL,
     applied_at  TEXT NOT NULL,
-    undone_at   TEXT
+    undone_at   TEXT,
+    crossed_bits TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_tracks_year ON tracks(year);
@@ -125,6 +126,10 @@ def _migrate(conn: sqlite3.Connection, version: int) -> None:
         )
     # v3 only adds the gain_log table, which CREATE TABLE IF NOT EXISTS
     # above has already made; nothing to alter.
+    if version < 4:
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(gain_log)")}
+        if columns and "crossed_bits" not in columns:
+            conn.execute("ALTER TABLE gain_log ADD COLUMN crossed_bits TEXT")
     if version < 2:
         columns = {row["name"] for row in conn.execute("PRAGMA table_info(tracks)")}
         if "year_is_original" not in columns:

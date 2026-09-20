@@ -8,6 +8,7 @@ a copy into an output folder, leaving the source untouched.
 from __future__ import annotations
 
 import datetime as dt
+import json
 import math
 import shutil
 from dataclasses import dataclass
@@ -140,7 +141,7 @@ def apply(conn, proposals: list[Proposal], in_place: bool) -> dict:
         try:
             source = proposal.path.read_bytes()
             before = mp3gain.read_gains(source, mp3gain.parse_frames(source))
-            written = mp3gain.apply_steps(source, proposal.plan.steps)
+            written, crossed = mp3gain.apply_to(source, proposal.plan.steps)
 
             if not in_place:
                 destination.parent.mkdir(parents=True, exist_ok=True)
@@ -152,36 +153,45 @@ def apply(conn, proposals: list[Proposal], in_place: bool) -> dict:
                 shutil.copystat(proposal.path, temporary)
             temporary.replace(destination)
 
+            # Verify by undoing the write in memory: if that does not
+            # reproduce the source byte for byte, the change is not reversible
+            # and must not be kept. This is stronger than comparing gains,
+            # and it exercises the very path undo will take.
             check = destination.read_bytes()
-            after = mp3gain.read_gains(check, mp3gain.parse_frames(check))
-            if len(after) != len(before) or any(
-                    b + proposal.plan.steps != a for b, a in zip(before, after)):
-                raise mp3gain.Mp3Error("verification failed after write")
+            restored, _ = mp3gain.apply_to(check, -proposal.plan.steps,
+                                           also_move=crossed)
+            if restored != source:
+                raise mp3gain.Mp3Error(
+                    "written file does not reverse to the original; not kept")
+            del before
         except Exception as exc:
             proposal.problem = f"{type(exc).__name__}: {exc}"
             counts["failed"] += 1
             continue
 
-        _log(conn, proposal, destination, in_place)
+        _log(conn, proposal, destination, in_place, crossed)
         counts["written"] += 1
     conn.commit()
     return counts
 
 
-def _log(conn, proposal: Proposal, destination: Path, in_place: bool) -> None:
+def _log(conn, proposal: Proposal, destination: Path, in_place: bool,
+         crossed: list) -> None:
     conn.execute(
         "INSERT INTO gain_log (path, output_path, steps, applied_db, "
-        "                      in_place, applied_at) VALUES (?, ?, ?, ?, ?, ?)",
+        "                      in_place, applied_at, crossed_bits) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
         (str(proposal.path), str(destination), proposal.plan.steps,
          proposal.plan.applied_db, 1 if in_place else 0,
-         dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")),
+         dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
+         json.dumps(crossed) if crossed else None),
     )
 
 
 def undo(conn, limit_to: list[Path] | None = None) -> dict:
     """Reverse every in-place change still on record, newest first."""
     rows = conn.execute(
-        "SELECT id, output_path, steps FROM gain_log "
+        "SELECT id, output_path, steps, crossed_bits FROM gain_log "
         "WHERE in_place = 1 AND undone_at IS NULL ORDER BY id DESC"
     ).fetchall()
     wanted = {str(p.resolve()) for p in limit_to} if limit_to else None
@@ -194,7 +204,11 @@ def undo(conn, limit_to: list[Path] | None = None) -> dict:
             continue
         try:
             data = path.read_bytes()
-            path.write_bytes(mp3gain.apply_steps(data, -row["steps"]))
+            # Granules the original shift pushed below the floor now read as
+            # inaudible and would be skipped, so name them explicitly.
+            crossed = json.loads(row["crossed_bits"]) if row["crossed_bits"] else []
+            restored, _ = mp3gain.apply_to(data, -row["steps"], also_move=crossed)
+            path.write_bytes(restored)
         except Exception:
             counts["failed"] += 1
             continue

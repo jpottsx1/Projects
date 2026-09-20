@@ -244,13 +244,20 @@ Guarantees, because the alternative is quietly damaging someone's records:
   beatgrids and waveform overviews in `GEOB` frames there. Only bytes inside
   audio frames change, so those survive byte-for-byte. Tested.
 * **Silent granules are left alone, not counted.** Encoders emit granules in
-  fade-ins and run-outs whose `global_gain` sits at or near zero; one of them
-  would otherwise pin an entire track, since attenuating would drive it out of
-  the field's range. Granules with no data, or below a global_gain of 24
-  (at most -120 dBFS even in an impossible worst case), are skipped. The step
-  is additionally held so no movable granule can fall through that floor,
-  which keeps the excluded set identical on the way back and the reversal
-  byte-exact.
+  fade-ins and run-outs whose `global_gain` sits at or near zero, and one of
+  them would otherwise pin an entire track. Granules with no data, or below a
+  global_gain of 24 (at most -120 dBFS even in an impossible worst case), are
+  skipped.
+
+  A granule the shift pushes *across* that floor would read as inaudible
+  afterwards and be skipped on the way back, so the gain log records those
+  offsets and undo moves exactly the set that was moved. Holding the step
+  back instead -- the first attempt -- meant a single granule sitting on the
+  floor pinned the file just as effectively as one at zero.
+* **Every write is verified by reversing it in memory** and checking the
+  result matches the source byte for byte. If it does not, the file is not
+  kept. That is stronger than comparing gain values, and it exercises the
+  exact path undo will take.
 * **A step applies to every granule or not at all.** Clamping granules
   individually would change one part of a track against another, which is the
   dynamics change this project exists to avoid. Where a file lacks the
@@ -264,8 +271,6 @@ Guarantees, because the alternative is quietly damaging someone's records:
   already-normalised library. Where the ceiling binds, the step is floored
   rather than rounded, since rounding to the nearest 1.5 dB could land back
   above it.
-* **Every written file is verified** by re-parsing it and checking each
-  `global_gain` moved by exactly the planned step.
 
 After running it, Serato's stored auto-gain and waveform overview for those
 tracks are stale. Let it re-analyse, and turn its own auto-gain off if you

@@ -49,10 +49,13 @@ GAIN_MIN, GAIN_MAX = 0, 255
 # attenuating the file would drive it below the field's range, and this tool
 # refuses to move some granules but not others.
 #
-# The threshold is safe to exclude on only because plan() additionally holds
-# the step to (lowest movable gain - AUDIBLE_GAIN_FLOOR). That keeps every
-# movable granule above the floor after the shift, so the excluded set is
-# identical on the way back and the reversal stays byte-exact.
+# Excluding on this threshold alone would not be reversible: a granule moved
+# down past the floor would be classified as excluded on the way back and
+# never restored. Holding the step so that cannot happen was the first
+# attempt, but it makes a single granule sitting ON the floor pin the file
+# just as effectively as one at zero. Instead, apply_to() reports the
+# granules a shift pushes across the floor, and the gain log records them so
+# undo moves exactly the set that was moved.
 AUDIBLE_GAIN_FLOOR = 24
 
 _BITRATES_V1 = (0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 0)
@@ -243,13 +246,13 @@ def read_gains(data, frames: list[Frame]) -> list[int]:
 def headroom(gains: list[int]) -> tuple[int, int]:
     """(most we may subtract, most we may add) without clamping any granule.
 
-    Attenuation stops at AUDIBLE_GAIN_FLOOR rather than at 0, so that no
-    movable granule can fall through the floor and change which granules are
-    excluded -- that is what keeps the operation exactly reversible.
+    The only hard limit is the 8-bit field itself. Granules that cross
+    AUDIBLE_GAIN_FLOOR on the way down are handled by recording them, not by
+    holding the whole file back.
     """
     if not gains:
         return 0, 0
-    return max(0, min(gains) - AUDIBLE_GAIN_FLOOR), max(0, GAIN_MAX - max(gains))
+    return min(gains) - GAIN_MIN, GAIN_MAX - max(gains)
 
 
 def steps_for_db(db: float) -> int:
@@ -286,6 +289,7 @@ class GainPlan:
     skipped_granules: int    # empty granules, left alone
     protected_frames: int    # frames carrying a CRC that must be recomputed
     clamped: bool            # requested more than the file had headroom for
+    crossing_granules: int   # granules this step pushes below the floor
     lowest_gain: int         # the global_gain that limits attenuation
     lowest_count: int        # how many granules sit at it
     headroom_down_db: float  # most attenuation this file can take
@@ -315,6 +319,8 @@ def plan(data, target_db: float, max_steps: int | None = None) -> GainPlan:
     down, up = headroom(gains)
     allowed = max(-down, min(up, wanted))
     lowest = min(gains)
+    crossing = sum(1 for g in gains
+                   if g + allowed < AUDIBLE_GAIN_FLOOR <= g) if allowed < 0 else 0
     total_granules = sum(len(f.gain_bits) for f in frames if not f.is_info_frame)
     return GainPlan(
         requested_db=target_db,
@@ -324,40 +330,57 @@ def plan(data, target_db: float, max_steps: int | None = None) -> GainPlan:
         skipped_granules=total_granules - len(gains),
         protected_frames=sum(1 for f in frames if f.has_crc),
         clamped=allowed != wanted,
+        crossing_granules=crossing,
         lowest_gain=lowest,
         lowest_count=sum(1 for g in gains if g == lowest),
         headroom_down_db=-down * DB_PER_STEP,
     )
 
 
-def apply_steps(data: bytes, steps: int) -> bytes:
-    """Return a copy of `data` with every global_gain shifted by `steps`.
+def apply_to(data: bytes, steps: int,
+             also_move: tuple = ()) -> tuple[bytes, list[int]]:
+    """Shift global_gain by `steps`, and report which granules crossed the floor.
 
     Only bytes inside audio frames change. The ID3 region, album art and any
     Serato GEOB frames are copied through untouched.
+
+    `also_move` names bit offsets to move even though they now read as
+    inaudible. Undo passes the offsets recorded on the way down, so the set
+    moved back is exactly the set that was moved.
+
+    Returns (new bytes, offsets that ended below AUDIBLE_GAIN_FLOOR). Those
+    offsets are what a caller must record to be able to undo exactly.
     """
     out = bytearray(data)
     if steps == 0:
-        return bytes(out)
+        return bytes(out), []
     frames = parse_frames(out)
-    movable = set(gain_bits(out, frames))
+    movable = set(gain_bits(out, frames)) | set(also_move)
+    crossed: list[int] = []
     for frame in frames:
         if frame.is_info_frame:
             continue
         touched = False
         for bit in frame.gain_bits:
             if bit not in movable:
-                continue          # empty granule: silent either way, leave it
+                continue          # silent either way: leave it alone
             value = _u8_at(out, bit) + steps
             if not GAIN_MIN <= value <= GAIN_MAX:
                 raise Mp3Error(
                     f"global_gain {value} out of range at bit {bit}; "
                     "plan() should have prevented this")
             _set_u8_at(out, bit, value)
+            if value < AUDIBLE_GAIN_FLOOR:
+                crossed.append(bit)
             touched = True
         if touched and frame.has_crc:
             info = parse_header(out, frame.offset)
             recomputed = frame_crc(out, frame, info["side_info_size"])
             out[frame.offset + 4] = (recomputed >> 8) & 0xFF
             out[frame.offset + 5] = recomputed & 0xFF
-    return bytes(out)
+    return bytes(out), crossed
+
+
+def apply_steps(data: bytes, steps: int) -> bytes:
+    """apply_to() for callers that do not need the crossing list."""
+    return apply_to(data, steps)[0]

@@ -262,14 +262,45 @@ class TestLosslessGain(unittest.TestCase):
         self.assertEqual(
             mp3gain.apply_steps(mp3gain.apply_steps(data, -7), 7), data)
 
-    def test_headroom_stops_at_the_floor_not_at_zero(self):
+    def test_headroom_runs_to_the_field_limit(self):
+        """The 8-bit field is the only hard constraint. Holding attenuation
+        back at the inaudibility floor instead made one granule sitting ON
+        the floor pin the whole file."""
         data, _ = self._with_floor_granules()
         gains = mp3gain.read_gains(data, mp3gain.parse_frames(data))
-        down, _ = mp3gain.headroom(gains)
-        self.assertEqual(down, min(gains) - mp3gain.AUDIBLE_GAIN_FLOOR)
-        shifted = mp3gain.apply_steps(data, -down)
-        remaining = mp3gain.read_gains(shifted, mp3gain.parse_frames(shifted))
-        self.assertGreaterEqual(min(remaining), mp3gain.AUDIBLE_GAIN_FLOOR)
+        down, up = mp3gain.headroom(gains)
+        self.assertEqual(down, min(gains) - mp3gain.GAIN_MIN)
+        self.assertEqual(up, mp3gain.GAIN_MAX - max(gains))
+
+    def test_a_granule_on_the_floor_does_not_pin_the_file(self):
+        data = bytearray(self.with_silence.read_bytes())
+        movable = mp3gain.gain_bits(data, mp3gain.parse_frames(data))
+        mp3gain._set_u8_at(data, movable[10], mp3gain.AUDIBLE_GAIN_FLOOR)
+        computed = mp3gain.plan(bytes(data), -10.5)
+        self.assertFalse(computed.clamped)
+        self.assertEqual(computed.steps, -7)
+        self.assertEqual(computed.crossing_granules, 1)
+
+    def test_crossing_granules_are_reported_and_undo_needs_them(self):
+        """A granule pushed below the floor reads as inaudible afterwards, so
+        a plain reversal skips it. The recorded list is what makes undo
+        exact -- this checks the naive path really is wrong, so the record
+        is not carrying its weight by accident."""
+        data = bytearray(self.with_silence.read_bytes())
+        movable = mp3gain.gain_bits(data, mp3gain.parse_frames(data))
+        mp3gain._set_u8_at(data, movable[10], mp3gain.AUDIBLE_GAIN_FLOOR + 2)
+        data = bytes(data)
+
+        shifted, crossed = mp3gain.apply_to(data, -7)
+        self.assertEqual(len(crossed), 1)
+        restored, _ = mp3gain.apply_to(shifted, 7, also_move=crossed)
+        self.assertEqual(restored, data)
+        self.assertNotEqual(mp3gain.apply_steps(shifted, 7), data)
+
+    def test_no_crossers_when_nothing_is_near_the_floor(self):
+        data = self.plain.read_bytes()
+        _, crossed = mp3gain.apply_to(data, -6)
+        self.assertEqual(crossed, [])
 
     def test_the_floor_is_inaudible_by_construction(self):
         """Worst case: every one of 576 lines at the largest quantised value,

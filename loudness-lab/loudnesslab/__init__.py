@@ -4,4 +4,4 @@ Stage 1 of the normalisation project. Nothing here writes to an audio file.
 """
 
 __version__ = "0.1.0"
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3

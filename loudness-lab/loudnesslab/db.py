@@ -64,6 +64,17 @@ CREATE TABLE IF NOT EXISTS bands (
     PRIMARY KEY (track_id, band_hz)
 );
 
+CREATE TABLE IF NOT EXISTS gain_log (
+    id          INTEGER PRIMARY KEY,
+    path        TEXT NOT NULL,
+    output_path TEXT NOT NULL,
+    steps       INTEGER NOT NULL,
+    applied_db  REAL NOT NULL,
+    in_place    INTEGER NOT NULL,
+    applied_at  TEXT NOT NULL,
+    undone_at   TEXT
+);
+
 CREATE INDEX IF NOT EXISTS idx_tracks_year ON tracks(year);
 CREATE INDEX IF NOT EXISTS idx_tracks_status ON tracks(status);
 CREATE INDEX IF NOT EXISTS idx_bands_hz ON bands(band_hz);
@@ -112,6 +123,8 @@ def _migrate(conn: sqlite3.Connection, version: int) -> None:
             f"database is schema v{version}, newer than this build's "
             f"v{SCHEMA_VERSION}. Update loudness-lab, or analyse into a new file."
         )
+    # v3 only adds the gain_log table, which CREATE TABLE IF NOT EXISTS
+    # above has already made; nothing to alter.
     if version < 2:
         columns = {row["name"] for row in conn.execute("PRAGMA table_info(tracks)")}
         if "year_is_original" not in columns:

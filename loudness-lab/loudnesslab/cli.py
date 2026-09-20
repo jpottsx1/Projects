@@ -12,7 +12,7 @@ import sys
 import time
 from pathlib import Path
 
-from . import __version__, analyze, db, decode, report
+from . import __version__, analyze, apply_gain, db, decode, mp3gain, report
 
 
 def _progress_printer(start: float):
@@ -49,6 +49,101 @@ def cmd_analyze(args: argparse.Namespace) -> int:
     if counts["errors"]:
         print(f"run `loudness-lab report errors --db {args.db}` for details")
     return 0
+
+
+def cmd_gain(args: argparse.Namespace) -> int:
+    """Lossless gain. Dry run unless --apply is given."""
+    if args.in_place and args.out:
+        sys.stderr.write("error: choose --out or --in-place, not both\n")
+        return 2
+    out_dir = None if args.in_place else (args.out or Path("gained"))
+
+    conn = db.connect(args.db)
+    try:
+        if args.undo:
+            counts = apply_gain.undo(conn, args.path or None)
+            print(f"undone {counts['undone']}  failed {counts['failed']}  "
+                  f"skipped {counts['skipped']}")
+            return 1 if counts["failed"] else 0
+
+        proposals = apply_gain.propose(conn, args.path, args.estimator,
+                                       args.target, out_dir)
+        if not proposals:
+            print("no .mp3 files found under those paths")
+            return 1
+
+        usable = [p for p in proposals if p.ok]
+        blocked = [p for p in proposals if not p.ok]
+        moving = [p for p in usable if p.plan.steps != 0]
+
+        print(f"LOSSLESS GAIN  estimator={args.estimator}  "
+              f"target={args.target:+.1f}  step={mp3gain.DB_PER_STEP:.3f} dB")
+        print("=" * 100)
+        print("  Rewrites global_gain in the audio frames. No decode, no re-encode,")
+        print("  no generation loss. The ID3 region -- including Serato's GEOB cue")
+        print("  points and beatgrids -- is copied through untouched.")
+        print()
+        print(f"  {'artist / title':<44s}{'now':>8s}{'want':>8s}"
+              f"{'applied':>9s}{'off by':>8s}  note")
+        for proposal in sorted(usable, key=lambda p: p.wanted_db)[:args.limit]:
+            name = " - ".join(x for x in (proposal.artist, proposal.title) if x) \
+                or proposal.path.name
+            note = "clamped: not enough headroom" if proposal.plan.clamped else ""
+            if proposal.plan.steps == 0:
+                note = note or "already within half a step"
+            print(f"  {name[:43]:<44s}{proposal.measured:8.1f}"
+                  f"{proposal.wanted_db:+8.1f}{proposal.plan.applied_db:+9.2f}"
+                  f"{proposal.residual_db:+8.2f}  {note}")
+        if len(usable) > args.limit:
+            print(f"  ... {len(usable) - args.limit} more")
+
+        if usable:
+            residuals = [abs(p.residual_db) for p in usable]
+            print()
+            print(f"  {len(moving)} of {len(usable)} files would change. "
+                  f"Quantisation error: median "
+                  f"{sorted(residuals)[len(residuals) // 2]:.2f} dB, "
+                  f"worst {max(residuals):.2f} dB.")
+            protected = sum(1 for p in usable if p.plan.protected_frames)
+            if protected:
+                print(f"  {protected} file(s) carry frame CRCs; those are "
+                      f"recomputed on write.")
+        if blocked:
+            print()
+            print(f"  {len(blocked)} file(s) cannot be processed:")
+            for proposal in blocked[:10]:
+                print(f"    {proposal.path.name}: {proposal.problem}")
+
+        if not args.apply:
+            print()
+            print("  DRY RUN -- nothing was written. Add --apply to write.")
+            if out_dir is not None:
+                print(f"  Output would go to: {out_dir}/")
+            return 0
+
+        if args.in_place and not args.yes:
+            print()
+            print("  --in-place rewrites your originals. It is reversible with")
+            print("  `gain --undo`, but re-run with --yes to confirm.")
+            return 2
+
+        counts = apply_gain.apply(conn, proposals, in_place=args.in_place)
+        print()
+        print(f"written {counts['written']}  unchanged {counts['unchanged']}  "
+              f"skipped {counts['skipped']}  failed {counts['failed']}")
+        if counts["failed"]:
+            for proposal in proposals:
+                if proposal.problem and proposal.plan is not None:
+                    print(f"  {proposal.path.name}: {proposal.problem}")
+            return 1
+        if not args.in_place:
+            print(f"Originals untouched. Modified copies are in: {out_dir}/")
+        print("Serato's stored auto-gain and waveform overview for these tracks")
+        print("are now stale -- let it re-analyse them, and turn its own")
+        print("auto-gain off if you want this tool to own loudness.")
+        return 0
+    finally:
+        conn.close()
 
 
 def _slug(path: Path) -> str:
@@ -330,6 +425,26 @@ def build_parser() -> argparse.ArgumentParser:
     scan.add_argument("--reference", default=report.REFERENCE_ERA)
     scan.add_argument("--quiet", action="store_true")
     scan.set_defaults(func=cmd_scan)
+
+    gain = subparsers.add_parser(
+        "gain", help="apply lossless gain by rewriting global_gain (mp3 only)")
+    gain.add_argument("path", type=Path, nargs="*",
+                      help="files or folders that have already been analysed")
+    gain.add_argument("--db", type=Path, default=Path("library.db"))
+    gain.add_argument("--estimator", default="s_p95", choices=report.ESTIMATORS)
+    gain.add_argument("--target", type=float, default=-12.0)
+    gain.add_argument("--out", type=Path, default=None,
+                      help="write modified copies here (default: gained/)")
+    gain.add_argument("--in-place", action="store_true",
+                      help="rewrite the originals instead; reversible with --undo")
+    gain.add_argument("--apply", action="store_true",
+                      help="actually write; without it this is a dry run")
+    gain.add_argument("--yes", action="store_true",
+                      help="confirm --apply --in-place")
+    gain.add_argument("--undo", action="store_true",
+                      help="reverse in-place changes recorded in the database")
+    gain.add_argument("--limit", type=int, default=40)
+    gain.set_defaults(func=cmd_gain)
 
     check = subparsers.add_parser(
         "doctor", help="check the environment and a library path")

@@ -71,6 +71,10 @@ individual commands, if you want them separately:
 # What a given normalisation would do, per track. Writes nothing.
 ./loudness-lab report tracks --db library.db --estimator s_p95 --target -14
 
+# Lossless gain. Dry run by default; --apply writes.
+./loudness-lab gain "~/Music/Album" --db library.db --target -12
+./loudness-lab gain "~/Music/Album" --db library.db --target -12 --apply
+
 ./loudness-lab report errors --db library.db
 ./loudness-lab export --db library.db --out tracks.csv --what tracks
 ./loudness-lab export --db library.db --out bands.csv  --what bands
@@ -179,16 +183,59 @@ whose sections stay *inside* the gate -- the fixture with a 6 dB swing shows
 So LRA is a poor proxy for "will the estimator choice matter here". Run the
 report on real records before trusting either number.
 
+## Lossless gain
+
+`gain` is the one command that writes to audio files. It rewrites the 8-bit
+`global_gain` field in each MPEG Layer III granule rather than re-encoding:
+the decoder scales that granule by `2^((global_gain-210)/4)`, so subtracting 1
+attenuates by exactly 1.505 dB with no decode, no re-encode and no generation
+loss. Adding the step back restores the file byte-for-byte.
+
+The cost is that level only moves in 1.505 dB steps. On a library needing a
+couple of dB of attenuation that is a much better trade than a second lossy
+generation; the dry run prints the quantisation error per track so you can
+judge it.
+
+```sh
+./loudness-lab gain "~/Music/Album" --db library.db --target -12          # dry run
+./loudness-lab gain "~/Music/Album" --db library.db --target -12 --apply  # writes copies
+./loudness-lab gain "~/Music/Album" --db library.db --in-place --apply --yes
+./loudness-lab gain --db library.db --undo                                # reverse in-place
+```
+
+Guarantees, because the alternative is quietly damaging someone's records:
+
+* **The ID3 region is never read or written.** Serato keeps cue points,
+  beatgrids and waveform overviews in `GEOB` frames there. Only bytes inside
+  audio frames change, so those survive byte-for-byte. Tested.
+* **A step applies to every granule or not at all.** Clamping granules
+  individually would change one part of a track against another, which is the
+  dynamics change this project exists to avoid. Where a file lacks the
+  headroom, the step is reduced for the whole file and reported as clamped.
+* **Frame CRCs are recomputed** where present, verified against LAME's own.
+* **Copies by default.** Originals are only touched with `--in-place --apply
+  --yes`, and that is reversible with `--undo`.
+* **Every written file is verified** by re-parsing it and checking each
+  `global_gain` moved by exactly the planned step.
+
+After running it, Serato's stored auto-gain and waveform overview for those
+tracks are stale. Let it re-analyse, and turn its own auto-gain off if you
+want this tool to own loudness.
+
+Only `.mp3` is supported: the trick is specific to the MPEG Layer III
+bitstream. Lossless formats need no such trick, and re-encoding anything else
+would defeat the purpose.
+
 ## What this does not do
 
-No EQ, no bass synthesis, no limiting, no gain, no tag writing, no file
-writing of any kind. Those belong to later stages, and should not be built
-until this pass has been run over real records and the numbers looked at.
-
-It also does not read Serato's `GEOB` frames. Any later stage that writes
-files must preserve them byte-for-byte or cue points and beatgrids are lost.
+No EQ, no bass synthesis, no limiting, no tag writing, no format conversion.
+Those belong to later stages, and should not be built until the measurement
+pass has been run over real records and the numbers looked at.
 
 ## Development
+
+`lame` is needed only to run the gain tests, which check our frame CRCs
+against a real encoder's: `brew install lame`.
 
 ```sh
 ./setup.sh                                     # also runs the suite
@@ -212,5 +259,7 @@ loudnesslab/decode.py     ffmpeg/ffprobe wrappers (read-only)
 loudnesslab/db.py         SQLite schema and writes
 loudnesslab/analyze.py    Per-track analysis, parallel walk, resume
 loudnesslab/report.py     The reports
+loudnesslab/mp3gain.py    MPEG Layer III frame parsing and global_gain rewriting
+loudnesslab/apply_gain.py Planning, writing and undo for lossless gain
 tools/make_fixtures.py    Synthetic library with known properties
 ```

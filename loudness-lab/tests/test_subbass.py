@@ -233,6 +233,36 @@ class TestComparisonPairs(unittest.TestCase):
     """An unmatched A/B mostly measures which file is louder, and louder wins
     regardless of whether it is better. The pair must be loudness-matched."""
 
+    def test_match_selects_only_the_named_tracks(self):
+        """Iterating on a setting means running the same tracks again at a
+        different amount, which the thinnest-N selection cannot express."""
+        from loudnesslab import cli
+        x, _ = programme(seconds=6.0)
+        with tempfile.TemporaryDirectory() as tmp:
+            root, out = Path(tmp) / "src", Path(tmp) / "out"
+            root.mkdir()
+            for name in ("Talk Talk - Its My Life", "Duran Duran - Rio"):
+                subbass.write_flac(root / f"{name}.flac", x, RATE)
+            code = cli.main(["subbass", str(root), "--db", str(Path(tmp) / "m.db"),
+                             "--out", str(out), "--amount", "3",
+                             "--match", "talk talk", "--jobs", "1", "--quiet"])
+            self.assertEqual(code, 0)
+            produced = sorted(p.name for p in out.glob("*B *.flac"))
+        self.assertEqual(len(produced), 1)
+        self.assertIn("Talk Talk", produced[0])
+
+    def test_match_with_no_hits_fails_clearly(self):
+        from loudnesslab import cli
+        x, _ = programme(seconds=6.0)
+        with tempfile.TemporaryDirectory() as tmp:
+            root, out = Path(tmp) / "src", Path(tmp) / "out"
+            root.mkdir()
+            subbass.write_flac(root / "Duran Duran - Rio.flac", x, RATE)
+            code = cli.main(["subbass", str(root), "--db", str(Path(tmp) / "m.db"),
+                             "--out", str(out), "--match", "nothing here",
+                             "--jobs", "1", "--quiet"])
+        self.assertEqual(code, 1)
+
     def test_pair_is_loudness_matched_and_differs_only_in_the_low_end(self):
         from loudnesslab import bs1770, cli, decode, spectrum
         x, _ = programme(seconds=8.0)

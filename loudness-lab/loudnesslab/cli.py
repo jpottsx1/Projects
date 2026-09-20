@@ -81,18 +81,40 @@ def cmd_subbass(args: argparse.Namespace) -> int:
     conn = db.connect(database)
     try:
         bands = ", ".join(str(b) for b in report.LOW_SHAPE_BANDS)
+        # A match filter turns "the ten thinnest" into "these ones", which is
+        # how you iterate on a setting: same tracks, different amount.
+        clause, params = "", []
+        if args.match:
+            tests = []
+            for pattern in args.match:
+                like = f"%{pattern.lower()}%"
+                tests.append("(LOWER(COALESCE(t.artist, '')) LIKE ? "
+                             "OR LOWER(COALESCE(t.title, '')) LIKE ? "
+                             "OR LOWER(t.path) LIKE ?)")
+                params += [like, like, like]
+            clause = " AND (" + " OR ".join(tests) + ")"
         rows = conn.execute(
             f"SELECT t.path, t.artist, t.title, AVG(b.shape_db) AS low "
             f"FROM tracks t JOIN bands b ON b.track_id = t.id "
             f"WHERE t.status = 'ok' AND b.band_hz IN ({bands}) "
-            f"AND b.shape_db IS NOT NULL "
-            f"GROUP BY t.id ORDER BY low ASC LIMIT ?", (args.limit,)
+            f"AND b.shape_db IS NOT NULL{clause} "
+            f"GROUP BY t.id ORDER BY low ASC LIMIT ?", (*params, args.limit)
         ).fetchall()
+        analysed = conn.execute(
+            "SELECT COUNT(*) FROM tracks WHERE status = 'ok'").fetchone()[0]
     finally:
         conn.close()
     if not rows:
-        print("nothing analysed to work from")
+        if args.match:
+            print(f"no track matched {', '.join(repr(m) for m in args.match)} "
+                  f"among {analysed} analysed.")
+            print("Matching is a case-insensitive substring of the artist, "
+                  "title or path.")
+        else:
+            print("nothing analysed to work from")
         return 1
+    if args.match:
+        print(f"matched {len(rows)} of {analysed} analysed track(s)")
 
     out_dir.mkdir(parents=True, exist_ok=True)
     print(f"KICK PROTOTYPE  sub={args.amount:+.1f} dB in "
@@ -649,6 +671,10 @@ def build_parser() -> argparse.ArgumentParser:
                      help="ms the attack emphasis decays over (default: 8)")
     sub.add_argument("--freq", type=float, default=subbass.DEFAULT_FREQ_HZ)
     sub.add_argument("--decay", type=float, default=subbass.DEFAULT_DECAY_S)
+    sub.add_argument("--match", action="append", default=None, metavar="TEXT",
+                     help="only tracks whose artist, title or path contains "
+                          "TEXT (case-insensitive). Repeatable; any match "
+                          "counts. Without it the thinnest tracks are chosen")
     sub.add_argument("--limit", type=int, default=10,
                      help="how many of the thinnest tracks to do (default: 10)")
     sub.add_argument("--no-compare", action="store_true",

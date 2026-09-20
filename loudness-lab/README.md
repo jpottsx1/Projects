@@ -280,11 +280,56 @@ Only `.mp3` is supported: the trick is specific to the MPEG Layer III
 bitstream. Lossless formats need no such trick, and re-encoding anything else
 would defeat the purpose.
 
+## Sub-bass prototype
+
+`subbass` is the one stage that is lossy and irreversible. It exists to be
+listened to, not to be run over a library.
+
+```sh
+./loudness-lab subbass "~/Music/Eighties" --amount 5 --limit 10
+```
+
+It analyses, picks the ten tracks whose 31.5-63 Hz octave measures thinnest,
+adds a kick-synchronised sub to each, and writes FLAC into
+`subbass-preview/`. Originals are never touched.
+
+**Why kicks rather than a subharmonic divider.** The measurements say 1980s
+material sits 10-15 dB below modern in the 31.5-63 Hz octave while matching
+it from 80 Hz up -- the shape a dbx 120 was built for. But a divider
+flip-flops on zero crossings and needs a near-monophonic source; in a dense
+mix the 70-140 Hz band holds the kick, the bassline and the bottom of
+everything else at once, and an octave below the wrong partial is a wrong
+bass note. In dance and pop most of the missing energy is kick, so this
+detects the kick and lays a short decaying sine under it. Nothing is
+pitch-tracked, so nothing can mistrack.
+
+Two things that had to be got right, both caught by measurement rather than
+by listening:
+
+* **Detection keys on attack sharpness, not level.** A fast envelope rising
+  above a slow one. Against synthetic tracks with known kick times, a
+  bassline changing note on every beat and a kickless breakdown, this holds
+  recall and precision near 0.9-1.0 from 96 to 174 BPM. A plain rising-edge
+  detector managed 0.52 and 0.30 on the same material.
+* **Filtering is zero-phase and onsets are backtracked to the attack.**
+  Causal envelope filters put every onset 22-26 ms late, and at 45 Hz one
+  cycle is 22 ms -- a burst that late flams against the kick and partly
+  cancels the thing it was meant to reinforce.
+
+The gain is the root of a quadratic rather than a ratio of powers, because a
+burst deliberately aligned with the kick is correlated with what is already
+there. It hits the requested figure to 0.01 dB.
+
+Run the level pass again afterwards: adding energy moves loudness, so
+whatever happens last has to be the levelling.
+
 ## What this does not do
 
-No EQ, no bass synthesis, no limiting, no tag writing, no format conversion.
-Those belong to later stages, and should not be built until the measurement
-pass has been run over real records and the numbers looked at.
+No EQ, no limiting, no tag writing, no expansion and no transient shaping.
+The measurements argued against the last two: crest sits around 10-12 dB
+across the clean corpora, so there is nothing flattened to restore, and
+expansion would raise loudness range -- which is precisely what makes tracks
+disagree with each other.
 
 ## Development
 
@@ -315,5 +360,6 @@ loudnesslab/analyze.py    Per-track analysis, parallel walk, resume
 loudnesslab/report.py     The reports
 loudnesslab/mp3gain.py    MPEG Layer III frame parsing and global_gain rewriting
 loudnesslab/apply_gain.py Planning, writing and undo for lossless gain
+loudnesslab/subbass.py    Kick detection and sub-bass synthesis (prototype)
 tools/make_fixtures.py    Synthetic library with known properties
 ```

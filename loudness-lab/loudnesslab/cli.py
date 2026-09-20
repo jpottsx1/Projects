@@ -12,7 +12,8 @@ import sys
 import time
 from pathlib import Path
 
-from . import __version__, analyze, apply_gain, db, decode, mp3gain, report
+from . import (__version__, analyze, apply_gain, bs1770, db, decode,
+               mp3gain, report, spectrum, subbass)
 
 
 def _progress_printer(start: float):
@@ -48,6 +49,96 @@ def cmd_analyze(args: argparse.Namespace) -> int:
           f"in {elapsed / 60:.1f} min")
     if counts["errors"]:
         print(f"run `loudness-lab report errors --db {args.db}` for details")
+    return 0
+
+
+def cmd_subbass(args: argparse.Namespace) -> int:
+    """PROTOTYPE: kick-synchronised sub-bass, for listening to.
+
+    Lossy and irreversible, unlike everything else here, so it only ever
+    writes FLAC into a separate folder and picks the tracks that measure
+    thinnest rather than processing everything.
+    """
+    database = args.db or (Path("scans") / f"{_slug(args.path[0])}.db")
+    database.parent.mkdir(parents=True, exist_ok=True)
+    out_dir = args.out or Path("subbass-preview")
+
+    start = time.monotonic()
+    analyze.run(roots=args.path, db_path=database, jobs=args.jobs,
+                progress=None if args.quiet else _progress_printer(start))
+    if not args.quiet:
+        sys.stderr.write("\n")
+
+    conn = db.connect(database)
+    try:
+        bands = ", ".join(str(b) for b in report.LOW_SHAPE_BANDS)
+        rows = conn.execute(
+            f"SELECT t.path, t.artist, t.title, AVG(b.shape_db) AS low "
+            f"FROM tracks t JOIN bands b ON b.track_id = t.id "
+            f"WHERE t.status = 'ok' AND b.band_hz IN ({bands}) "
+            f"AND b.shape_db IS NOT NULL "
+            f"GROUP BY t.id ORDER BY low ASC LIMIT ?", (args.limit,)
+        ).fetchall()
+    finally:
+        conn.close()
+    if not rows:
+        print("nothing analysed to work from")
+        return 1
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    print(f"SUB-BASS PROTOTYPE  amount={args.amount:+.1f} dB in "
+          f"{subbass.SUB_LOW_HZ:.0f}-{subbass.SUB_HIGH_HZ:.0f} Hz  "
+          f"freq={args.freq:.0f} Hz  decay={args.decay:.2f}s")
+    print("=" * 104)
+    print("  Lossy and irreversible, unlike the gain pass. Originals are never")
+    print("  touched; these are new FLAC files to listen to and compare.")
+    print()
+    print("  'shape' is the mean 1/3-octave level relative to the track's own")
+    print("  broadband, in the same units as report lowend, so it can be read")
+    print("  against the correction curve. 'added' is the energy put into the")
+    print("  octave; the two differ because one is a mean of decibels and the")
+    print("  other a sum of energies.")
+    print()
+    print(f"  {'artist / title':<40s}{'kicks/min':>10s}{'shape was':>11s}"
+          f"{'now':>8s}{'added':>8s}{'trim':>7s}{'dBTP':>7s}")
+
+    written = 0
+    for row in rows:
+        source = Path(row["path"])
+        try:
+            audio = decode.decode(source)
+            after, info = subbass.enhance(audio, decode.TARGET_RATE,
+                                          amount_db=args.amount,
+                                          freq=args.freq, decay_s=args.decay)
+            before_bands = {b["band_hz"]: b["shape_db"]
+                            for b in spectrum.analyse(audio, decode.TARGET_RATE)}
+            after_bands = {b["band_hz"]: b["shape_db"]
+                           for b in spectrum.analyse(after, decode.TARGET_RATE)}
+            peak = bs1770.measure(after)["true_peak_dbtp"]
+            destination = out_dir / (source.stem + ".flac")
+            subbass.write_flac(destination, after, decode.TARGET_RATE, source)
+        except Exception as exc:
+            print(f"  {source.name[:39]:<40s}  FAILED: {type(exc).__name__}: {exc}")
+            continue
+
+        def mean_low(table):
+            values = [table[b] for b in report.LOW_SHAPE_BANDS
+                      if table.get(b) is not None]
+            return sum(values) / len(values) if values else float("nan")
+
+        name = " - ".join(p for p in (row["artist"], row["title"]) if p) or source.stem
+        note = "" if info["note"] is None else f"  {info['note']}"
+        print(f"  {name[:39]:<40s}{info['kicks_per_minute']:>10.0f}"
+              f"{mean_low(before_bands):>11.1f}{mean_low(after_bands):>8.1f}"
+              f"{info['applied_db']:>+8.2f}{info['safety_trim_db']:>+7.2f}"
+              f"{peak:>+7.2f}{note}")
+        written += 1
+
+    print()
+    print(f"  {written} file(s) written to {out_dir}/ as FLAC.")
+    print("  Listen against the originals before deciding this is worth a")
+    print("  generation. Re-run the level pass afterwards: adding energy moves")
+    print("  loudness, so whatever happens last has to be the levelling.")
     return 0
 
 
@@ -492,6 +583,22 @@ def build_parser() -> argparse.ArgumentParser:
     scan.add_argument("--reference", default=report.REFERENCE_ERA)
     scan.add_argument("--quiet", action="store_true")
     scan.set_defaults(func=cmd_scan)
+
+    sub = subparsers.add_parser(
+        "subbass", help="PROTOTYPE: kick-synchronised sub-bass (lossy, writes FLAC)")
+    sub.add_argument("path", type=Path, nargs="+")
+    sub.add_argument("--db", type=Path, default=None)
+    sub.add_argument("--out", type=Path, default=None,
+                     help="where the FLACs go (default: subbass-preview/)")
+    sub.add_argument("--amount", type=float, default=5.0,
+                     help="dB to add in the 31.5-63 Hz octave (default: 5)")
+    sub.add_argument("--freq", type=float, default=subbass.DEFAULT_FREQ_HZ)
+    sub.add_argument("--decay", type=float, default=subbass.DEFAULT_DECAY_S)
+    sub.add_argument("--limit", type=int, default=10,
+                     help="how many of the thinnest tracks to do (default: 10)")
+    sub.add_argument("--jobs", type=int, default=None)
+    sub.add_argument("--quiet", action="store_true")
+    sub.set_defaults(func=cmd_subbass)
 
     gain = subparsers.add_parser(
         "gain", help="apply lossless gain by rewriting global_gain (mp3 only)")

@@ -110,7 +110,11 @@ def cmd_gain(args: argparse.Namespace) -> int:
         for proposal in sorted(usable, key=lambda p: p.wanted_db)[:args.limit]:
             name = " - ".join(x for x in (proposal.artist, proposal.title) if x) \
                 or proposal.path.name
-            note = "clamped: not enough headroom" if proposal.plan.clamped else ""
+            note = ""
+            if proposal.plan.clamped:
+                note = (f"clamped at {proposal.plan.headroom_down_db:+.2f} dB "
+                        f"by {proposal.plan.lowest_count} granule(s) at "
+                        f"global_gain {proposal.plan.lowest_gain}")
             if proposal.plan.steps == 0:
                 note = note or "already within half a step"
             print(f"  {name[:43]:<44s}{proposal.measured:8.1f}"
@@ -130,6 +134,15 @@ def cmd_gain(args: argparse.Namespace) -> int:
             if protected:
                 print(f"  {protected} file(s) carry frame CRCs; those are "
                       f"recomputed on write.")
+            clamped = [p for p in usable if p.plan.clamped]
+            if clamped:
+                print(f"  {len(clamped)} file(s) clamped: a granule sits too "
+                      f"close to global_gain 0 to shift the")
+                print("  whole file uniformly. Empty granules are already "
+                      "ignored, so these carry")
+                print("  data. Attenuating only the rest would change the "
+                      "track's own dynamics,")
+                print("  which is the one thing this tool will not do.")
         if blocked:
             print()
             print(f"  {len(blocked)} file(s) cannot be processed:")

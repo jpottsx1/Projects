@@ -58,6 +58,15 @@ class Frame:
     is_info_frame: bool  # Xing/Info/VBRI header frame, decodes to silence
 
 
+def _bits_at(data, bit_offset: int, count: int) -> int:
+    """Read `count` bits starting at an arbitrary bit offset (MSB first)."""
+    value = 0
+    for index in range(count):
+        position = bit_offset + index
+        value = (value << 1) | ((data[position >> 3] >> (7 - (position & 7))) & 1)
+    return value
+
+
 def _u8_at(data, bit_offset: int) -> int:
     """Read 8 bits starting at an arbitrary bit offset (MSB first)."""
     index, shift = bit_offset >> 3, bit_offset & 7
@@ -178,9 +187,32 @@ def parse_frames(data) -> list[Frame]:
     return frames
 
 
+def granule_has_data(data, gain_bit: int) -> bool:
+    """False when this granule carries no spectral data at all.
+
+    part2_3_length is the first 12 bits of the granule's side info block, and
+    global_gain sits 21 bits in. A zero-length granule has nothing to scale,
+    so the decoder outputs silence whatever its global_gain says -- which is
+    why such granules can be left alone rather than counted against the
+    file's headroom.
+
+    The test is on part2_3_length rather than on how small global_gain is,
+    because it does not change when we shift gains. A threshold on
+    global_gain would move granules in and out of the excluded set between
+    applying a step and reversing it, and the reversal would stop being
+    byte-exact.
+    """
+    return _bits_at(data, gain_bit - 21, 12) != 0
+
+
+def gain_bits(data, frames: list[Frame]) -> list[int]:
+    """Bit offsets of every global_gain we are willing to move."""
+    return [bit for frame in frames if not frame.is_info_frame
+            for bit in frame.gain_bits if granule_has_data(data, bit)]
+
+
 def read_gains(data, frames: list[Frame]) -> list[int]:
-    return [_u8_at(data, bit) for frame in frames
-            if not frame.is_info_frame for bit in frame.gain_bits]
+    return [_u8_at(data, bit) for bit in gain_bits(data, frames)]
 
 
 def headroom(gains: list[int]) -> tuple[int, int]:
@@ -220,9 +252,13 @@ class GainPlan:
     requested_db: float
     steps: int               # global_gain steps actually applicable
     applied_db: float        # steps * DB_PER_STEP
-    granules: int
+    granules: int            # granules carrying data, i.e. ones we would move
+    skipped_granules: int    # empty granules, left alone
     protected_frames: int    # frames carrying a CRC that must be recomputed
     clamped: bool            # requested more than the file had headroom for
+    lowest_gain: int         # the global_gain that limits attenuation
+    lowest_count: int        # how many granules sit at it
+    headroom_down_db: float  # most attenuation this file can take
 
 
 def plan(data, target_db: float) -> GainPlan:
@@ -237,13 +273,19 @@ def plan(data, target_db: float) -> GainPlan:
     wanted = steps_for_db(target_db)
     down, up = headroom(gains)
     allowed = max(-down, min(up, wanted))
+    lowest = min(gains)
+    total_granules = sum(len(f.gain_bits) for f in frames if not f.is_info_frame)
     return GainPlan(
         requested_db=target_db,
         steps=allowed,
         applied_db=allowed * DB_PER_STEP,
         granules=len(gains),
+        skipped_granules=total_granules - len(gains),
         protected_frames=sum(1 for f in frames if f.has_crc),
         clamped=allowed != wanted,
+        lowest_gain=lowest,
+        lowest_count=sum(1 for g in gains if g == lowest),
+        headroom_down_db=-down * DB_PER_STEP,
     )
 
 
@@ -257,17 +299,22 @@ def apply_steps(data: bytes, steps: int) -> bytes:
     if steps == 0:
         return bytes(out)
     frames = parse_frames(out)
+    movable = set(gain_bits(out, frames))
     for frame in frames:
         if frame.is_info_frame:
             continue
+        touched = False
         for bit in frame.gain_bits:
+            if bit not in movable:
+                continue          # empty granule: silent either way, leave it
             value = _u8_at(out, bit) + steps
             if not GAIN_MIN <= value <= GAIN_MAX:
                 raise Mp3Error(
                     f"global_gain {value} out of range at bit {bit}; "
                     "plan() should have prevented this")
             _set_u8_at(out, bit, value)
-        if frame.has_crc:
+            touched = True
+        if touched and frame.has_crc:
             info = parse_header(out, frame.offset)
             recomputed = frame_crc(out, frame, info["side_info_size"])
             out[frame.offset + 4] = (recomputed >> 8) & 0xFF

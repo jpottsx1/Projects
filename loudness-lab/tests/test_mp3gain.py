@@ -75,6 +75,15 @@ class TestLosslessGain(unittest.TestCase):
         _encode(wav, cls.plain)
         _encode(wav, cls.protected, protected=True)
 
+        # A real track starts and ends in digital silence. Encoders emit
+        # empty granules there, and those must not be able to hold the whole
+        # file hostage when it is asked to attenuate.
+        padded = root / "padded.wav"
+        quiet = np.zeros((int(1.5 * RATE), 2))
+        _write_wav(padded, np.concatenate([quiet, _programme(), quiet]))
+        cls.with_silence = root / "with_silence.mp3"
+        _encode(padded, cls.with_silence)
+
     @classmethod
     def tearDownClass(cls):
         cls.tmp.cleanup()
@@ -159,6 +168,59 @@ class TestLosslessGain(unittest.TestCase):
         plain_frames = mp3gain.parse_frames(self.plain.read_bytes())
         tagged_frames = mp3gain.parse_frames(tagged)
         self.assertEqual(len(tagged_frames), len(plain_frames))
+
+    def test_silent_granules_exist_in_a_padded_track(self):
+        """Guards the premise of the tests below."""
+        data = self.with_silence.read_bytes()
+        frames = mp3gain.parse_frames(data)
+        total = sum(len(f.gain_bits) for f in frames if not f.is_info_frame)
+        movable = len(mp3gain.gain_bits(data, frames))
+        self.assertGreater(total - movable, 0, "no empty granules to test with")
+
+    def test_empty_granules_do_not_limit_headroom(self):
+        """An empty granule decodes to silence whatever its global_gain says,
+        so it must not block the file from being attenuated."""
+        data = self.with_silence.read_bytes()
+        frames = mp3gain.parse_frames(data)
+        every_gain = [mp3gain._u8_at(data, bit) for frame in frames
+                      if not frame.is_info_frame for bit in frame.gain_bits]
+        audible = mp3gain.read_gains(data, frames)
+        self.assertLess(len(audible), len(every_gain))
+        computed = mp3gain.plan(data, -3.0)
+        self.assertFalse(computed.clamped)
+        self.assertEqual(computed.steps, -2)
+        self.assertEqual(computed.granules, len(audible))
+        self.assertEqual(computed.skipped_granules,
+                         len(every_gain) - len(audible))
+
+    def test_empty_granules_are_left_untouched(self):
+        data = self.with_silence.read_bytes()
+        shifted = mp3gain.apply_steps(data, -2)
+        frames = mp3gain.parse_frames(data)
+        movable = set(mp3gain.gain_bits(data, frames))
+        for frame in frames:
+            if frame.is_info_frame:
+                continue
+            for bit in frame.gain_bits:
+                before = mp3gain._u8_at(data, bit)
+                after = mp3gain._u8_at(shifted, bit)
+                expected = before - 2 if bit in movable else before
+                self.assertEqual(after, expected, f"granule at bit {bit}")
+
+    def test_reversal_stays_exact_with_silent_granules(self):
+        """Skipping granules must not break the losslessness claim: the
+        excluded set is chosen by part2_3_length, which a gain shift does not
+        change, so the same granules are skipped in both directions."""
+        data = self.with_silence.read_bytes()
+        self.assertEqual(
+            mp3gain.apply_steps(mp3gain.apply_steps(data, -4), 4), data)
+
+    def test_padded_track_still_gains_exactly(self):
+        before = bs1770.measure(decode.decode(self.with_silence))["lufs_i"]
+        output = Path(self.tmp.name) / "padded_shifted.mp3"
+        output.write_bytes(mp3gain.apply_steps(self.with_silence.read_bytes(), -2))
+        after = bs1770.measure(decode.decode(output))["lufs_i"]
+        self.assertAlmostEqual(after - before, -2 * mp3gain.DB_PER_STEP, places=3)
 
     def test_plan_clamps_rather_than_exceeding_headroom(self):
         data = self.plain.read_bytes()

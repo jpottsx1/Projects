@@ -35,6 +35,26 @@ DB_PER_STEP = 20.0 * 0.3010299956639812 / 4.0  # 1.50515 dB
 
 GAIN_MIN, GAIN_MAX = 0, 255
 
+# Granules below this global_gain are inaudible and are left alone.
+#
+# A decoder reconstructs a line as |is|^(4/3) * 2^((global_gain-210)/4), before
+# the scalefactors attenuate it further. The largest |is| the format can carry
+# is 8206, so |is|^(4/3) <= 2^17.3; summing 576 lines coherently -- which real
+# audio never does -- bounds a granule at 2^26.5 times that scale factor. At
+# global_gain 24 the scale factor is 2^-46.5, so even that impossible worst
+# case lands at 2^-20, about -120 dBFS. Below sixteen-bit dither.
+#
+# Encoders emit such granules in fade-ins, run-outs and dithered lead-ins, and
+# one of them sitting at global_gain 0 would otherwise pin an entire track:
+# attenuating the file would drive it below the field's range, and this tool
+# refuses to move some granules but not others.
+#
+# The threshold is safe to exclude on only because plan() additionally holds
+# the step to (lowest movable gain - AUDIBLE_GAIN_FLOOR). That keeps every
+# movable granule above the floor after the shift, so the excluded set is
+# identical on the way back and the reversal stays byte-exact.
+AUDIBLE_GAIN_FLOOR = 24
+
 _BITRATES_V1 = (0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 0)
 _BITRATES_V2 = (0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160, 0)
 _SAMPLE_RATES = {
@@ -206,9 +226,14 @@ def granule_has_data(data, gain_bit: int) -> bool:
 
 
 def gain_bits(data, frames: list[Frame]) -> list[int]:
-    """Bit offsets of every global_gain we are willing to move."""
+    """Bit offsets of every global_gain we are willing to move.
+
+    Excludes granules that carry no data, and granules already so quiet that
+    nothing could hear them (see AUDIBLE_GAIN_FLOOR).
+    """
     return [bit for frame in frames if not frame.is_info_frame
-            for bit in frame.gain_bits if granule_has_data(data, bit)]
+            for bit in frame.gain_bits
+            if granule_has_data(data, bit) and _u8_at(data, bit) >= AUDIBLE_GAIN_FLOOR]
 
 
 def read_gains(data, frames: list[Frame]) -> list[int]:
@@ -216,10 +241,15 @@ def read_gains(data, frames: list[Frame]) -> list[int]:
 
 
 def headroom(gains: list[int]) -> tuple[int, int]:
-    """(most we may subtract, most we may add) without clamping any granule."""
+    """(most we may subtract, most we may add) without clamping any granule.
+
+    Attenuation stops at AUDIBLE_GAIN_FLOOR rather than at 0, so that no
+    movable granule can fall through the floor and change which granules are
+    excluded -- that is what keeps the operation exactly reversible.
+    """
     if not gains:
         return 0, 0
-    return min(gains) - GAIN_MIN, GAIN_MAX - max(gains)
+    return max(0, min(gains) - AUDIBLE_GAIN_FLOOR), max(0, GAIN_MAX - max(gains))
 
 
 def steps_for_db(db: float) -> int:
@@ -275,7 +305,9 @@ def plan(data, target_db: float, max_steps: int | None = None) -> GainPlan:
         raise Mp3Error("no MPEG Layer III frames found")
     gains = read_gains(data, frames)
     if not gains:
-        raise Mp3Error("no audio granules found (header-only file?)")
+        raise Mp3Error(
+            "no granule carries audible content -- every one is empty or "
+            f"below global_gain {AUDIBLE_GAIN_FLOOR}. Is this file silent?")
 
     wanted = steps_for_db(target_db)
     if max_steps is not None:

@@ -243,6 +243,14 @@ Guarantees, because the alternative is quietly damaging someone's records:
 * **The ID3 region is never read or written.** Serato keeps cue points,
   beatgrids and waveform overviews in `GEOB` frames there. Only bytes inside
   audio frames change, so those survive byte-for-byte. Tested.
+* **Silent granules are left alone, not counted.** Encoders emit granules in
+  fade-ins and run-outs whose `global_gain` sits at or near zero; one of them
+  would otherwise pin an entire track, since attenuating would drive it out of
+  the field's range. Granules with no data, or below a global_gain of 24
+  (at most -120 dBFS even in an impossible worst case), are skipped. The step
+  is additionally held so no movable granule can fall through that floor,
+  which keeps the excluded set identical on the way back and the reversal
+  byte-exact.
 * **A step applies to every granule or not at all.** Clamping granules
   individually would change one part of a track against another, which is the
   dynamics change this project exists to avoid. Where a file lacks the

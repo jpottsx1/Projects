@@ -222,6 +222,70 @@ class TestLosslessGain(unittest.TestCase):
         after = bs1770.measure(decode.decode(output))["lufs_i"]
         self.assertAlmostEqual(after - before, -2 * mp3gain.DB_PER_STEP, places=3)
 
+    def _with_floor_granules(self, count: int = 3) -> tuple[bytes, list[int]]:
+        """A copy whose first few data-carrying granules sit at global_gain 0.
+
+        Encoders really do this in fade-ins and dithered lead-ins, and it is
+        what blocked seven of fifteen real tracks from being levelled.
+        """
+        data = bytearray(self.with_silence.read_bytes())
+        movable = mp3gain.gain_bits(data, mp3gain.parse_frames(data))
+        pinned = movable[10:10 + count]
+        for bit in pinned:
+            mp3gain._set_u8_at(data, bit, 0)
+        return bytes(data), pinned
+
+    def test_a_silent_granule_does_not_pin_the_whole_file(self):
+        data, _ = self._with_floor_granules()
+        computed = mp3gain.plan(data, -10.5)
+        self.assertFalse(computed.clamped)
+        self.assertEqual(computed.steps, -7)
+
+    def test_granules_below_the_floor_are_left_untouched(self):
+        data, pinned = self._with_floor_granules()
+        shifted = mp3gain.apply_steps(data, -7)
+        for bit in pinned:
+            self.assertEqual(mp3gain._u8_at(shifted, bit), 0)
+
+    def test_the_excluded_set_is_identical_after_a_shift(self):
+        """If a movable granule could fall through the floor, it would be
+        excluded on the way back and the reversal would not be exact."""
+        data, pinned = self._with_floor_granules()
+        before = mp3gain.gain_bits(data, mp3gain.parse_frames(data))
+        shifted = mp3gain.apply_steps(data, -7)
+        after = mp3gain.gain_bits(shifted, mp3gain.parse_frames(shifted))
+        self.assertEqual(before, after)
+        self.assertNotIn(pinned[0], before)
+
+    def test_reversal_exact_with_granules_at_the_floor(self):
+        data, _ = self._with_floor_granules()
+        self.assertEqual(
+            mp3gain.apply_steps(mp3gain.apply_steps(data, -7), 7), data)
+
+    def test_headroom_stops_at_the_floor_not_at_zero(self):
+        data, _ = self._with_floor_granules()
+        gains = mp3gain.read_gains(data, mp3gain.parse_frames(data))
+        down, _ = mp3gain.headroom(gains)
+        self.assertEqual(down, min(gains) - mp3gain.AUDIBLE_GAIN_FLOOR)
+        shifted = mp3gain.apply_steps(data, -down)
+        remaining = mp3gain.read_gains(shifted, mp3gain.parse_frames(shifted))
+        self.assertGreaterEqual(min(remaining), mp3gain.AUDIBLE_GAIN_FLOOR)
+
+    def test_the_floor_is_inaudible_by_construction(self):
+        """Worst case: every one of 576 lines at the largest quantised value,
+        summing coherently. Real audio cannot reach this."""
+        worst = (8206 ** (4 / 3)) * 576
+        level = 20 * np.log10(worst * 2 ** ((mp3gain.AUDIBLE_GAIN_FLOOR - 210) / 4))
+        self.assertLess(level, -100.0)
+
+    def test_an_entirely_silent_file_is_reported_clearly(self):
+        data = bytearray(self.plain.read_bytes())
+        for bit in mp3gain.gain_bits(data, mp3gain.parse_frames(data)):
+            mp3gain._set_u8_at(data, bit, 0)
+        with self.assertRaises(mp3gain.Mp3Error) as caught:
+            mp3gain.plan(bytes(data), -3.0)
+        self.assertIn("silent", str(caught.exception))
+
     def test_plan_clamps_rather_than_exceeding_headroom(self):
         data = self.plain.read_bytes()
         computed = mp3gain.plan(data, -200.0)     # far more than any file allows

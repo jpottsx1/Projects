@@ -179,25 +179,49 @@ def loudness_report(conn: sqlite3.Connection) -> str:
     return "\n".join(out)
 
 
-def _band_matrix(conn: sqlite3.Connection, field: str) -> tuple[list[float], dict]:
-    """{era: {band_hz: [values]}} for one bands column."""
+def _band_matrix(conn: sqlite3.Connection, field: str,
+                 group_by: str = "era") -> tuple[list[float], dict]:
+    """{group: {band_hz: [values]}} for one bands column.
+
+    Grouping by folder exists because a library of compilations has useless
+    year tags -- every track carries the reissue date -- while the folders
+    are exactly the corpora you meant to compare.
+    """
     rows = conn.execute(
-        f"SELECT t.year, b.band_hz, b.{field} AS value FROM bands b "
+        f"SELECT t.year, t.path, b.band_hz, b.{field} AS value FROM bands b "
         "JOIN tracks t ON t.id = b.track_id "
         f"WHERE t.status = 'ok' AND b.{field} IS NOT NULL"
     ).fetchall()
-    bands, by_era = set(), {}
+    labels = (_folder_labels([row["path"] for row in rows])
+              if group_by == "folder" else None)
+    bands, grouped = set(), {}
     for row in rows:
+        key = (labels.get(row["path"], "(root)") if labels is not None
+               else _era(row["year"]))
         bands.add(row["band_hz"])
-        by_era.setdefault(_era(row["year"]), {}).setdefault(row["band_hz"], []).append(row["value"])
-    return sorted(bands), by_era
+        grouped.setdefault(key, {}).setdefault(row["band_hz"], []).append(row["value"])
+    return sorted(bands), grouped
 
 
-def _era_counts(conn: sqlite3.Connection) -> dict:
-    counts = {}
-    for row in conn.execute("SELECT year FROM tracks WHERE status = 'ok'"):
-        counts[_era(row["year"])] = counts.get(_era(row["year"]), 0) + 1
+def _group_counts(conn: sqlite3.Connection, group_by: str = "era") -> dict:
+    rows = conn.execute(
+        "SELECT year, path FROM tracks WHERE status = 'ok'").fetchall()
+    labels = (_folder_labels([row["path"] for row in rows])
+              if group_by == "folder" else None)
+    counts: dict = {}
+    for row in rows:
+        key = (labels.get(row["path"], "(root)") if labels is not None
+               else _era(row["year"]))
+        counts[key] = counts.get(key, 0) + 1
     return counts
+
+
+def resolve_reference(groups, wanted: str) -> str | None:
+    """Match a reference group exactly, else by unique case-insensitive substring."""
+    if wanted in groups:
+        return wanted
+    matches = [g for g in groups if wanted.lower() in g.lower()]
+    return matches[0] if len(matches) == 1 else None
 
 
 def _year_provenance(conn: sqlite3.Connection) -> str | None:
@@ -231,13 +255,20 @@ def _year_provenance(conn: sqlite3.Connection) -> str | None:
     return None
 
 
-def lowend_report(conn: sqlite3.Connection, reference: str = REFERENCE_ERA) -> str:
-    bands, shape = _band_matrix(conn, "shape_db")
+def lowend_report(conn: sqlite3.Connection, reference: str = REFERENCE_ERA,
+                  group_by: str = "era") -> str:
+    bands, shape = _band_matrix(conn, "shape_db", group_by)
     if not bands:
         return "No analysed tracks with band results yet."
     low = [b for b in bands if b <= LOW_BAND_MAX_HZ]
-    counts = _era_counts(conn)
-    eras = sorted(shape, key=_era_order)
+    counts = _group_counts(conn, group_by)
+    by_folder = group_by == "folder"
+    eras = sorted(shape) if by_folder else sorted(shape, key=_era_order)
+    width = max(10, min(38, max((len(g) for g in eras), default=10)))
+    heading = "folder" if by_folder else "era"
+    if by_folder:
+        matched = resolve_reference(shape, reference)
+        reference = matched if matched else "\x00none"
 
     def median_curve(era: str, table: dict) -> dict:
         return {b: float(np.median(table[era][b])) for b in table.get(era, {})}
@@ -247,7 +278,7 @@ def lowend_report(conn: sqlite3.Connection, reference: str = REFERENCE_ERA) -> s
         values = shape.get(era, {}).get(band)
         return values is None or float(np.median(values)) < MIN_SHAPE_FOR_WIDTH_DB
 
-    provenance = _year_provenance(conn)
+    provenance = None if by_folder else _year_provenance(conn)
     normalised = normalisation_warning(conn)
     out = ["LOW END  (1/3-octave, relative to each track's own broadband level)",
            "=" * 78, ""]
@@ -256,23 +287,31 @@ def lowend_report(conn: sqlite3.Connection, reference: str = REFERENCE_ERA) -> s
     if provenance:
         out += [provenance, ""]
     out += [
-           "Median shape per era, in dB relative to broadband", "-" * 78,
+           f"Median shape per {heading}, in dB relative to broadband", "-" * 78,
            "  A number here is level-independent: it says what fraction of the",
            "  track's energy sits in that band, not how loud the track is.", "",
-           "  " + "era".ljust(10) + "n".rjust(6) + "".join(f"{b:>8.0f}" for b in low)]
+           "  " + heading.ljust(width) + "n".rjust(6)
+           + "".join(f"{b:>8.0f}" for b in low)]
     for era in eras:
         curve = median_curve(era, shape)
         cells = "".join(f"{curve[b]:8.1f}" if b in curve else "       -" for b in low)
-        out.append(f"  {era:<10s}{counts.get(era, 0):6d}{cells}")
+        out.append(f"  {era[-width:]:<{width}s}{counts.get(era, 0):6d}{cells}")
+
+    if by_folder and reference not in shape:
+        out += ["", "  No reference chosen, so no correction curve below. Pick one",
+                "  of the folders above with --reference, naming the corpus the",
+                "  others should be measured against:", "",
+                f'    report lowend --by folder --reference "{eras[-1]}"']
 
     if reference in shape:
         ref = median_curve(reference, shape)
         out += ["", f"Difference from the {reference} reference "
-                    f"(positive = this era has LESS energy here)", "-" * 78,
+                    f"(positive = this row has LESS energy here)", "-" * 78,
                 "  This is the candidate stage-2 correction curve. Values are",
                 "  deliberately un-smoothed; stage 2 should fit 3-4 gentle filters to",
                 "  them and cap the result at about 5 dB.", "",
-                "  " + "era".ljust(10) + "n".rjust(6) + "".join(f"{b:>8.0f}" for b in low)]
+                "  " + heading.ljust(width) + "n".rjust(6)
+                + "".join(f"{b:>8.0f}" for b in low)]
         for era in eras:
             if era == reference:
                 continue
@@ -280,7 +319,7 @@ def lowend_report(conn: sqlite3.Connection, reference: str = REFERENCE_ERA) -> s
             cells = "".join(
                 f"{ref[b] - curve[b]:8.1f}" if b in curve and b in ref else "       -"
                 for b in low)
-            out.append(f"  {era:<10s}{counts.get(era, 0):6d}{cells}")
+            out.append(f"  {era[-width:]:<{width}s}{counts.get(era, 0):6d}{cells}")
         out += ["",
                 "  Read the two halves separately: a positive number at 25-50 Hz means",
                 "  missing sub, which EQ can only fix if the content is actually there",
@@ -301,7 +340,8 @@ def lowend_report(conn: sqlite3.Connection, reference: str = REFERENCE_ERA) -> s
             "  whole group, or none. A wide spread means some tracks are much",
             "  thinner than their neighbours and no single gain will reconcile",
             "  them; those need treating individually or not at all.", "",
-            "  " + "era".ljust(10) + "n".rjust(6) + "".join(f"{b:>8.0f}" for b in low)]
+            "  " + heading.ljust(width) + "n".rjust(6)
+            + "".join(f"{b:>8.0f}" for b in low)]
     for era in eras:
         values = shape.get(era, {})
         cells = "".join(
@@ -309,17 +349,18 @@ def lowend_report(conn: sqlite3.Connection, reference: str = REFERENCE_ERA) -> s
             else (f"{np.percentile(values[b], 90) - np.percentile(values[b], 10):8.1f}"
                   if values.get(b) else "       -")
             for b in low)
-        out.append(f"  {era:<10s}{counts.get(era, 0):6d}{cells}")
+        out.append(f"  {era[-width:]:<{width}s}{counts.get(era, 0):6d}{cells}")
     out.append("  '.' = the band is more than 40 dB down; there is nothing to compare.")
 
-    _, modulation_hi = _band_matrix(conn, "p90_db")
-    _, modulation_lo = _band_matrix(conn, "p10_db")
+    _, modulation_hi = _band_matrix(conn, "p90_db", group_by)
+    _, modulation_lo = _band_matrix(conn, "p10_db", group_by)
     out += ["", "Does the low end modulate like music? (median p90 - p10, dB)", "-" * 78,
             "  A band carrying a bassline swings with the arrangement. A band holding",
             "  rumble, hiss or cutting noise sits still. CAVEAT: the narrow low bands",
             "  contain few FFT bins, so they show 8-9 dB of spread on noise alone --",
-            "  compare across eras, not against an absolute threshold.", "",
-            "  " + "era".ljust(10) + "n".rjust(6) + "".join(f"{b:>8.0f}" for b in low)]
+            f"  compare across {heading}s, not against an absolute threshold.", "",
+            "  " + heading.ljust(width) + "n".rjust(6)
+            + "".join(f"{b:>8.0f}" for b in low)]
     for era in eras:
         hi_curve = median_curve(era, modulation_hi)
         lo_curve = median_curve(era, modulation_lo)
@@ -328,24 +369,25 @@ def lowend_report(conn: sqlite3.Connection, reference: str = REFERENCE_ERA) -> s
             else (f"{hi_curve[b] - lo_curve[b]:8.1f}"
                   if b in hi_curve and b in lo_curve else "       -")
             for b in low)
-        out.append(f"  {era:<10s}{counts.get(era, 0):6d}{cells}")
+        out.append(f"  {era[-width:]:<{width}s}{counts.get(era, 0):6d}{cells}")
     out.append("  '.' = the band is more than 40 dB down, so there is nothing "
                "there to measure.")
 
-    _, side = _band_matrix(conn, "side_mid_db")
+    _, side = _band_matrix(conn, "side_mid_db", group_by)
     if side:
         out += ["", "Stereo width in the low end (median side/mid, dB)", "-" * 78,
                 "  Strongly negative values low down mean the bass is effectively mono:",
                 "  the signature of a record cut for vinyl. Those tracks have a hard",
                 "  floor on how much genuine sub can be recovered.", "",
-                "  " + "era".ljust(10) + "n".rjust(6) + "".join(f"{b:>8.0f}" for b in low)]
-        for era in sorted(side, key=_era_order):
+                "  " + heading.ljust(width) + "n".rjust(6)
+                + "".join(f"{b:>8.0f}" for b in low)]
+        for era in (sorted(side) if by_folder else sorted(side, key=_era_order)):
             curve = median_curve(era, side)
             cells = "".join(
                 "       ." if is_empty(era, b)
                 else (f"{curve[b]:8.1f}" if b in curve else "       -")
                 for b in low)
-            out.append(f"  {era:<10s}{counts.get(era, 0):6d}{cells}")
+            out.append(f"  {era[-width:]:<{width}s}{counts.get(era, 0):6d}{cells}")
         out.append("  '.' = the band is more than 40 dB down; width there is "
                    "filter residue, not music.")
     return "\n".join(out)

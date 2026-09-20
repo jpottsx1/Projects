@@ -229,7 +229,8 @@ def cmd_scan(args: argparse.Namespace) -> int:
             "",
             report.folders_report(conn),
             "",
-            report.lowend_report(conn, reference=args.reference),
+            report.lowend_report(conn, reference=args.reference,
+                                 group_by="folder"),
         ]
         if counts["errors"]:
             sections += ["", report.errors_report(conn)]
@@ -250,7 +251,8 @@ def cmd_report(args: argparse.Namespace) -> int:
         if args.kind == "loudness":
             print(report.loudness_report(conn))
         elif args.kind == "lowend":
-            print(report.lowend_report(conn, reference=args.reference))
+            print(report.lowend_report(conn, reference=args.reference,
+                                       group_by=args.by))
         elif args.kind == "folders":
             print(report.folders_report(conn))
         elif args.kind == "tracks":
@@ -451,8 +453,14 @@ def build_parser() -> argparse.ArgumentParser:
     show.add_argument("--target", type=float, default=-14.0,
                       help="tracks: target level in LUFS")
     show.add_argument("--limit", type=int, default=40, help="tracks: rows to print")
+    show.add_argument("--by", choices=("era", "folder"), default="era",
+                      help="lowend: group by year-derived era (default) or by "
+                           "the folder each track sits in. Use folder when the "
+                           "library is compilations, whose year tags are "
+                           "reissue dates")
     show.add_argument("--reference", default=report.REFERENCE_ERA,
-                      help="lowend: era to use as the reference curve")
+                      help="lowend: the era or folder the others are measured "
+                           "against; folders match on a unique substring")
     show.set_defaults(func=cmd_report)
 
     scan = subparsers.add_parser(

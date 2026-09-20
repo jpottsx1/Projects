@@ -63,6 +63,12 @@ individual commands, if you want them separately:
 ./loudness-lab report loudness --db library.db
 ./loudness-lab report lowend   --db library.db
 
+# Low end grouped by folder rather than by year-derived era. Use this when
+# the library is compilations, whose year tags are reissue dates, and name
+# the corpus the others should be measured against.
+./loudness-lab report lowend --db library.db --by folder \
+    --reference "New Music 2026-09-02"
+
 # Grouped by the folder each track sits in. If the folders are Camelot keys,
 # this is the test of whether low-end shape tracks the KEY rather than the
 # mastering -- which is what would make spectral matching dangerous.

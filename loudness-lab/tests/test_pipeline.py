@@ -64,6 +64,28 @@ class TestFolderLabels(unittest.TestCase):
         self.assertEqual(report._folder_labels([]), {})
 
 
+class TestReferenceResolution(unittest.TestCase):
+    def test_exact_name_wins(self):
+        groups = {"New Music 2026-09-02": {}, "NOW 100 Hits Party": {}}
+        self.assertEqual(
+            report.resolve_reference(groups, "NOW 100 Hits Party"),
+            "NOW 100 Hits Party")
+
+    def test_unique_substring_matches_case_insensitively(self):
+        groups = {"New Music 2026-09-02": {}, "NOW 100 Hits Party": {}}
+        self.assertEqual(report.resolve_reference(groups, "new music"),
+                         "New Music 2026-09-02")
+
+    def test_an_ambiguous_substring_matches_nothing(self):
+        """Silently picking one of two plausible references would produce a
+        correction curve measured against the wrong corpus."""
+        groups = {"NOW Party CD1": {}, "NOW Party CD2": {}}
+        self.assertIsNone(report.resolve_reference(groups, "NOW Party"))
+
+    def test_no_match(self):
+        self.assertIsNone(report.resolve_reference({"a": {}}, "zzz"))
+
+
 class TestNormalisationGuard(unittest.TestCase):
     """A library that has been through a loudness normaliser is fine to
     level but useless as a reference, because its crest, LRA and true peak
@@ -524,6 +546,28 @@ class TestPipeline(unittest.TestCase):
         finally:
             conn.close()
         self.assertIn("How consistent is the low end BETWEEN tracks?", text)
+
+    def test_lowend_can_group_by_folder(self):
+        """Compilations carry reissue dates, so the folder is the only honest
+        grouping; the year-provenance warning is then irrelevant."""
+        conn = db.connect(self.db)
+        try:
+            text = report.lowend_report(conn, group_by="folder")
+        finally:
+            conn.close()
+        self.assertIn("Median shape per folder", text)
+        self.assertNotIn("RELEASE", text)
+        self.assertIn("No reference chosen", text)
+
+    def test_lowend_by_folder_builds_a_curve_against_a_chosen_reference(self):
+        conn = db.connect(self.db)
+        try:
+            text = report.lowend_report(conn, group_by="folder",
+                                        reference="nested")
+        finally:
+            conn.close()
+        self.assertIn("Difference from the", text)
+        self.assertNotIn("No reference chosen", text)
 
     def test_reissue_dates_are_flagged_in_the_lowend_report(self):
         """The tagged fixture carries date=1978 and no original date."""

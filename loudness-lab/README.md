@@ -292,6 +292,29 @@ listened to, not to be run over a library.
 `--amount` adds sub under the kick; `--punch` emphasises its attack. Both use
 the same kick detection, so a track is decoded and analysed once.
 
+`--match TEXT` narrows to named tracks rather than the thinnest ten, which is
+how you iterate on a setting. `--dry-run` reports and writes nothing.
+
+### Letting each track set its own amount
+
+One figure suits one corpus at a time: the same +5 dB that closes half the
+gap on early-eighties material closes all of it on late-nineties material,
+and does nothing useful to a modern master. `--auto` takes the amount from
+each track's own measured shortfall against a reference folder instead:
+
+```sh
+./loudness-lab subbass "~/Music" --auto --reference "New Music 2026-09-02" \
+    --max-amount 6 --dry-run
+```
+
+Two things stop it from acting where it should not. A track already within
+half a dB of the reference is left alone. So is one whose low bands barely
+move over the track -- below about 12 dB of swing a band is holding rumble
+or hiss rather than a bassline, and lifting it lifts that. The narrow low
+bands show 8-9 dB of spread on noise alone, so the threshold sits clear of
+it; on real records it rarely fires, and it is there as a floor rather than
+as a routine filter.
+
 It analyses, picks the ten tracks whose 31.5-63 Hz octave measures thinnest,
 adds a kick-synchronised sub to each, and writes FLAC into
 `subbass-preview/`. Originals are never touched.

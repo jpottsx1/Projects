@@ -8,6 +8,8 @@ rising-edge detector mistook for a kick -- and a passage with no kick at all.
 
 from __future__ import annotations
 
+import contextlib
+import io
 import shutil
 import subprocess
 import sys
@@ -232,6 +234,69 @@ class TestAttackShaping(unittest.TestCase):
 class TestComparisonPairs(unittest.TestCase):
     """An unmatched A/B mostly measures which file is louder, and louder wins
     regardless of whether it is better. The pair must be loudness-matched."""
+
+    def test_auto_sets_the_amount_from_the_measured_shortfall(self):
+        """A single --amount suits one corpus at a time. Real material differs
+        track to track, so the amount has to come from each track's own gap
+        to the reference."""
+        from scipy.signal import butter, sosfiltfilt
+        from loudnesslab import cli
+        x, _ = programme(seconds=14.0)
+        thin = sosfiltfilt(butter(4, 70.0, btype="high", fs=RATE,
+                                  output="sos"), x, axis=0).astype(np.float32)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "src"
+            (root / "Modern").mkdir(parents=True)
+            (root / "Old").mkdir(parents=True)
+            subbass.write_flac(root / "Modern" / "full.flac", x, RATE)
+            subbass.write_flac(root / "Old" / "rolled off.flac", thin, RATE)
+            buffer = io.StringIO()
+            with contextlib.redirect_stdout(buffer):
+                code = cli.main(["subbass", str(root), "--db",
+                                 str(Path(tmp) / "a.db"), "--auto",
+                                 "--reference", "Modern", "--dry-run",
+                                 "--jobs", "1", "--quiet"])
+            output = buffer.getvalue()
+        self.assertEqual(code, 0)
+        self.assertIn("reference: Modern", output)
+        # The rolled-off copy must be told it needs something...
+        rolled = [ln for ln in output.splitlines() if "rolled off" in ln]
+        self.assertTrue(rolled)
+        self.assertNotIn("skipped", rolled[0])
+        # ...and the reference itself must be told it needs nothing.
+        full = [ln for ln in output.splitlines() if "full" in ln]
+        self.assertTrue(full)
+        self.assertIn("within", full[0])
+
+    def test_auto_without_a_resolvable_reference_stops(self):
+        from loudnesslab import cli
+        x, _ = programme(seconds=6.0)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "src"
+            root.mkdir()
+            subbass.write_flac(root / "a.flac", x, RATE)
+            buffer = io.StringIO()
+            with contextlib.redirect_stdout(buffer):
+                code = cli.main(["subbass", str(root), "--db",
+                                 str(Path(tmp) / "a.db"), "--auto",
+                                 "--reference", "nothing like this",
+                                 "--dry-run", "--jobs", "1", "--quiet"])
+        self.assertEqual(code, 2)
+
+    def test_dry_run_writes_nothing(self):
+        from loudnesslab import cli
+        x, _ = programme(seconds=6.0)
+        with tempfile.TemporaryDirectory() as tmp:
+            root, out = Path(tmp) / "src", Path(tmp) / "out"
+            root.mkdir()
+            subbass.write_flac(root / "a.flac", x, RATE)
+            with contextlib.redirect_stdout(io.StringIO()):
+                code = cli.main(["subbass", str(root), "--db",
+                                 str(Path(tmp) / "d.db"), "--out", str(out),
+                                 "--amount", "4", "--dry-run", "--jobs", "1",
+                                 "--quiet"])
+            self.assertEqual(code, 0)
+            self.assertFalse(out.exists() and any(out.iterdir()))
 
     def test_match_selects_only_the_named_tracks(self):
         """Iterating on a setting means running the same tracks again at a

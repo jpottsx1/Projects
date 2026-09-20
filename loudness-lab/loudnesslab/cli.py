@@ -5,6 +5,8 @@ from __future__ import annotations
 import argparse
 import csv
 import os
+
+import numpy as np
 import re
 import shutil
 import subprocess
@@ -52,10 +54,55 @@ def cmd_analyze(args: argparse.Namespace) -> int:
     return 0
 
 
-def _label(args: argparse.Namespace) -> str:
+# Below this, a low band is not swinging with the music -- it is holding
+# rumble or hiss, and lifting it lifts that. The narrow low bands show 8-9 dB
+# of spread on noise alone, so this sits clear of that.
+MIN_LOW_MODULATION_DB = 12.0
+
+
+def _reference_curve(conn, wanted: str) -> tuple[str | None, dict]:
+    """Median low-band shape of the folder named by `wanted`."""
+    bands, shape = report._band_matrix(conn, "shape_db", group_by="folder")
+    name = report.resolve_reference(shape, wanted)
+    if name is None:
+        return None, {}
+    curve = {b: float(np.median(shape[name][b]))
+             for b in report.LOW_SHAPE_BANDS if shape[name].get(b)}
+    return name, curve
+
+
+def _auto_amount(conn, path: str, curve: dict, cap: float) -> tuple[float, str | None]:
+    """How much this track is short of the reference, and whether it can take it."""
+    rows = conn.execute(
+        "SELECT b.band_hz, b.shape_db, b.p90_db, b.p10_db FROM bands b "
+        "JOIN tracks t ON t.id = b.track_id WHERE t.path = ? "
+        f"AND b.band_hz IN ({', '.join(str(b) for b in report.LOW_SHAPE_BANDS)})",
+        (path,)).fetchall()
+    deficits, modulations = [], []
+    for row in rows:
+        target = curve.get(row["band_hz"])
+        if target is None or row["shape_db"] is None:
+            continue
+        deficits.append(target - row["shape_db"])
+        if row["p90_db"] is not None and row["p10_db"] is not None:
+            modulations.append(row["p90_db"] - row["p10_db"])
+    if not deficits:
+        return 0.0, "no band data"
+    shortfall = float(np.mean(deficits))
+    if modulations and float(np.median(modulations)) < MIN_LOW_MODULATION_DB:
+        return 0.0, (f"low end barely modulates "
+                     f"({float(np.median(modulations)):.0f} dB) -- nothing "
+                     f"musical there to lift")
+    if shortfall <= 0.5:
+        return 0.0, f"already within {shortfall:.1f} dB of the reference"
+    return min(shortfall, cap), None
+
+
+def _label(args: argparse.Namespace, amount: float | None = None) -> str:
     parts = []
-    if args.amount > 0:
-        parts.append(f"sub{args.amount:+.0f}dB")
+    amount = args.amount if amount is None else amount
+    if amount > 0:
+        parts.append(f"sub{amount:+.1f}dB")
     if args.punch > 0:
         parts.append(f"punch{args.punch:+.0f}dB")
     return " ".join(parts) or "unchanged"
@@ -102,6 +149,20 @@ def cmd_subbass(args: argparse.Namespace) -> int:
         ).fetchall()
         analysed = conn.execute(
             "SELECT COUNT(*) FROM tracks WHERE status = 'ok'").fetchone()[0]
+        reference_name, curve = (None, {})
+        if args.auto:
+            reference_name, curve = _reference_curve(conn, args.reference or "")
+            if reference_name is None:
+                print(f"--auto needs a reference folder; {args.reference!r} "
+                      f"matched none (or matched several).")
+                print("Name one of the folders that report lowend --by folder "
+                      "lists.")
+                return 2
+        amounts = {}
+        if args.auto:
+            for row in rows:
+                amounts[row["path"]] = _auto_amount(conn, row["path"], curve,
+                                                    args.max_amount)
     finally:
         conn.close()
     if not rows:
@@ -115,9 +176,14 @@ def cmd_subbass(args: argparse.Namespace) -> int:
         return 1
     if args.match:
         print(f"matched {len(rows)} of {analysed} analysed track(s)")
+    if args.auto:
+        print(f"reference: {reference_name}")
 
-    out_dir.mkdir(parents=True, exist_ok=True)
-    print(f"KICK PROTOTYPE  sub={args.amount:+.1f} dB in "
+    if not args.dry_run:
+        out_dir.mkdir(parents=True, exist_ok=True)
+    heading = ("sub=auto (per track)" if args.auto
+               else f"sub={args.amount:+.1f} dB")
+    print(f"KICK PROTOTYPE  {heading} in "
           f"{subbass.SUB_LOW_HZ:.0f}-{subbass.SUB_HIGH_HZ:.0f} Hz  "
           f"punch={args.punch:+.1f} dB in "
           f"{subbass.PUNCH_LOW_HZ / 1000:.0f}-{subbass.PUNCH_HIGH_HZ / 1000:.0f} kHz")
@@ -139,8 +205,15 @@ def cmd_subbass(args: argparse.Namespace) -> int:
         source = Path(row["path"])
         try:
             audio = decode.decode(source)
+            amount, skip = amounts.get(str(source), (args.amount, None))
+            if skip is not None:
+                name = " - ".join(p for p in (row["artist"], row["title"]) if p) \
+                    or source.stem
+                print(f"  {name[:39]:<40s}{'':>10}{'':>11}{'':>8}{'':>8}"
+                      f"{'':>7}{'':>7}{'':>8}{'':>7}  skipped: {skip}")
+                continue
             after, info = subbass.enhance(audio, decode.TARGET_RATE,
-                                          amount_db=args.amount,
+                                          amount_db=amount,
                                           freq=args.freq, decay_s=args.decay,
                                           punch_db=args.punch,
                                           punch_decay_ms=args.punch_decay)
@@ -154,9 +227,11 @@ def cmd_subbass(args: argparse.Namespace) -> int:
             processed = bs1770.measure(after)
             peak = processed["true_peak_dbtp"]
 
-            if args.no_compare:
+            if args.dry_run:
+                match_db = 0.0
+            elif args.no_compare:
                 subbass.write_flac(out_dir / (source.stem + ".flac"), after,
-                                   decode.TARGET_RATE, source)
+                                   decode.TARGET_RATE, source)  # noqa: E501
                 match_db = 0.0
             else:
                 # Level-match the pair, or the comparison just measures which
@@ -173,7 +248,7 @@ def cmd_subbass(args: argparse.Namespace) -> int:
                 subbass.write_flac(out_dir / f"{source.stem} -- A original.flac",
                                    a, decode.TARGET_RATE, source)
                 subbass.write_flac(
-                    out_dir / f"{source.stem} -- B {_label(args)}.flac",
+                    out_dir / f"{source.stem} -- B {_label(args, amount)}.flac",
                     b, decode.TARGET_RATE, source)
                 peak = bs1770.measure(b)["true_peak_dbtp"]
         except Exception as exc:
@@ -195,6 +270,10 @@ def cmd_subbass(args: argparse.Namespace) -> int:
         written += 1
 
     print()
+    if args.dry_run:
+        print(f"  DRY RUN -- nothing written. {written} track(s) would be "
+              f"processed.")
+        return 0
     if args.no_compare:
         print(f"  {written} file(s) written to {out_dir}/ as FLAC.")
     else:
@@ -671,6 +750,16 @@ def build_parser() -> argparse.ArgumentParser:
                      help="ms the attack emphasis decays over (default: 8)")
     sub.add_argument("--freq", type=float, default=subbass.DEFAULT_FREQ_HZ)
     sub.add_argument("--decay", type=float, default=subbass.DEFAULT_DECAY_S)
+    sub.add_argument("--auto", action="store_true",
+                     help="set the sub amount per track from its own measured "
+                          "shortfall against --reference, rather than using "
+                          "one figure for everything")
+    sub.add_argument("--reference", default=None, metavar="TEXT",
+                     help="--auto: the folder whose low end is the target")
+    sub.add_argument("--max-amount", type=float, default=6.0,
+                     help="--auto: cap on the per-track amount (default: 6)")
+    sub.add_argument("--dry-run", action="store_true",
+                     help="report what would be done and write nothing")
     sub.add_argument("--match", action="append", default=None, metavar="TEXT",
                      help="only tracks whose artist, title or path contains "
                           "TEXT (case-insensitive). Repeatable; any match "

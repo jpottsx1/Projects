@@ -52,13 +52,35 @@ def cmd_analyze(args: argparse.Namespace) -> int:
 
 
 def cmd_gain(args: argparse.Namespace) -> int:
-    """Lossless gain. Dry run unless --apply is given."""
+    """Lossless gain. Dry run unless --apply is given.
+
+    Analyses anything not already measured, so pointing this at a folder is
+    enough -- no separate scan step, and no database path to keep in step
+    with it.
+    """
     if args.in_place and args.out:
         sys.stderr.write("error: choose --out or --in-place, not both\n")
         return 2
     out_dir = None if args.in_place else (args.out or Path("gained"))
+    database = args.db or (
+        Path("scans") / f"{_slug(args.path[0])}.db" if args.path
+        else Path("library.db"))
+    database.parent.mkdir(parents=True, exist_ok=True)
 
-    conn = db.connect(args.db)
+    if args.path and not args.undo and not args.no_analyze:
+        start = time.monotonic()
+        counts = analyze.run(
+            roots=args.path, db_path=database, jobs=args.jobs,
+            progress=None if args.quiet else _progress_printer(start))
+        if not args.quiet:
+            sys.stderr.write("\n")
+        if counts["analysed"] or counts["errors"]:
+            print(f"measured {counts['analysed']} new file(s), "
+                  f"{counts['skipped']} already current, "
+                  f"{counts['errors']} error(s)")
+            print()
+
+    conn = db.connect(database)
     try:
         if args.undo:
             counts = apply_gain.undo(conn, args.path or None)
@@ -430,7 +452,12 @@ def build_parser() -> argparse.ArgumentParser:
         "gain", help="apply lossless gain by rewriting global_gain (mp3 only)")
     gain.add_argument("path", type=Path, nargs="*",
                       help="files or folders that have already been analysed")
-    gain.add_argument("--db", type=Path, default=Path("library.db"))
+    gain.add_argument("--db", type=Path, default=None,
+                      help="default: scans/<folder-name>.db")
+    gain.add_argument("--no-analyze", action="store_true",
+                      help="fail on unmeasured files instead of measuring them")
+    gain.add_argument("--jobs", type=int, default=None)
+    gain.add_argument("--quiet", action="store_true")
     gain.add_argument("--estimator", default="s_p95", choices=report.ESTIMATORS)
     gain.add_argument("--target", type=float, default=-12.0)
     gain.add_argument("--out", type=Path, default=None,

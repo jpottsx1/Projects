@@ -196,12 +196,22 @@ couple of dB of attenuation that is a much better trade than a second lossy
 generation; the dry run prints the quantisation error per track so you can
 judge it.
 
+`gain` measures anything it has not already measured, so pointing it at a
+folder is the whole workflow -- no separate scan step, and no database path
+to keep in step with it.
+
 ```sh
-./loudness-lab gain "~/Music/Album" --db library.db --target -12          # dry run
-./loudness-lab gain "~/Music/Album" --db library.db --target -12 --apply  # writes copies
-./loudness-lab gain "~/Music/Album" --db library.db --in-place --apply --yes
-./loudness-lab gain --db library.db --undo                                # reverse in-place
+./loudness-lab gain "~/Music/Album" --target -12            # dry run, writes nothing
+./loudness-lab gain "~/Music/Album" --target -12 --apply    # writes copies to gained/
+./loudness-lab gain "~/Music/Album" --in-place --apply --yes
+./loudness-lab gain --db scans/album.db --undo              # reverse in-place
 ```
+
+It cannot touch the bottom end. `global_gain` is one broadband scalar per
+granule, so this command moves level and nothing else. Spectral work means
+decoding, filtering and re-encoding, which forfeits every guarantee above;
+that is a separate stage with a separate risk profile, and it should write
+FLAC or AIFF rather than a second lossy generation.
 
 Guarantees, because the alternative is quietly damaging someone's records:
 

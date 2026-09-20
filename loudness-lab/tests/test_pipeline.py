@@ -324,6 +324,37 @@ class TestPipeline(unittest.TestCase):
         self.assertIn("analysed 3", result.stdout)
         self.assertIn("errors 0", result.stdout)
 
+    def test_gain_measures_what_it_needs_and_writes_nothing_by_default(self):
+        """Pointing gain at a folder should be enough: no separate scan step,
+        and a dry run must leave every file untouched."""
+        originals = {p: p.read_bytes() for p in self.root.rglob("*.mp3")}
+        self.assertTrue(originals)
+        with tempfile.TemporaryDirectory() as tmp:
+            code = cli.main(["gain", str(self.root), "--db",
+                             str(Path(tmp) / "auto.db"), "--out",
+                             str(Path(tmp) / "out"), "--target", "-12",
+                             "--jobs", "1", "--quiet"])
+            self.assertEqual(code, 0)
+            self.assertFalse(list(Path(tmp).glob("out/**/*.mp3")))
+        for path, before in originals.items():
+            self.assertEqual(path.read_bytes(), before, f"{path.name} was modified")
+
+    def test_gain_apply_writes_copies_and_leaves_originals_alone(self):
+        originals = {p: p.read_bytes() for p in self.root.rglob("*.mp3")}
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "out"
+            code = cli.main(["gain", str(self.root), "--db",
+                             str(Path(tmp) / "auto.db"), "--out", str(out),
+                             "--target", "-20", "--apply", "--jobs", "1",
+                             "--quiet"])
+            self.assertEqual(code, 0)
+            written = list(out.rglob("*.mp3"))
+            self.assertTrue(written)
+            self.assertFalse(any(p.name.endswith(".partial")
+                                 for p in out.rglob("*")))
+        for path, before in originals.items():
+            self.assertEqual(path.read_bytes(), before, f"{path.name} was modified")
+
     def test_piping_into_head_is_not_an_error(self):
         """A closed pipe is how `| head` works; it must not print an error."""
         launcher = Path(__file__).resolve().parents[1] / "loudness-lab"

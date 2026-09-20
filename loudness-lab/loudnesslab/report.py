@@ -162,6 +162,37 @@ def _era_counts(conn: sqlite3.Connection) -> dict:
     return counts
 
 
+def _year_provenance(conn: sqlite3.Connection) -> str | None:
+    """Warn when the era grouping is built on release rather than recording dates.
+
+    A compilation tags every track with the reissue year, so early-eighties
+    records land in the 2010s and the era curves become meaningless. NULL
+    means the database predates this check, not that the year is original.
+    """
+    row = conn.execute(
+        "SELECT COUNT(*) AS total, "
+        "  SUM(CASE WHEN year_is_original = 0 THEN 1 ELSE 0 END) AS release_dated, "
+        "  SUM(CASE WHEN year_is_original IS NULL THEN 1 ELSE 0 END) AS unknown "
+        "FROM tracks WHERE status = 'ok' AND year IS NOT NULL"
+    ).fetchone()
+    if not row or not row["total"]:
+        return None
+    total = row["total"]
+    release_dated = row["release_dated"] or 0
+    unknown = row["unknown"] or 0
+    if unknown == total:
+        return ("  NOTE: this database predates the original-year check, so the "
+                "years below\n  may be reissue dates. Re-run analyze --force to "
+                "resolve them.")
+    if release_dated / total > 0.2:
+        return (f"  WARNING: {release_dated} of {total} tracks ({release_dated / total:.0%}) "
+                f"have no original-recording\n  date, so their year is the RELEASE "
+                f"date. On a compilation or remaster that is\n  the reissue year, and "
+                f"these era rows describe when the disc was sold, not\n  when the music "
+                f"was mastered. Group by folder instead: report folders.")
+    return None
+
+
 def lowend_report(conn: sqlite3.Connection, reference: str = REFERENCE_ERA) -> str:
     bands, shape = _band_matrix(conn, "shape_db")
     if not bands:
@@ -173,8 +204,12 @@ def lowend_report(conn: sqlite3.Connection, reference: str = REFERENCE_ERA) -> s
     def median_curve(era: str, table: dict) -> dict:
         return {b: float(np.median(table[era][b])) for b in table.get(era, {})}
 
+    provenance = _year_provenance(conn)
     out = ["LOW END  (1/3-octave, relative to each track's own broadband level)",
-           "=" * 78, "",
+           "=" * 78, ""]
+    if provenance:
+        out += [provenance, ""]
+    out += [
            "Median shape per era, in dB relative to broadband", "-" * 78,
            "  A number here is level-independent: it says what fraction of the",
            "  track's energy sits in that band, not how loud the track is.", "",

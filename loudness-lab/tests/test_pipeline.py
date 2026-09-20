@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -14,7 +15,7 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from loudnesslab import analyze, db, decode, report  # noqa: E402
+from loudnesslab import analyze, cli, db, decode, report  # noqa: E402
 
 RATE = 48000
 HAVE_FFMPEG = shutil.which("ffmpeg") is not None and shutil.which("ffprobe") is not None
@@ -36,6 +37,88 @@ def write_wav(path: Path, x: np.ndarray) -> None:
         handle.setsampwidth(2)
         handle.setframerate(RATE)
         handle.writeframes((np.clip(x, -1, 1) * 32767).astype("<i2").tobytes())
+
+
+class TestYearTags(unittest.TestCase):
+    """Era grouping is only meaningful when the year says when the record was
+    MADE. A compilation tags every track with the reissue year."""
+
+    def test_original_date_beats_release_date(self):
+        year, is_original = decode._year(
+            {"date": "2011", "originaldate": "1982-04-01"})
+        self.assertEqual((year, is_original), (1982, 1))
+
+    def test_release_date_is_used_but_flagged(self):
+        year, is_original = decode._year({"date": "2011"})
+        self.assertEqual((year, is_original), (2011, 0))
+
+    def test_id3_original_frames_are_recognised(self):
+        self.assertEqual(decode._year({"tyer": "2004", "tory": "1981"}),
+                         (1981, 1))
+
+    def test_no_date_at_all(self):
+        self.assertEqual(decode._year({"artist": "Duran Duran"}), (None, None))
+
+    def test_a_year_embedded_in_a_longer_string(self):
+        self.assertEqual(decode._year({"date": "1984-11-05T00:00:00"}),
+                         (1984, 0))
+
+
+class TestSchemaMigration(unittest.TestCase):
+    """Re-analysing a large library costs hours, so a schema bump migrates an
+    existing database in place rather than refusing to open it."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.path = Path(self.tmp.name) / "old.db"
+        self.addCleanup(self.tmp.cleanup)
+
+    def _make_v1(self) -> None:
+        conn = sqlite3.connect(self.path)
+        conn.executescript(
+            "CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);"
+            "CREATE TABLE tracks (id INTEGER PRIMARY KEY, path TEXT UNIQUE "
+            "  NOT NULL, status TEXT NOT NULL, year INTEGER);"
+            "INSERT INTO meta VALUES ('schema_version', '1');"
+            "INSERT INTO tracks (path, status, year) "
+            "  VALUES ('/a.mp3', 'ok', 1981);")
+        conn.commit()
+        conn.close()
+
+    def test_v1_is_migrated_not_rejected(self):
+        self._make_v1()
+        conn = db.connect(self.path)
+        try:
+            columns = {row["name"] for row in conn.execute("PRAGMA table_info(tracks)")}
+            self.assertIn("year_is_original", columns)
+            version = conn.execute(
+                "SELECT value FROM meta WHERE key = 'schema_version'").fetchone()
+            self.assertEqual(int(version["value"]), 2)
+        finally:
+            conn.close()
+
+    def test_migration_preserves_existing_rows(self):
+        self._make_v1()
+        conn = db.connect(self.path)
+        try:
+            row = conn.execute("SELECT path, year, year_is_original "
+                               "FROM tracks").fetchone()
+        finally:
+            conn.close()
+        self.assertEqual(row["path"], "/a.mp3")
+        self.assertEqual(row["year"], 1981)
+        # Unknown, not "not original" -- the old database never recorded it.
+        self.assertIsNone(row["year_is_original"])
+
+    def test_a_newer_database_is_refused(self):
+        conn = sqlite3.connect(self.path)
+        conn.executescript(
+            "CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);"
+            "INSERT INTO meta VALUES ('schema_version', '99');")
+        conn.commit()
+        conn.close()
+        with self.assertRaises(RuntimeError):
+            db.connect(self.path)
 
 
 class TestSurvey(unittest.TestCase):
@@ -249,6 +332,27 @@ class TestPipeline(unittest.TestCase):
         head.wait()
         stderr = report_cmd.communicate()[1].decode()
         self.assertNotIn("error:", stderr, stderr)
+
+    def test_scan_writes_a_database_and_a_transcript(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out_db = Path(tmp) / "scan.db"
+            out_txt = Path(tmp) / "scan.txt"
+            code = cli.main(["scan", str(self.root), "--db", str(out_db),
+                             "--out", str(out_txt), "--jobs", "1", "--quiet"])
+            self.assertEqual(code, 0)
+            self.assertTrue(out_db.exists())
+            text = out_txt.read_text()
+            for heading in ("SCAN", "LOUDNESS", "FOLDERS", "LOW END"):
+                self.assertIn(heading, text)
+
+    def test_reissue_dates_are_flagged_in_the_lowend_report(self):
+        """The tagged fixture carries date=1978 and no original date."""
+        conn = db.connect(self.db)
+        try:
+            text = report.lowend_report(conn)
+        finally:
+            conn.close()
+        self.assertIn("RELEASE", text)
 
     def test_unknown_estimator_is_rejected(self):
         conn = db.connect(self.db)

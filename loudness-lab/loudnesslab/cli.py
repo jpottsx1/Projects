@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import csv
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -47,6 +48,60 @@ def cmd_analyze(args: argparse.Namespace) -> int:
           f"in {elapsed / 60:.1f} min")
     if counts["errors"]:
         print(f"run `loudness-lab report errors --db {args.db}` for details")
+    return 0
+
+
+def _slug(path: Path) -> str:
+    """A filesystem-safe name derived from a folder, for default outputs."""
+    name = path.name or path.parent.name or "library"
+    slug = re.sub(r"[^A-Za-z0-9]+", "-", name).strip("-").lower()
+    return (slug or "library")[:60]
+
+
+def cmd_scan(args: argparse.Namespace) -> int:
+    """Analyse a folder and print every report, in one command.
+
+    Saves the same text to a file, because the reports are long and the whole
+    point of them is to be read side by side and shared.
+    """
+    destination = args.db or Path("scans") / f"{_slug(args.path[0])}.db"
+    transcript = args.out or destination.with_suffix(".txt")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    transcript.parent.mkdir(parents=True, exist_ok=True)
+
+    start = time.monotonic()
+    counts = analyze.run(
+        roots=args.path, db_path=destination, jobs=args.jobs,
+        force=args.force, limit=args.limit,
+        progress=None if args.quiet else _progress_printer(start),
+    )
+    if not args.quiet:
+        sys.stderr.write("\n")
+
+    conn = db.connect(destination)
+    try:
+        sections = [
+            f"SCAN  {', '.join(str(p) for p in args.path)}",
+            f"      {counts['analysed']} analysed, {counts['skipped']} already "
+            f"current, {counts['errors']} errors, in "
+            f"{(time.monotonic() - start) / 60:.1f} min",
+            "",
+            report.loudness_report(conn),
+            "",
+            report.folders_report(conn),
+            "",
+            report.lowend_report(conn, reference=args.reference),
+        ]
+        if counts["errors"]:
+            sections += ["", report.errors_report(conn)]
+    finally:
+        conn.close()
+
+    text = "\n".join(sections)
+    print(text)
+    transcript.write_text(text + "\n")
+    print(f"\nDatabase: {destination}")
+    print(f"Reports:  {transcript}")
     return 0
 
 
@@ -260,6 +315,21 @@ def build_parser() -> argparse.ArgumentParser:
     show.add_argument("--reference", default=report.REFERENCE_ERA,
                       help="lowend: era to use as the reference curve")
     show.set_defaults(func=cmd_report)
+
+    scan = subparsers.add_parser(
+        "scan", help="analyse a folder and print every report in one command")
+    scan.add_argument("path", type=Path, nargs="+",
+                      help="one or more files or folders to walk")
+    scan.add_argument("--db", type=Path, default=None,
+                      help="default: scans/<folder-name>.db")
+    scan.add_argument("--out", type=Path, default=None,
+                      help="where to save the reports (default: alongside the db)")
+    scan.add_argument("--jobs", type=int, default=None)
+    scan.add_argument("--force", action="store_true")
+    scan.add_argument("--limit", type=int, default=None)
+    scan.add_argument("--reference", default=report.REFERENCE_ERA)
+    scan.add_argument("--quiet", action="store_true")
+    scan.set_defaults(func=cmd_scan)
 
     check = subparsers.add_parser(
         "doctor", help="check the environment and a library path")

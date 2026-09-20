@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS tracks (
     album           TEXT,
     genre           TEXT,
     year            INTEGER,
+    year_is_original INTEGER,
     bpm             REAL,
     musical_key     TEXT
 );
@@ -70,7 +71,8 @@ CREATE INDEX IF NOT EXISTS idx_bands_hz ON bands(band_hz);
 
 TRACK_FIELDS = (
     "codec", "source_rate", "source_channels", "bitrate_kbps", "duration_s",
-    "artist", "title", "album", "genre", "year", "bpm", "musical_key",
+    "artist", "title", "album", "genre", "year", "year_is_original", "bpm",
+    "musical_key",
 )
 LOUDNESS_FIELDS = (
     "lufs_i", "lra", "s_max", "s_p95", "s_p90", "s_p50", "s_p10",
@@ -92,13 +94,30 @@ def connect(path: Path) -> sqlite3.Connection:
     if stored is None:
         conn.execute("INSERT INTO meta (key, value) VALUES ('schema_version', ?)",
                      (str(SCHEMA_VERSION),))
-    elif int(stored["value"]) != SCHEMA_VERSION:
-        raise RuntimeError(
-            f"database is schema v{stored['value']}, this build writes "
-            f"v{SCHEMA_VERSION}. Analyse into a new file."
-        )
+    else:
+        _migrate(conn, int(stored["value"]))
     conn.commit()
     return conn
+
+
+def _migrate(conn: sqlite3.Connection, version: int) -> None:
+    """Bring an older database forward rather than making the user re-run it.
+
+    Re-analysing a large library costs hours, so a schema bump migrates in
+    place. Columns added this way stay NULL for existing rows, which reports
+    must read as "unknown" rather than as a value.
+    """
+    if version > SCHEMA_VERSION:
+        raise RuntimeError(
+            f"database is schema v{version}, newer than this build's "
+            f"v{SCHEMA_VERSION}. Update loudness-lab, or analyse into a new file."
+        )
+    if version < 2:
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(tracks)")}
+        if "year_is_original" not in columns:
+            conn.execute("ALTER TABLE tracks ADD COLUMN year_is_original INTEGER")
+    conn.execute("UPDATE meta SET value = ? WHERE key = 'schema_version'",
+                 (str(SCHEMA_VERSION),))
 
 
 def needs_analysis(conn: sqlite3.Connection, path: Path, stat) -> bool:

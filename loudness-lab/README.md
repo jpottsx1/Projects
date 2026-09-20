@@ -38,6 +38,14 @@ the virtual environment by itself, so there is nothing to activate. Re-running
 ## Use
 
 ```sh
+# Everything in one command: analyse, then print and save every report.
+./loudness-lab scan "~/Downloads/100 Hits - The New Romantics (2011)"
+```
+
+That writes `scans/<folder-name>.db` and `scans/<folder-name>.txt`. The
+individual commands, if you want them separately:
+
+```sh
 # Check the environment and the library before committing to a long run.
 ./loudness-lab doctor "/Volumes/Card/DJ Music/Converted Wedding"
 
@@ -115,6 +123,14 @@ Per track per 1/3-octave band (31 bands, 20 Hz to 20 kHz), in `bands`:
 **Everything is measured at 48 kHz.** The K-weighting coefficients in
 BS.1770-4 are published at that rate; deriving them for other rates is an
 error source the project does not need. `decode.py` resamples on the way in.
+
+**The year is the original recording date where a tag provides one.**
+`originaldate`, `originalyear`, TDOR and TORY are checked before `date`, TDRC
+and TYER, because on a compilation or remaster the plain date tag is the
+reissue year -- a 2011 compilation of 1982 records would otherwise land in the
+modern reference curve. Where only a release date exists the track is still
+dated, but flagged, and the low-end report warns when enough of the library is
+flagged that the era rows stop meaning anything. Group by folder in that case.
 
 **Mono sources are upmixed to dual mono.** A mono record played in a club
 comes out of both stacks, so that is the signal worth measuring. The original

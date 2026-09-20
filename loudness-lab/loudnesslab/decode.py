@@ -19,6 +19,15 @@ AUDIO_SUFFIXES = {
 
 _YEAR = re.compile(r"(19|20)\d{2}")
 
+# Original-recording tags are checked first and release tags second. On a
+# compilation or remaster the plain `date` tag is the reissue year: "100 Hits
+# - The New Romantics (2011)" is a 2011 release of 1980-84 recordings, and
+# filing it under the 2010s would put early-eighties mastering into the
+# modern reference curve.
+ORIGINAL_YEAR_TAGS = ("originaldate", "originalyear", "original_year",
+                      "original date", "tdor", "tory")
+RELEASE_YEAR_TAGS = ("date", "year", "tdrc", "tyer", "tdrl", "release_date")
+
 
 class DecodeError(RuntimeError):
     pass
@@ -57,6 +66,8 @@ def probe(path: Path) -> dict:
         for key, value in source.items():
             tags.setdefault(key.lower(), value)
 
+    year, year_is_original = _year(tags)
+
     return {
         "codec": stream.get("codec_name"),
         "source_rate": _int(stream.get("sample_rate")),
@@ -67,7 +78,8 @@ def probe(path: Path) -> dict:
         "title": tags.get("title"),
         "album": tags.get("album"),
         "genre": tags.get("genre"),
-        "year": _year(tags),
+        "year": year,
+        "year_is_original": year_is_original,
         "bpm": _float(tags.get("tbpm") or tags.get("bpm")),
         "musical_key": tags.get("initialkey") or tags.get("tkey") or tags.get("key"),
     }
@@ -170,9 +182,19 @@ def _round(value: float | None, divisor: float) -> float | None:
     return None if value is None else round(value / divisor, 1)
 
 
-def _year(tags: dict) -> int | None:
-    for key in ("date", "year", "originalyear", "tdrc", "tyer", "originaldate"):
+def _year(tags: dict) -> tuple[int | None, int | None]:
+    """(year, 1 if it came from an original-recording tag else 0).
+
+    The flag matters because era grouping is only meaningful when the year
+    describes when the record was MADE. A library of compilations whose years
+    are all reissue dates will produce an era table that says nothing.
+    """
+    for key in ORIGINAL_YEAR_TAGS:
         match = _YEAR.search(str(tags.get(key, "")))
         if match:
-            return int(match.group(0))
-    return None
+            return int(match.group(0)), 1
+    for key in RELEASE_YEAR_TAGS:
+        match = _YEAR.search(str(tags.get(key, "")))
+        if match:
+            return int(match.group(0)), 0
+    return None, None

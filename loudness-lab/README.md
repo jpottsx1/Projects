@@ -149,6 +149,25 @@ signals in `tests/test_bs1770.py`, agreeing within 0.05 LU (ffmpeg only prints
 to 0.1 dB, so that is the floor of the comparison). A Swift port should be
 validated against this module in turn.
 
+## A library that has already been normalised
+
+Both reports check whether integrated loudness is implausibly uniform across
+the library, and say so:
+
+```
+  ALREADY NORMALISED: 150 tracks sit within 0.02 dB of -11.51 LUFS-I.
+```
+
+Real music spans several dB. Anything tighter than 0.3 dB has been through a
+loudness normaliser. Such a library is still fine to level -- you level what
+you have -- but it must not be used as a *reference* for how an era sounds:
+its crest, loudness range and true peak describe the normaliser's limiter
+rather than the records, and any spectral shaping the tool applied is baked
+into the band figures too.
+
+This matters because reference curves are the one thing in this project that
+depends on measuring the music rather than the file in front of you.
+
 ## Reading the low-end report
 
 Two halves, different meanings:

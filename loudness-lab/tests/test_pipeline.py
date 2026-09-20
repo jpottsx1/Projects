@@ -42,6 +42,50 @@ def write_wav(path: Path, x: np.ndarray) -> None:
         handle.writeframes((np.clip(x, -1, 1) * 32767).astype("<i2").tobytes())
 
 
+class TestNormalisationGuard(unittest.TestCase):
+    """A library that has been through a loudness normaliser is fine to
+    level but useless as a reference, because its crest, LRA and true peak
+    are the normaliser's limiter rather than the records."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.conn = db.connect(Path(self.tmp.name) / "guard.db")
+        self.addCleanup(self.conn.close)
+
+    def _populate(self, values) -> None:
+        for index, value in enumerate(values):
+            path = f"/library/{index}.mp3"
+            self.conn.execute(
+                "INSERT INTO tracks (path, status) VALUES (?, 'ok')", (path,))
+            track_id = self.conn.execute(
+                "SELECT id FROM tracks WHERE path = ?", (path,)).fetchone()["id"]
+            self.conn.execute(
+                "INSERT INTO loudness (track_id, lufs_i) VALUES (?, ?)",
+                (track_id, value))
+        self.conn.commit()
+
+    def test_a_normalised_library_is_flagged(self):
+        self._populate([-11.51 + (i % 3) * 0.01 for i in range(40)])
+        warning = report.normalisation_warning(self.conn)
+        self.assertIsNotNone(warning)
+        self.assertIn("ALREADY NORMALISED", warning)
+
+    def test_a_real_library_is_not_flagged(self):
+        self._populate([-16.0 + (i % 11) * 0.9 for i in range(40)])
+        self.assertIsNone(report.normalisation_warning(self.conn))
+
+    def test_too_few_tracks_to_judge(self):
+        """Five tracks can be similar by chance; do not cry wolf."""
+        self._populate([-11.5] * 5)
+        self.assertIsNone(report.normalisation_warning(self.conn))
+
+    def test_the_warning_reaches_both_reports(self):
+        self._populate([-11.51 + (i % 3) * 0.01 for i in range(40)])
+        self.assertIn("ALREADY NORMALISED",
+                      report.loudness_report(self.conn))
+
+
 class TestYearTags(unittest.TestCase):
     """Era grouping is only meaningful when the year says when the record was
     MADE. A compilation tags every track with the reissue year."""

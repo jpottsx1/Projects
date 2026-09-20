@@ -53,6 +53,41 @@ def _era_order(name: str) -> int:
     return names.index(name) if name in names else len(names)
 
 
+# Real music spans several dB of integrated loudness. Anything under this is
+# not a library, it is the output of a loudness normaliser.
+NORMALISED_SD_DB = 0.30
+NORMALISED_MIN_TRACKS = 20
+
+
+def normalisation_warning(conn: sqlite3.Connection) -> str | None:
+    """Flag a library that has already been loudness-normalised.
+
+    Such a library is fine to level -- you level what you have -- but it is
+    useless as a reference for what records of an era actually sound like,
+    because a limiter has been through it. Getting that backwards produces
+    measurements of the processing tool rather than of the music.
+    """
+    values = [row[0] for row in conn.execute(
+        "SELECT l.lufs_i FROM loudness l JOIN tracks t ON t.id = l.track_id "
+        "WHERE t.status = 'ok' AND l.lufs_i IS NOT NULL")]
+    if len(values) < NORMALISED_MIN_TRACKS:
+        return None
+    spread = float(np.std(values))
+    if spread >= NORMALISED_SD_DB:
+        return None
+    return (f"  ALREADY NORMALISED: {len(values)} tracks sit within "
+            f"{spread:.2f} dB of {np.median(values):.2f} LUFS-I.\n"
+            f"  Real music does not do that, so these files have been through "
+            f"a loudness\n"
+            f"  normaliser. Levelling them is still fine -- you level what you "
+            f"have -- but do\n"
+            f"  NOT use this library as a reference for how an era sounds: its "
+            f"crest, LRA\n"
+            f"  and true peak are the normaliser's limiter, not the records. "
+            f"Any spectral\n"
+            f"  shaping it applied is baked into the band figures too.")
+
+
 def _fetch_loudness(conn: sqlite3.Connection) -> list[sqlite3.Row]:
     return conn.execute(
         "SELECT t.id, t.artist, t.title, t.year, t.genre, t.source_channels, "
@@ -76,8 +111,11 @@ def loudness_report(conn: sqlite3.Connection) -> str:
     if not rows:
         return "No analysed tracks with loudness results yet."
 
-    out = [f"LOUDNESS  ({len(rows)} tracks)", "=" * 78, "",
-           "Where the library sits now", "-" * 78]
+    out = [f"LOUDNESS  ({len(rows)} tracks)", "=" * 78, ""]
+    warning = normalisation_warning(conn)
+    if warning:
+        out += [warning, ""]
+    out += ["Where the library sits now", "-" * 78]
     columns = {}
     for name in ESTIMATORS + ("lra", "true_peak_dbtp", "crest_db"):
         values = np.array([r[name] for r in rows if r[name] is not None], dtype=float)
@@ -210,8 +248,11 @@ def lowend_report(conn: sqlite3.Connection, reference: str = REFERENCE_ERA) -> s
         return values is None or float(np.median(values)) < MIN_SHAPE_FOR_WIDTH_DB
 
     provenance = _year_provenance(conn)
+    normalised = normalisation_warning(conn)
     out = ["LOW END  (1/3-octave, relative to each track's own broadband level)",
            "=" * 78, ""]
+    if normalised:
+        out += [normalised, ""]
     if provenance:
         out += [provenance, ""]
     out += [

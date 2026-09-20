@@ -204,6 +204,11 @@ def lowend_report(conn: sqlite3.Connection, reference: str = REFERENCE_ERA) -> s
     def median_curve(era: str, table: dict) -> dict:
         return {b: float(np.median(table[era][b])) for b in table.get(era, {})}
 
+    def is_empty(era: str, band: float) -> bool:
+        """True where this era's median band level is too low to interpret."""
+        values = shape.get(era, {}).get(band)
+        return values is None or float(np.median(values)) < MIN_SHAPE_FOR_WIDTH_DB
+
     provenance = _year_provenance(conn)
     out = ["LOW END  (1/3-octave, relative to each track's own broadband level)",
            "=" * 78, ""]
@@ -243,10 +248,28 @@ def lowend_report(conn: sqlite3.Connection, reference: str = REFERENCE_ERA) -> s
                 "  congestion, and cutting it is cheap, safe and often does more for",
                 "  perceived weight than any sub boost."]
 
-    def is_empty(era: str, band: float) -> bool:
-        """True where this era's median band level is too low to interpret."""
-        values = shape.get(era, {}).get(band)
-        return values is None or float(np.median(values)) < MIN_SHAPE_FOR_WIDTH_DB
+    out += ["", "How consistent is the low end BETWEEN tracks? "
+                "(p90 - p10 of shape, dB)", "-" * 78,
+            "  The rows above are medians, which say nothing about whether the",
+            "  tracks agree with each other. This is the spread across tracks",
+            "  within each era, and it is the figure that decides whether",
+            "  levelling alone is enough.", "",
+            "  A tight spread (roughly 3 dB or less) means the records share a",
+            "  low-end balance, so once they sit at the same loudness they sit",
+            "  together full stop -- any correction would be one curve for the",
+            "  whole group, or none. A wide spread means some tracks are much",
+            "  thinner than their neighbours and no single gain will reconcile",
+            "  them; those need treating individually or not at all.", "",
+            "  " + "era".ljust(10) + "n".rjust(6) + "".join(f"{b:>8.0f}" for b in low)]
+    for era in eras:
+        values = shape.get(era, {})
+        cells = "".join(
+            "       ." if is_empty(era, b)
+            else (f"{np.percentile(values[b], 90) - np.percentile(values[b], 10):8.1f}"
+                  if values.get(b) else "       -")
+            for b in low)
+        out.append(f"  {era:<10s}{counts.get(era, 0):6d}{cells}")
+    out.append("  '.' = the band is more than 40 dB down; there is nothing to compare.")
 
     _, modulation_hi = _band_matrix(conn, "p90_db")
     _, modulation_lo = _band_matrix(conn, "p10_db")

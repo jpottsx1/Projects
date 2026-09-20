@@ -449,6 +449,16 @@ class TestPipeline(unittest.TestCase):
             for heading in ("SCAN", "LOUDNESS", "FOLDERS", "LOW END"):
                 self.assertIn(heading, text)
 
+    def test_lowend_report_shows_between_track_spread(self):
+        """A median low-end curve says nothing about whether the tracks agree
+        with each other, which is what decides if levelling alone suffices."""
+        conn = db.connect(self.db)
+        try:
+            text = report.lowend_report(conn)
+        finally:
+            conn.close()
+        self.assertIn("How consistent is the low end BETWEEN tracks?", text)
+
     def test_reissue_dates_are_flagged_in_the_lowend_report(self):
         """The tagged fixture carries date=1978 and no original date."""
         conn = db.connect(self.db)

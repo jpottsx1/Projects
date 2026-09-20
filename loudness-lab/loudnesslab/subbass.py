@@ -164,6 +164,38 @@ def _lay_bursts(n: int, rate: int, kicks: np.ndarray, strengths: np.ndarray,
     return sosfilt(butter(4, SUB_CEILING_HZ, btype="low", fs=rate, output="sos"), sub)
 
 
+# Below this, the sub octave is not moving with the music. Calibrated
+# against a static low-frequency floor, which reads about 11 dB, and real
+# groove material, which reads in the forties.
+MIN_LOW_ACTIVITY_DB = 20.0
+
+
+def low_band_activity(x: np.ndarray, rate: int) -> float:
+    """How much the sub octave swings over the track, in dB.
+
+    Measured on the band's own envelope at a rhythm timescale, NOT on
+    per-frame band levels. The frame version answers a different question and
+    gets this one wrong: a 0.68 s window averages over several kicks, so a
+    relentless groove -- which is the most musical low end there is -- reads
+    as barely moving, while the same bass with breakdowns reads as lively.
+    Measured that way a wall-to-wall funk record scored 10.9 dB and a static
+    rumble 6.2, far too close to tell apart. On the envelope they are 43.7
+    and 11.3.
+    """
+    band = sosfiltfilt(butter(4, [SUB_LOW_HZ, SUB_HIGH_HZ], btype="band",
+                              fs=rate, output="sos"), x.mean(axis=1))
+    envelope = sosfiltfilt(butter(2, 20.0, btype="low", fs=rate, output="sos"),
+                           np.abs(band))
+    envelope = envelope[envelope > 0]
+    if envelope.size < rate:
+        return float("nan")
+    quiet = float(np.percentile(envelope, 10))
+    loud = float(np.percentile(envelope, 90))
+    if quiet <= 0 or loud <= 0:
+        return float("nan")
+    return float(20 * np.log10(loud / quiet))
+
+
 def attack_contrast(x: np.ndarray, rate: int, kicks: np.ndarray,
                     low: float = PUNCH_LOW_HZ, high: float = PUNCH_HIGH_HZ,
                     window_s: float = 0.015) -> float:

@@ -54,12 +54,6 @@ def cmd_analyze(args: argparse.Namespace) -> int:
     return 0
 
 
-# Below this, a low band is not swinging with the music -- it is holding
-# rumble or hiss, and lifting it lifts that. The narrow low bands show 8-9 dB
-# of spread on noise alone, so this sits clear of that.
-MIN_LOW_MODULATION_DB = 12.0
-
-
 def _reference_curve(conn, wanted: str) -> tuple[str | None, dict]:
     """Median low-band shape of the folder named by `wanted`."""
     bands, shape = report._band_matrix(conn, "shape_db", group_by="folder")
@@ -74,25 +68,19 @@ def _reference_curve(conn, wanted: str) -> tuple[str | None, dict]:
 def _auto_amount(conn, path: str, curve: dict, cap: float) -> tuple[float, str | None]:
     """How much this track is short of the reference, and whether it can take it."""
     rows = conn.execute(
-        "SELECT b.band_hz, b.shape_db, b.p90_db, b.p10_db FROM bands b "
+        "SELECT b.band_hz, b.shape_db FROM bands b "
         "JOIN tracks t ON t.id = b.track_id WHERE t.path = ? "
         f"AND b.band_hz IN ({', '.join(str(b) for b in report.LOW_SHAPE_BANDS)})",
         (path,)).fetchall()
-    deficits, modulations = [], []
+    deficits = []
     for row in rows:
         target = curve.get(row["band_hz"])
         if target is None or row["shape_db"] is None:
             continue
         deficits.append(target - row["shape_db"])
-        if row["p90_db"] is not None and row["p10_db"] is not None:
-            modulations.append(row["p90_db"] - row["p10_db"])
     if not deficits:
         return 0.0, "no band data"
     shortfall = float(np.mean(deficits))
-    if modulations and float(np.median(modulations)) < MIN_LOW_MODULATION_DB:
-        return 0.0, (f"low end barely modulates "
-                     f"({float(np.median(modulations)):.0f} dB) -- nothing "
-                     f"musical there to lift")
     if shortfall <= 0.5:
         return 0.0, f"already within {shortfall:.1f} dB of the reference"
     return min(shortfall, cap), None
@@ -206,6 +194,13 @@ def cmd_subbass(args: argparse.Namespace) -> int:
         try:
             audio = decode.decode(source)
             amount, skip = amounts.get(str(source), (args.amount, None))
+            # The content check needs the audio, not the per-frame band
+            # statistics, so it happens here rather than in the query.
+            if skip is None and amount > 0:
+                activity = subbass.low_band_activity(audio, decode.TARGET_RATE)
+                if np.isfinite(activity) and activity < subbass.MIN_LOW_ACTIVITY_DB:
+                    skip = (f"sub octave barely moves ({activity:.0f} dB) -- "
+                            f"a static floor rather than a bassline")
             if skip is not None:
                 name = " - ".join(p for p in (row["artist"], row["title"]) if p) \
                     or source.stem

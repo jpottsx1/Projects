@@ -157,6 +157,52 @@ class TestEnhancement(unittest.TestCase):
         self.assertAlmostEqual(report["applied_db"], 0.0, places=3)
 
 
+class TestLowBandActivity(unittest.TestCase):
+    """Telling a bassline from a noise floor.
+
+    The first attempt used per-frame band levels from the spectrum pass, which
+    measure arrangement dynamics over 0.68 s windows. A relentless groove
+    scored 10.9 dB and static rumble 6.2 -- indistinguishable -- and a real
+    funk record was skipped as having "nothing musical to lift".
+    """
+
+    def test_a_steady_groove_reads_as_musical(self):
+        steady, _ = programme(seconds=16.0, breakdown=False)
+        self.assertGreater(subbass.low_band_activity(steady, RATE),
+                           subbass.MIN_LOW_ACTIVITY_DB)
+
+    def test_breakdowns_do_not_change_the_verdict(self):
+        """The metric must report content, not arrangement."""
+        steady, _ = programme(seconds=16.0, breakdown=False)
+        varied, _ = programme(seconds=16.0, breakdown=True)
+        self.assertAlmostEqual(subbass.low_band_activity(steady, RATE),
+                               subbass.low_band_activity(varied, RATE),
+                               delta=6.0)
+
+    def test_a_static_floor_reads_as_noise(self):
+        from scipy.signal import sosfiltfilt
+        rng = np.random.default_rng(3)
+        noise = sosfiltfilt(butter(4, [25, 70], btype="band", fs=RATE,
+                                   output="sos"),
+                            rng.standard_normal(16 * RATE)) * 0.05
+        rumble = np.stack([noise, noise], axis=1).astype(np.float32)
+        self.assertLess(subbass.low_band_activity(rumble, RATE),
+                        subbass.MIN_LOW_ACTIVITY_DB)
+
+    def test_the_two_cases_are_far_apart(self):
+        """A threshold is only safe if the populations are well separated."""
+        from scipy.signal import sosfiltfilt
+        steady, _ = programme(seconds=16.0, breakdown=False)
+        rng = np.random.default_rng(5)
+        noise = sosfiltfilt(butter(4, [25, 70], btype="band", fs=RATE,
+                                   output="sos"),
+                            rng.standard_normal(16 * RATE)) * 0.05
+        rumble = np.stack([noise, noise], axis=1).astype(np.float32)
+        margin = (subbass.low_band_activity(steady, RATE)
+                  - subbass.low_band_activity(rumble, RATE))
+        self.assertGreater(margin, 20.0)
+
+
 class TestAttackShaping(unittest.TestCase):
     """The three properties that separate a transient shaper from an expander
     and from an EQ. All three are checked, because failing any one of them

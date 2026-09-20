@@ -308,12 +308,21 @@ each track's own measured shortfall against a reference folder instead:
 ```
 
 Two things stop it from acting where it should not. A track already within
-half a dB of the reference is left alone. So is one whose low bands barely
-move over the track -- below about 12 dB of swing a band is holding rumble
-or hiss rather than a bassline, and lifting it lifts that. The narrow low
-bands show 8-9 dB of spread on noise alone, so the threshold sits clear of
-it; on real records it rarely fires, and it is there as a floor rather than
-as a routine filter.
+half a dB of the reference is left alone. So is one whose sub octave holds a
+static floor rather than a bassline -- lifting rumble is the one way this
+does active harm.
+
+That second test measures the **band's own envelope**, not its per-frame
+level. The distinction matters and getting it wrong is not subtle: per-frame
+levels are computed over 0.68 s windows, which average across several bars,
+so a relentless groove -- the most musical low end there is -- scores LOW.
+Measured that way a wall-to-wall funk record read 10.9 dB against 6.2 for
+static rumble, and the record was skipped as having nothing musical to lift.
+On the envelope the same two read 43.7 and 11.3.
+
+The "how much does each band vary across the track" table in `report lowend`
+has the same 0.68 s basis, so read it as arrangement dynamics -- intros,
+breakdowns, drops -- and not as evidence of whether a band holds music.
 
 It analyses, picks the ten tracks whose 31.5-63 Hz octave measures thinnest,
 adds a kick-synchronised sub to each, and writes FLAC into

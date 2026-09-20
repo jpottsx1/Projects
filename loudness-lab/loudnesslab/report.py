@@ -354,11 +354,19 @@ def lowend_report(conn: sqlite3.Connection, reference: str = REFERENCE_ERA,
 
     _, modulation_hi = _band_matrix(conn, "p90_db", group_by)
     _, modulation_lo = _band_matrix(conn, "p10_db", group_by)
-    out += ["", "Does the low end modulate like music? (median p90 - p10, dB)", "-" * 78,
-            "  A band carrying a bassline swings with the arrangement. A band holding",
-            "  rumble, hiss or cutting noise sits still. CAVEAT: the narrow low bands",
-            "  contain few FFT bins, so they show 8-9 dB of spread on noise alone --",
-            f"  compare across {heading}s, not against an absolute threshold.", "",
+    out += ["", "How much does each band vary ACROSS the track? "
+                "(median p90 - p10, dB)", "-" * 78,
+            "  Measured over 0.68 s windows, so this reports arrangement dynamics:",
+            "  intros, breakdowns, drops. It does NOT report whether a band holds",
+            "  music or noise, and reading it that way is a mistake -- a window that",
+            "  long averages over several bars, so a relentless groove, which is the",
+            "  most musical low end there is, scores LOW. Measured this way a",
+            "  wall-to-wall funk record read 10.9 dB against 6.2 for static rumble.",
+            "  To tell content from a noise floor, use the sub octave's own envelope",
+            "  instead, which separates the same two cases 43.7 against 11.3; that is",
+            "  what subbass --auto gates on.",
+            "  Also: the narrow low bands show 8-9 dB here on noise alone, so compare",
+            f"  across {heading}s rather than against an absolute threshold.", "",
             "  " + heading.ljust(width) + "n".rjust(6)
             + "".join(f"{b:>8.0f}" for b in low)]
     for era in eras:

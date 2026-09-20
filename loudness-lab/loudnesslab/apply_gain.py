@@ -8,6 +8,7 @@ a copy into an output folder, leaving the source untouched.
 from __future__ import annotations
 
 import datetime as dt
+import math
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
@@ -24,9 +25,11 @@ class Proposal:
     artist: str | None
     title: str | None
     measured: float | None          # the estimator's value for this track
-    wanted_db: float                # target - measured
+    wanted_db: float                # what we will actually aim for
     plan: mp3gain.GainPlan | None
     problem: str | None = None
+    peak_capped_from: float | None = None   # target asked for more than the
+                                            # true-peak ceiling allowed
 
     @property
     def ok(self) -> bool:
@@ -51,11 +54,19 @@ def _stale(row, path: Path) -> str | None:
 
 
 def propose(conn, roots: list[Path], estimator: str, target: float,
-            out_dir: Path | None) -> list[Proposal]:
-    """Work out what would happen, touching nothing."""
+            out_dir: Path | None, peak_ceiling: float = -1.0) -> list[Proposal]:
+    """Work out what would happen, touching nothing.
+
+    A gain that would push true peak past `peak_ceiling` is reduced to fit.
+    Without that, raising a quiet track toward the target can drive it into
+    inter-sample clipping -- which is the exact defect this project found in
+    an already-normalised library, and it would be perverse to introduce it
+    here. Headroom is what limiting exists to buy, and this tool does not
+    limit.
+    """
     rows = conn.execute(
         f"SELECT t.path, t.artist, t.title, t.size_bytes, t.mtime_ns, "
-        f"       l.{estimator} AS measured "
+        f"       l.{estimator} AS measured, l.true_peak_dbtp "
         f"FROM tracks t LEFT JOIN loudness l ON l.track_id = t.id "
         f"WHERE t.status = 'ok' ORDER BY t.path"
     ).fetchall()
@@ -88,12 +99,24 @@ def propose(conn, roots: list[Path], estimator: str, target: float,
                 continue
 
             wanted = target - row["measured"]
+            capped_from = None
+            max_steps = None
+            peak = row["true_peak_dbtp"]
+            if peak is not None:
+                allowance = peak_ceiling - peak
+                # floor, not round: rounding to the nearest step could land
+                # above the ceiling we are trying to respect.
+                max_steps = math.floor(allowance / mp3gain.DB_PER_STEP)
+                if allowance < wanted:
+                    capped_from, wanted = wanted, allowance
             try:
-                computed = mp3gain.plan(path.read_bytes(), wanted)
+                computed = mp3gain.plan(path.read_bytes(), wanted,
+                                        max_steps=max_steps)
             except (mp3gain.Mp3Error, OSError) as exc:
                 computed, problem = None, f"{type(exc).__name__}: {exc}"
             proposals.append(Proposal(path, output, row["artist"], row["title"],
-                                      row["measured"], wanted, computed, problem))
+                                      row["measured"], wanted, computed, problem,
+                                      peak_capped_from=capped_from))
     return proposals
 
 

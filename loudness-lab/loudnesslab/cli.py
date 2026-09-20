@@ -89,7 +89,8 @@ def cmd_gain(args: argparse.Namespace) -> int:
             return 1 if counts["failed"] else 0
 
         proposals = apply_gain.propose(conn, args.path, args.estimator,
-                                       args.target, out_dir)
+                                       args.target, out_dir,
+                                       peak_ceiling=args.peak_ceiling)
         if not proposals:
             print("no .mp3 files found under those paths")
             return 1
@@ -111,6 +112,9 @@ def cmd_gain(args: argparse.Namespace) -> int:
             name = " - ".join(x for x in (proposal.artist, proposal.title) if x) \
                 or proposal.path.name
             note = ""
+            if proposal.peak_capped_from is not None:
+                note = (f"held to {args.peak_ceiling:+.1f} dBTP "
+                        f"(wanted {proposal.peak_capped_from:+.1f} dB)")
             if proposal.plan.clamped:
                 note = (f"clamped at {proposal.plan.headroom_down_db:+.2f} dB "
                         f"by {proposal.plan.lowest_count} granule(s) at "
@@ -134,6 +138,11 @@ def cmd_gain(args: argparse.Namespace) -> int:
             if protected:
                 print(f"  {protected} file(s) carry frame CRCs; those are "
                       f"recomputed on write.")
+            capped = [p for p in usable if p.peak_capped_from is not None]
+            if capped:
+                print(f"  {len(capped)} file(s) held back by the "
+                      f"{args.peak_ceiling:+.1f} dBTP ceiling rather than "
+                      f"being pushed into clipping.")
             clamped = [p for p in usable if p.plan.clamped]
             if clamped:
                 print(f"  {len(clamped)} file(s) clamped: a granule sits too "
@@ -473,6 +482,9 @@ def build_parser() -> argparse.ArgumentParser:
     gain.add_argument("--quiet", action="store_true")
     gain.add_argument("--estimator", default="s_p95", choices=report.ESTIMATORS)
     gain.add_argument("--target", type=float, default=-12.0)
+    gain.add_argument("--peak-ceiling", type=float, default=-1.0,
+                      help="never let true peak exceed this, in dBTP "
+                           "(default: -1.0)")
     gain.add_argument("--out", type=Path, default=None,
                       help="write modified copies here (default: gained/)")
     gain.add_argument("--in-place", action="store_true",

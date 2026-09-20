@@ -225,6 +225,12 @@ Guarantees, because the alternative is quietly damaging someone's records:
 * **Frame CRCs are recomputed** where present, verified against LAME's own.
 * **Copies by default.** Originals are only touched with `--in-place --apply
   --yes`, and that is reversible with `--undo`.
+* **True peak never passes the ceiling** (`--peak-ceiling`, default
+  -1.0 dBTP). Raising a quiet track toward a hot target would drive it into
+  inter-sample clipping, which is the exact defect this project found in an
+  already-normalised library. Where the ceiling binds, the step is floored
+  rather than rounded, since rounding to the nearest 1.5 dB could land back
+  above it.
 * **Every written file is verified** by re-parsing it and checking each
   `global_gain` moved by exactly the planned step.
 

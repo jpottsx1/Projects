@@ -261,8 +261,15 @@ class GainPlan:
     headroom_down_db: float  # most attenuation this file can take
 
 
-def plan(data, target_db: float) -> GainPlan:
-    """Work out the uniform step this file can take toward `target_db`."""
+def plan(data, target_db: float, max_steps: int | None = None) -> GainPlan:
+    """Work out the uniform step this file can take toward `target_db`.
+
+    `max_steps` is a hard ceiling on the result, used to keep true peak under
+    a limit. It matters because rounding to the nearest 1.5 dB step can round
+    UP: a gain capped at +0.9 dB would otherwise become +1.505 and overshoot
+    the very ceiling that capped it. Callers pass a floored step count, and
+    this never exceeds it.
+    """
     frames = parse_frames(data)
     if not frames:
         raise Mp3Error("no MPEG Layer III frames found")
@@ -271,6 +278,8 @@ def plan(data, target_db: float) -> GainPlan:
         raise Mp3Error("no audio granules found (header-only file?)")
 
     wanted = steps_for_db(target_db)
+    if max_steps is not None:
+        wanted = min(wanted, max_steps)
     down, up = headroom(gains)
     allowed = max(-down, min(up, wanted))
     lowest = min(gains)

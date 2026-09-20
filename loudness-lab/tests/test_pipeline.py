@@ -17,8 +17,8 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from loudnesslab import (SCHEMA_VERSION, analyze, cli, db, decode,  # noqa: E402
-                         report)
+from loudnesslab import (SCHEMA_VERSION, analyze, apply_gain, cli,  # noqa: E402
+                         db, decode, report)
 
 RATE = 48000
 HAVE_FFMPEG = shutil.which("ffmpeg") is not None and shutil.which("ffprobe") is not None
@@ -374,6 +374,53 @@ class TestPipeline(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertNotIn("not in the database", output)
         self.assertIn("would change", output)
+
+    def test_gain_never_boosts_past_the_true_peak_ceiling(self):
+        """Raising a quiet track toward a hot target would drive it into
+        inter-sample clipping -- the exact defect found in an already
+        normalised library. Headroom is what limiting buys, and this tool
+        does not limit."""
+        with tempfile.TemporaryDirectory() as tmp:
+            database = Path(tmp) / "ceiling.db"
+            analyze.run(self.root, database, jobs=1)
+            conn = db.connect(database)
+            try:
+                # A target far above everything, so every track wants a boost.
+                proposals = apply_gain.propose(
+                    conn, [self.root], "s_p95", target=0.0,
+                    out_dir=Path(tmp) / "out", peak_ceiling=-1.0)
+                peaks = dict(conn.execute(
+                    "SELECT t.path, l.true_peak_dbtp FROM tracks t "
+                    "JOIN loudness l ON l.track_id = t.id"))
+            finally:
+                conn.close()
+        self.assertTrue(proposals)
+        for proposal in proposals:
+            if not proposal.ok:
+                continue
+            peak = peaks[str(proposal.path)]
+            self.assertIsNotNone(proposal.peak_capped_from)
+            self.assertLessEqual(peak + proposal.wanted_db, -1.0 + 1e-9)
+            self.assertLessEqual(peak + proposal.plan.applied_db, -1.0 + 1e-9)
+
+    def test_attenuation_is_never_held_back_by_the_ceiling(self):
+        """Turning a track down cannot raise its peak, so the ceiling must
+        not interfere with the ordinary case."""
+        with tempfile.TemporaryDirectory() as tmp:
+            database = Path(tmp) / "quiet.db"
+            analyze.run(self.root, database, jobs=1)
+            conn = db.connect(database)
+            try:
+                proposals = apply_gain.propose(
+                    conn, [self.root], "s_p95", target=-30.0,
+                    out_dir=Path(tmp) / "out", peak_ceiling=-1.0)
+            finally:
+                conn.close()
+        usable = [p for p in proposals if p.ok]
+        self.assertTrue(usable)
+        for proposal in usable:
+            self.assertIsNone(proposal.peak_capped_from)
+            self.assertLess(proposal.wanted_db, 0)
 
     def test_piping_into_head_is_not_an_error(self):
         """A closed pipe is how `| head` works; it must not print an error."""

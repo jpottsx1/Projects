@@ -12,7 +12,7 @@ import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import db, mp3gain
+from . import db, decode, mp3gain
 
 SUPPORTED_SUFFIXES = {".mp3"}
 
@@ -63,11 +63,12 @@ def propose(conn, roots: list[Path], estimator: str, target: float,
 
     proposals: list[Proposal] = []
     for root in roots:
-        root = root.resolve()
-        files = [root] if root.is_file() else sorted(
-            p for p in root.rglob("*")
-            if p.is_file() and p.suffix.lower() in SUPPORTED_SUFFIXES
-            and not p.name.startswith("."))
+        # Walk exactly as analyze did, and do NOT resolve: analyze stores the
+        # path it walked, so resolving here would turn every symlinked root
+        # (/tmp -> /private/tmp on macOS, any symlinked volume) into a lookup
+        # miss and report files as unanalysed straight after measuring them.
+        files = [path for path in decode.find_audio(root)
+                 if path.suffix.lower() in SUPPORTED_SUFFIXES]
         for path in files:
             row = by_path.get(str(path))
             output = None

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import contextlib
+import io
 import os
 import shutil
 import sqlite3
@@ -354,6 +356,24 @@ class TestPipeline(unittest.TestCase):
                                  for p in out.rglob("*")))
         for path, before in originals.items():
             self.assertEqual(path.read_bytes(), before, f"{path.name} was modified")
+
+    def test_gain_finds_tracks_through_a_symlinked_root(self):
+        """analyze stores the path it walked. If gain resolves symlinks and
+        analyze does not, every file reads as unanalysed right after being
+        measured -- which is how this looked on a macOS /tmp path."""
+        with tempfile.TemporaryDirectory() as tmp:
+            link = Path(tmp) / "link"
+            link.symlink_to(self.root, target_is_directory=True)
+            database = Path(tmp) / "sym.db"
+            buffer = io.StringIO()
+            with contextlib.redirect_stdout(buffer):
+                code = cli.main(["gain", str(link), "--db", str(database),
+                                 "--out", str(Path(tmp) / "out"),
+                                 "--target", "-12", "--jobs", "1", "--quiet"])
+            output = buffer.getvalue()
+        self.assertEqual(code, 0)
+        self.assertNotIn("not in the database", output)
+        self.assertIn("would change", output)
 
     def test_piping_into_head_is_not_an_error(self):
         """A closed pipe is how `| head` works; it must not print an error."""

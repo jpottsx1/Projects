@@ -15,7 +15,8 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from loudnesslab import analyze, cli, db, decode, report  # noqa: E402
+from loudnesslab import (SCHEMA_VERSION, analyze, cli, db, decode,  # noqa: E402
+                         report)
 
 RATE = 48000
 HAVE_FFMPEG = shutil.which("ffmpeg") is not None and shutil.which("ffprobe") is not None
@@ -93,7 +94,12 @@ class TestSchemaMigration(unittest.TestCase):
             self.assertIn("year_is_original", columns)
             version = conn.execute(
                 "SELECT value FROM meta WHERE key = 'schema_version'").fetchone()
-            self.assertEqual(int(version["value"]), 2)
+            # Against the constant, not a literal: a later schema bump must
+            # not silently turn this into a stale assertion.
+            self.assertEqual(int(version["value"]), SCHEMA_VERSION)
+            tables = {row["name"] for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'")}
+            self.assertIn("gain_log", tables)
         finally:
             conn.close()
 

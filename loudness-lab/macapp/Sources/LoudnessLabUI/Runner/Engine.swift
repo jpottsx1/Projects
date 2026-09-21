@@ -53,7 +53,8 @@ final class Engine: ObservableObject {
 
         do {
             let library = try Library(at: databaseURL)
-            say("Measuring \(folders.count) folder(s)…")
+            say("Measuring \(folders.count) folder(s), "
+                + "\(Concurrency.forMeasuring()) track(s) at a time…")
             let counts = await Analyzer.run(roots: folders, library: library) { [weak self] step in
                 Task { @MainActor in
                     self?.progress = step.total > 0
@@ -97,7 +98,8 @@ final class Engine: ObservableObject {
         do {
             let library = try Library(at: databaseURL)
 
-            say("Measuring \(folders.count) folder(s)…")
+            say("Measuring \(folders.count) folder(s), "
+                + "\(Concurrency.forMeasuring()) track(s) at a time…")
             let counts = await Analyzer.run(roots: folders, library: library) { [weak self] step in
                 Task { @MainActor in
                     self?.progress = step.total > 0

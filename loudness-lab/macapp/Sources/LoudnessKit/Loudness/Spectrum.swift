@@ -91,11 +91,16 @@ public enum Spectrum {
         var bands = [[Double]](); bands.reserveCapacity(frames)
         var broadband = [Double](); broadband.reserveCapacity(frames)
 
+        // One plan for the whole channel: the twiddle tables and the scratch
+        // buffers are built once instead of a thousand times.
+        let plan = FFT.Plan(size: nfft)
+        var windowed = [Double](repeating: 0, count: nfft)
+
         for frame in 0..<frames {
             let start = frame * hop
-            var windowed = [Double](repeating: 0, count: nfft)
             for i in 0..<nfft { windowed[i] = x[start + i] * window[i] }
-            var spectrum = FFT.powerSpectrum(windowed)
+            var spectrum = plan?.powerSpectrum(windowed)
+                ?? FFT.powerSpectrumScalar(windowed)
             // One-sided: everything but DC and Nyquist counts twice.
             for i in 1..<(spectrum.count - 1) { spectrum[i] *= 2 }
 

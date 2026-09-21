@@ -43,19 +43,9 @@ public enum Processor {
         }
     }
 
-    /// Two at a time by default, not one per core.
-    ///
-    /// A six-minute stereo track is about 250 MB held as doubles, and the
-    /// chain has several copies of it alive at once -- the decoded original,
-    /// the de-clipped version, the processed one, and in compare mode two
-    /// level-matched renders. That is roughly a gigabyte per track in
-    /// flight. Eight would be ten gigabytes and the machine would spend
-    /// longer swapping than filtering, which is not a speed-up.
-    public static func defaultJobs() -> Int {
-        let cores = ProcessInfo.processInfo.activeProcessorCount
-        let byMemory = Int(ProcessInfo.processInfo.physicalMemory / 4_000_000_000)
-        return max(1, min(cores, max(2, byMemory)))
-    }
+    /// How many at once. See `Concurrency` -- cores against memory, and
+    /// memory is what binds here.
+    public static func defaultJobs() -> Int { Concurrency.forProcessing() }
 
     /// Run `jobs` tracks at a time, reporting each as it lands.
     ///

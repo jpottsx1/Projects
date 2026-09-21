@@ -27,7 +27,7 @@ public enum Analyzer {
     /// and each track is independent -- while the database is written from
     /// one place, because SQLite would rather not be written from several.
     public static func run(roots: [URL], library: Library,
-                           jobs: Int = ProcessInfo.processInfo.activeProcessorCount,
+                           jobs: Int = Concurrency.forMeasuring(),
                            progress: (@Sendable (Progress) -> Void)? = nil) async -> Counts {
         var counts = Counts()
         var pending: [URL] = []
@@ -59,7 +59,10 @@ public enum Analyzer {
         let total = pending.count
         var done = 0
         var index = 0
-        let width = max(1, min(jobs, 8))
+        // Bounded by Concurrency, which weighs cores against memory. The
+        // flat cap of eight that used to be here ignored how much a track
+        // costs to hold, which is the thing that actually limits this.
+        let width = max(1, min(jobs, max(1, pending.count)))
 
         // Bounded rather than unbounded: one task per track would decode a
         // whole library at once and run the machine out of memory long

@@ -981,6 +981,49 @@ final class GoldenTests: XCTestCase {
         return cases
     }
 
+    /// vDSP's real FFT against the radix-2 loop it replaced.
+    ///
+    /// The packing is the part worth checking: Nyquist is folded into the
+    /// imaginary part of bin zero and the output carries a factor of two
+    /// that numpy does not. Both are corrections that would leave a
+    /// spectrum looking entirely plausible while being wrong -- the shape
+    /// right, the level out by 6 dB, or one band at each end nonsense.
+    func testTheFastFFTMatchesTheSlowOne() throws {
+        for size in [8, 64, 1024, 4096] {
+            let plan = try XCTUnwrap(FFT.Plan(size: size), "no plan for \(size)")
+            for (name, signal) in fftCases(size) {
+                let fast = plan.powerSpectrum(signal)
+                let slow = FFT.powerSpectrumScalar(signal)
+                XCTAssertEqual(fast.count, slow.count, "\(name) at \(size)")
+                // Relative, because power spans many orders of magnitude and
+                // an absolute tolerance would be vacuous at the top end and
+                // impossible at the bottom.
+                let scale = max(slow.max() ?? 1, 1e-300)
+                for (index, expected) in slow.enumerated() {
+                    XCTAssertEqual(fast[index] / scale, expected / scale,
+                                   accuracy: 1e-9,
+                                   "\(name) at \(size), bin \(index)")
+                }
+            }
+        }
+    }
+
+    func fftCases(_ size: Int) -> [(String, [Double])] {
+        var cases: [(String, [Double])] = []
+        // DC only: everything must land in bin zero, nothing in Nyquist.
+        cases.append(("constant", [Double](repeating: 0.5, count: size)))
+        // Alternating: everything in Nyquist, which is the folded bin.
+        cases.append(("nyquist", (0..<size).map { $0 % 2 == 0 ? 1.0 : -1.0 }))
+        // A bin-centred tone, so one bin should hold it all.
+        cases.append(("tone on a bin",
+                      (0..<size).map { sin(2 * .pi * 4 * Double($0) / Double(size)) }))
+        // And one that is not, so energy spreads and every bin matters.
+        cases.append(("tone between bins",
+                      (0..<size).map { sin(2 * .pi * 4.37 * Double($0) / Double(size)) }))
+        cases.append(("noise", Fixtures.xorshift(seed: 99, count: size)))
+        return cases
+    }
+
     func testTheSchemaVersionMatchesThePython() {
         XCTAssertEqual(Library.schemaVersion, golden.library.schemaVersion,
                        "the two sides would stop opening each other's files")

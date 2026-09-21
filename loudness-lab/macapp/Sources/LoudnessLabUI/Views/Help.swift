@@ -56,6 +56,25 @@ enum Help {
         the list is in name order and says so. Press Process and it fills in.
         """)
 
+    static let survey = HelpEntry(
+        title: "Survey",
+        summary: "What a folder IS: how much arrived clipped, how thin its low end is.",
+        detail: """
+        Measuring reads the files and writes nothing. It answers a different \
+        question from Process: not what a policy would do to a folder, but \
+        what the folder actually is.
+
+        Two numbers here decide things. How much of it arrived already \
+        clipped says whether de-clipping earns a lossy generation on this \
+        material. And how far a folder's low end sits under a reference is \
+        where a profile's cap is supposed to come from -- disco-70s allows \
+        8 dB because three 1970s corpora measured 6 to 9 dB short, and any \
+        new profile should be built the same way rather than guessed.
+
+        Name a reference folder to get the comparison. Changing it re-reads \
+        what is already measured; it does not measure again.
+        """)
+
     // MARK: - Profile
 
     static let profile = HelpEntry(
@@ -359,7 +378,7 @@ enum Help {
     /// of tuples needs the element destructured in the closure, which is
     /// the sort of thing that compiles in one position and not the next.
     static let sections: [HelpSection] = [
-        HelpSection("Choosing music", [folders, queue]),
+        HelpSection("Choosing music", [folders, queue, survey]),
         HelpSection("Policy", [profile]),
         HelpSection("Clipped peaks", [declip, declipMax]),
         HelpSection("Sub bass", [amount, auto, reference, maxAmount, minActivity]),

@@ -15,6 +15,14 @@ struct ContentView: View {
     @State private var dryRun = false
     @State private var chosen: Manifest.Track?
     @State private var blind = false
+    @State private var rightTab = RightTab.survey
+
+    /// Survey first, deliberately. You cannot choose a policy for a folder
+    /// you have not looked at, and looking at it used to mean a terminal.
+    enum RightTab: String, CaseIterable, Identifiable {
+        case survey = "Survey", results = "Results"
+        var id: String { rawValue }
+    }
 
     private var outputDirectory: URL {
         FileManager.default.homeDirectoryForCurrentUser
@@ -42,9 +50,26 @@ struct ContentView: View {
             QueuePanel(queue: queue, limit: limit)
                 .frame(minWidth: 260, idealWidth: 320, maxWidth: 480)
 
-            // What came out.
+            // What the folders are, and what came out of them.
             VStack(spacing: 0) {
-                ResultsPanel(manifest: engine.manifest, chosen: $chosen)
+                Picker("", selection: $rightTab) {
+                    ForEach(RightTab.allCases) { Text($0.rawValue).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .padding(.horizontal, 12).padding(.top, 8).padding(.bottom, 4)
+
+                switch rightTab {
+                case .survey:
+                    SurveyPanel(
+                        survey: engine.survey,
+                        isMeasuring: engine.isRunning,
+                        reference: Binding(get: { profile.reference ?? "" },
+                                           set: { profile.reference = $0 }),
+                        onMeasure: measure)
+                case .results:
+                    ResultsPanel(manifest: engine.manifest, chosen: $chosen)
+                }
                 Divider()
                 ComparePanel(player: player, track: chosen, blind: $blind,
                              estimator: profile.estimator)
@@ -58,6 +83,11 @@ struct ContentView: View {
         // a run measures tracks that had no numbers before.
         .task(id: folders) { await queue.refresh(folders: folders,
                                                  databaseURL: databaseURL) }
+        // Changing the reference re-reads the library; it does not re-measure.
+        .onChange(of: profile.reference) { _, name in
+            engine.refreshSurvey(folders: folders, databaseURL: databaseURL,
+                                 reference: name)
+        }
         .onReceive(NotificationCenter.default.publisher(for: .showHelp)) { _ in
             openWindow(id: "help")
         }
@@ -88,6 +118,16 @@ struct ContentView: View {
                 .foregroundStyle(.secondary)
                 .help(Help.folders.detail)
                 .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    /// Measuring is not processing: it reads the files, writes nothing, and
+    /// answers what the folder is rather than what a profile would do to it.
+    private func measure() {
+        Task {
+            await engine.measure(folders: folders, databaseURL: databaseURL,
+                                 reference: profile.reference)
+            await queue.refresh(folders: folders, databaseURL: databaseURL)
         }
     }
 

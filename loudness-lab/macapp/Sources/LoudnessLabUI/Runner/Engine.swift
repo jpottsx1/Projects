@@ -23,6 +23,48 @@ final class Engine: ObservableObject {
 
     func say(_ line: String) { log += line + "\n" }
 
+    @Published private(set) var survey: Survey?
+
+    /// Measure and report, touching nothing.
+    ///
+    /// Separate from `run` because it answers a different question. `run`
+    /// asks what a policy would do to a folder; this asks what the folder
+    /// IS -- how much of it arrived clipped, how far its low end sits under
+    /// another folder's. Those are the numbers a profile's caps are meant
+    /// to come from, and until now they only existed in the command line.
+    func measure(folders: [URL], databaseURL: URL, reference: String?) async {
+        guard !isRunning, !folders.isEmpty else { return }
+        isRunning = true; cancelled = false; failure = nil
+        log = ""; progress = nil
+        defer { isRunning = false; progress = nil }
+
+        do {
+            let library = try Library(at: databaseURL)
+            say("Measuring \(folders.count) folder(s)…")
+            let counts = await Analyzer.run(roots: folders, library: library) { [weak self] step in
+                Task { @MainActor in
+                    self?.progress = step.total > 0
+                        ? Double(step.done) / Double(step.total) : nil
+                    if step.failed { self?.say("  failed: \(step.name)") }
+                }
+            }
+            say("  \(counts.found) found, \(counts.analysed) measured, "
+                + "\(counts.skipped) already current, \(counts.errors) failed.")
+            progress = nil
+            survey = try Survey.of(library, under: folders, reference: reference)
+        } catch {
+            failure = error.localizedDescription
+        }
+    }
+
+    /// Recompute the survey from what the library already holds, without
+    /// measuring anything -- for when only the reference folder changed.
+    func refreshSurvey(folders: [URL], databaseURL: URL, reference: String?) {
+        guard FileManager.default.fileExists(atPath: databaseURL.path),
+              let library = try? Library(at: databaseURL) else { return }
+        survey = try? Survey.of(library, under: folders, reference: reference)
+    }
+
     /// `only` is the queue's selection: the paths the user left ticked. Nil
     /// means everything found, which is what the command line does. The
     /// selection is applied BEFORE the limit, so unticking a track promotes
@@ -114,6 +156,8 @@ final class Engine: ObservableObject {
             try write(built, to: outputDirectory.appendingPathComponent("manifest.json"))
             manifest = built
             say("\(tracks.count) track(s) written to \(outputDirectory.path).")
+            survey = try? Survey.of(library, under: folders,
+                                    reference: profile.reference)
         } catch {
             failure = error.localizedDescription
         }

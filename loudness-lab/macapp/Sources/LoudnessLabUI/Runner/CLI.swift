@@ -108,6 +108,7 @@ enum CLI {
         let process = box.process
         process.executableURL = tool
         process.arguments = arguments
+        process.environment = environment()
         let output = Pipe()
         let errors = Pipe()
         process.standardOutput = output
@@ -163,10 +164,66 @@ enum CLI {
         if status != 0 && !isCancelled() {
             let tail = stderrText.text().split(separator: "\n").suffix(6)
                 .joined(separator: "\n")
-            throw Failure("loudness-lab exited with \(status)."
-                          + (tail.isEmpty ? "" : "\n\(tail)"))
+            var message = "loudness-lab exited with \(status)."
+            if !tail.isEmpty { message += "\n\(tail)" }
+            // The one failure worth explaining rather than relaying: it
+            // means something different when the tool IS installed.
+            if tail.contains("ffmpeg") || tail.contains("ffprobe") {
+                let found = ["ffmpeg", "ffprobe"].compactMap { name in
+                    find(name).map { "\(name) at \($0)" }
+                }
+                message += found.isEmpty
+                    ? "\n\nNeither was found anywhere this app can see. "
+                      + "Install them with: brew install ffmpeg"
+                    : "\n\nBut this app can see \(found.joined(separator: ", ")). "
+                      + "That is a PATH problem rather than a missing "
+                      + "install -- please report it."
+            }
+            throw Failure(message)
         }
         return status
+    }
+
+    /// Where Homebrew puts things, and where a GUI app does not look.
+    ///
+    /// A program launched from Finder or Xcode does not inherit the shell's
+    /// PATH -- it gets roughly /usr/bin:/bin:/usr/sbin:/sbin, and nothing a
+    /// .zprofile added. So ffmpeg installed by Homebrew is on the PATH in
+    /// Terminal and invisible here, and the tool reports it missing when it
+    /// is sitting right there. Same command, same machine, different
+    /// answer, which is a confusing way to be told to install something you
+    /// already have.
+    ///
+    /// Appended rather than prepended, so a PATH that was inherited
+    /// properly still wins.
+    static let toolDirectories = [
+        "/opt/homebrew/bin",        // Apple silicon Homebrew
+        "/usr/local/bin",           // Intel Homebrew, and most installers
+        "/opt/local/bin",           // MacPorts
+        "/opt/homebrew/sbin",
+    ]
+
+    static func environment() -> [String: String] {
+        var environment = ProcessInfo.processInfo.environment
+        let existing = environment["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin"
+        let already = Set(existing.split(separator: ":").map(String.init))
+        let missing = toolDirectories.filter {
+            !already.contains($0) && FileManager.default.fileExists(atPath: $0)
+        }
+        if !missing.isEmpty {
+            environment["PATH"] = ([existing] + missing).joined(separator: ":")
+        }
+        return environment
+    }
+
+    /// Where a named tool actually is, for saying so in an error.
+    static func find(_ name: String) -> String? {
+        let paths = (environment()["PATH"] ?? "").split(separator: ":").map(String.init)
+        for directory in paths {
+            let candidate = (directory as NSString).appendingPathComponent(name)
+            if isRunnable(URL(fileURLWithPath: candidate)) { return candidate }
+        }
+        return nil
     }
 
     /// Holds the process so a watchdog can signal it.

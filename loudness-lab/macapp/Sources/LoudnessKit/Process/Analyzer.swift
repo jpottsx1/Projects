@@ -14,6 +14,11 @@ public enum Analyzer {
 
     public struct Progress: Sendable {
         public let done: Int, total: Int, name: String, failed: Bool
+        /// True while the folders are still being walked and each file
+        /// checked against the database. `total` is not known yet, and on a
+        /// large library this phase is long enough that saying nothing
+        /// during it reads as a hang.
+        public var scanning = false
     }
 
     /// Measure everything under `roots` into `library`.
@@ -30,7 +35,17 @@ public enum Analyzer {
         for root in roots {
             let survey = FileSurvey.survey(root)
             counts.found += survey.audio.count
+            var looked = 0
             for url in survey.audio {
+                looked += 1
+                // Every hundredth, because the callback hops to the main
+                // actor and doing that per file would cost more than the
+                // check it is reporting on.
+                if looked % 100 == 0 {
+                    progress?(Progress(done: looked, total: survey.audio.count,
+                                       name: root.lastPathComponent,
+                                       failed: false, scanning: true))
+                }
                 let attributes = try? FileManager.default.attributesOfItem(atPath: url.path)
                 let size = (attributes?[.size] as? Int) ?? 0
                 let modified = (attributes?[.modificationDate] as? Date) ?? .distantPast

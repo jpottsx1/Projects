@@ -1,4 +1,5 @@
 import Foundation
+import Accelerate
 
 /// Integer upsampling, for true-peak detection only.
 ///
@@ -68,24 +69,91 @@ public enum Resampler {
     }
 
     /// Largest magnitude of `x` upsampled by `up`, without building it.
+    /// The true peak, without ever holding the upsampled signal.
+    ///
+    /// This was the slowest thing in the app by a wide margin: measuring a
+    /// six-minute track meant about 1.3 billion multiply-adds per channel,
+    /// written as a scalar loop with a bounds check on every one. Accelerate
+    /// does the same arithmetic vectorised.
+    ///
+    /// The arithmetic really is the same, and that is checkable rather than
+    /// asserted: `peakOfUpsampledScalar` below is the original, kept so a
+    /// test can hold this to it. If the two ever disagree, this is wrong.
     public static func peakOfUpsampled(_ x: [Double], by up: Int) -> Double {
         guard up > 1 else { return x.map(abs).max() ?? 0 }
         guard !x.isEmpty else { return 0 }
-        let h = polyphaseFIR(up: up)
 
-        // One phase of the filter per output position within an input sample.
+        let phases = polyphase(up: up)
+        let count = x.count
+        // Blocked, so memory stays flat whatever the track length. The
+        // original comment still applies -- a twelve-minute mix upsampled
+        // four times would be a gigabyte -- and a block plus its history is
+        // half a megabyte.
+        let block = 1 << 16
+        var peak = 0.0
+
+        for phase in phases {
+            // vDSP correlates; convolution is correlation against the
+            // reversed taps, reversed once here rather than per sample.
+            let taps = Array(phase.reversed())
+            let width = taps.count
+            guard width > 0 else { continue }
+
+            var padded = [Double](repeating: 0, count: block + width - 1)
+            var out = [Double](repeating: 0, count: block)
+            var start = 0
+
+            while start < count {
+                let n = min(block, count - start)
+                // The `width - 1` input samples before this block, zero
+                // before the signal begins -- the same zero padding the
+                // scalar version did, so the edges still agree with scipy.
+                for i in 0..<(width - 1) {
+                    let source = start - (width - 1) + i
+                    padded[i] = source >= 0 ? x[source] : 0
+                }
+                for i in 0..<n { padded[width - 1 + i] = x[start + i] }
+
+                padded.withUnsafeBufferPointer { a in
+                    taps.withUnsafeBufferPointer { b in
+                        out.withUnsafeMutableBufferPointer { c in
+                            vDSP_convD(a.baseAddress!, 1, b.baseAddress!, 1,
+                                       c.baseAddress!, 1,
+                                       vDSP_Length(n), vDSP_Length(width))
+                        }
+                    }
+                }
+                var largest = 0.0
+                out.withUnsafeBufferPointer { c in
+                    vDSP_maxmgvD(c.baseAddress!, 1, &largest, vDSP_Length(n))
+                }
+                peak = max(peak, largest)
+                start += n
+            }
+        }
+        return peak
+    }
+
+    /// One set of taps per output position within an input sample.
+    static func polyphase(up: Int) -> [[Double]] {
+        let h = polyphaseFIR(up: up)
         var phases: [[Double]] = Array(repeating: [], count: up)
         for (index, tap) in h.enumerated() { phases[index % up].append(tap) }
+        return phases
+    }
 
+    /// The original, one output sample at a time. Kept only so the fast one
+    /// can be held to it -- an optimisation nobody can check is a rewrite.
+    static func peakOfUpsampledScalar(_ x: [Double], by up: Int) -> Double {
+        guard up > 1 else { return x.map(abs).max() ?? 0 }
+        guard !x.isEmpty else { return 0 }
+        let phases = polyphase(up: up)
         var peak = 0.0
         let count = x.count
         for m in 0..<(count * up) {
-            let phase = m % up
+            let taps = phases[m % up]
             let base = m / up
-            let taps = phases[phase]
             var accumulator = 0.0
-            // Zero outside the signal, which is what a convolution does at the
-            // ends and what scipy does too, so the edges agree as well.
             let highest = min(taps.count - 1, base)
             if highest >= 0 {
                 for j in 0...highest { accumulator += taps[j] * x[base - j] }

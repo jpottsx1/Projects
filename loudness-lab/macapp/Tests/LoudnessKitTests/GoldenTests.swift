@@ -944,6 +944,43 @@ final class GoldenTests: XCTestCase {
                        "two different CD1 folders were merged into one corpus")
     }
 
+    /// The vectorised true-peak detector against the scalar one it replaced.
+    ///
+    /// The golden vectors already pin true peak to the Python's number, but
+    /// only for the four fixtures. This holds the two implementations to
+    /// each other on signals chosen to be awkward -- the first samples,
+    /// where the filter is still hanging off the front of the signal, a
+    /// length that is not a multiple of the block size, and a peak placed
+    /// deliberately at the very end.
+    func testTheFastTruePeakMatchesTheSlowOne() {
+        for (name, signal) in truePeakCases() {
+            let fast = Resampler.peakOfUpsampled(signal, by: 4)
+            let slow = Resampler.peakOfUpsampledScalar(signal, by: 4)
+            XCTAssertEqual(fast, slow, accuracy: 1e-12,
+                           "\(name): Accelerate and the scalar loop disagree")
+        }
+    }
+
+    func truePeakCases() -> [(String, [Double])] {
+        var cases: [(String, [Double])] = []
+        cases.append(("empty", []))
+        cases.append(("one sample", [0.9]))
+        // Shorter than the filter, so every output is an edge case.
+        cases.append(("shorter than the taps", (0..<7).map { sin(Double($0)) * 0.5 }))
+        // Longer than one block, and not a whole number of them.
+        let long = (0..<(70_000)).map { sin(Double($0) * 0.07) * 0.8 }
+        cases.append(("across a block boundary", long))
+        // A peak on the last sample: the one an off-by-one would drop.
+        var trailing = [Double](repeating: 0.01, count: 70_001)
+        trailing[trailing.count - 1] = 0.95
+        cases.append(("peak at the very end", trailing))
+        // And on the first, where there is no history to convolve with.
+        var leading = [Double](repeating: 0.01, count: 1000)
+        leading[0] = 0.95
+        cases.append(("peak at the very start", leading))
+        return cases
+    }
+
     func testTheSchemaVersionMatchesThePython() {
         XCTAssertEqual(Library.schemaVersion, golden.library.schemaVersion,
                        "the two sides would stop opening each other's files")

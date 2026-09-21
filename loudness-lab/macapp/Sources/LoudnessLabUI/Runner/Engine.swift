@@ -58,7 +58,10 @@ final class Engine: ObservableObject {
                 Task { @MainActor in
                     self?.progress = step.total > 0
                         ? Double(step.done) / Double(step.total) : nil
-                    self?.progressNote = "\(step.done) of \(step.total) — \(step.name)"
+                    self?.progressNote = step.scanning
+                        ? "Looking through \(step.name): \(step.done) of "
+                          + "\(step.total) files…"
+                        : "Measured \(step.done) of \(step.total) — \(step.name)"
                     if step.failed { self?.say("  failed: \(step.name)") }
                 }
             }
@@ -99,7 +102,10 @@ final class Engine: ObservableObject {
                 Task { @MainActor in
                     self?.progress = step.total > 0
                         ? Double(step.done) / Double(step.total) : nil
-                    self?.progressNote = "\(step.done) of \(step.total) — \(step.name)"
+                    self?.progressNote = step.scanning
+                        ? "Looking through \(step.name): \(step.done) of "
+                          + "\(step.total) files…"
+                        : "Measured \(step.done) of \(step.total) — \(step.name)"
                     if step.failed { self?.say("  failed: \(step.name)") }
                 }
             }

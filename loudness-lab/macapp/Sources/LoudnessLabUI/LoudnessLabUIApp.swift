@@ -27,12 +27,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 @main
 struct LoudnessLabUIApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
+    @State private var showingSplash = true
 
     var body: some Scene {
         WindowGroup("Loudness Lab") {
-            ContentView()
-                // Three panes: what to do, what to do it to, what came out.
-                .frame(minWidth: 1120, minHeight: 640)
+            ZStack {
+                ContentView()
+                    // Three panes: what to do, what to do it to, what came out.
+                    .frame(minWidth: 1120, minHeight: 640)
+
+                if showingSplash {
+                    SplashView { showingSplash = false }
+                        .transition(.opacity)
+                }
+            }
+            .animation(.easeOut(duration: 0.4), value: showingSplash)
         }
         .windowResizability(.contentMinSize)
         .commands {

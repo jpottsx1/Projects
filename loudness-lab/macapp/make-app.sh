@@ -24,6 +24,14 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/LoudnessLab"
 
+# SwiftUI's Bundle.module looks for this next to the binary's .app --
+# Contents/Resources -- when the package is linked into an app. Without
+# it here, Bundle.module fatalErrors the moment the app reaches for the
+# splash image.
+BIN_DIR="$(dirname "$BIN")"
+RESOURCE_BUNDLE="$BIN_DIR/LoudnessLab_LoudnessLabUI.bundle"
+[ -d "$RESOURCE_BUNDLE" ] && cp -R "$RESOURCE_BUNDLE" "$APP/Contents/Resources/"
+
 # --- icon -------------------------------------------------------------
 # A .icns built from whatever square image is sitting here. macOS ships
 # both tools needed (sips and iconutil), so there is nothing to install

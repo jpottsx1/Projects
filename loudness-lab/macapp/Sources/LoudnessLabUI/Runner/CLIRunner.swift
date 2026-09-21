@@ -83,11 +83,11 @@ final class CLIRunner: ObservableObject {
             let pipe = Pipe()
             task.standardOutput = pipe
             task.standardError = pipe
-            pipe.fileHandleForReading.readabilityHandler = { handle in
+            pipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
                 let chunk = handle.availableData
                 guard !chunk.isEmpty, let text = String(data: chunk, encoding: .utf8)
                 else { return }
-                Task { @MainActor [weak self] in self?.log += text }
+                Task { @MainActor in self?.log += text }
             }
 
             task.terminationHandler = { finished in

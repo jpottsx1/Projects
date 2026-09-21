@@ -25,6 +25,24 @@ final class GoldenTests: XCTestCase {
         let measure: [String: MeasureCase]
         let declip: [String: DeclipCase]
         let countClipping: [String: [Int]]
+        let grooves: [String: FixtureCase]
+        let spectrum: [String: SpectrumCase]
+        let findPeaks: [PeaksCase]
+        let subbass: [String: SubBassCase]
+    }
+
+    struct SpectrumCase: Decodable { let bands: Int; let rows: [BandRow] }
+    struct BandRow: Decodable {
+        let band_hz: Double
+        let ltas_db, shape_db, p10_db, p90_db, side_mid_db: Double?
+    }
+    struct PeaksCase: Decodable { let seed: UInt64, distance: Int, peaks: [Int] }
+    struct SubBassCase: Decodable {
+        let kicks: [Int], strengths: [Double]
+        let lowBandActivityDB, attackContrastDB, appliedDB, punchDB: Double
+        let sustainTrimDB, bandLevelChangeDB, safetyTrimDB: Double
+        let polarityFlipped: Bool
+        let outputRMS, outputPeak: Double
     }
 
     struct FixtureCase: Decodable {
@@ -260,7 +278,136 @@ final class GoldenTests: XCTestCase {
         }
     }
 
+    // MARK: - Spectrum
+
+    func testTheGrooveFixtureIsTheSameSignalInBothLanguages() throws {
+        for (bpm, expected) in golden.grooves {
+            let x = Fixtures.groove(bpm: Double(bpm) ?? 0)
+            XCTAssertEqual(x[0].count, expected.frames, bpm)
+            for (index, value) in expected.head.enumerated() {
+                XCTAssertEqual(x[0][index], value, accuracy: 1e-9, "\(bpm) sample \(index)")
+            }
+            XCTAssertEqual(rms(x), expected.rms, accuracy: 1e-9, bpm)
+            XCTAssertEqual(peak(x), expected.peak, accuracy: 1e-9, bpm)
+        }
+    }
+
+    func testTheThirdOctaveSpectrumMatches() throws {
+        // Loose on purpose. numpy's rfft on a float32 frame returns
+        // complex64, so the Python does this FFT in SINGLE precision while
+        // this does it in double; band levels differ by around a millionth
+        // of a decibel, and the Python rounds to three places anyway.
+        for (kind, expected) in golden.spectrum {
+            let rows = Spectrum.analyse(Fixtures.make(Fixtures.Kind(rawValue: kind)!,
+                                                      seconds: 4.0),
+                                        rate: Fixtures.rate)
+            XCTAssertEqual(rows.count, expected.bands, kind)
+            for (index, row) in expected.rows.enumerated() {
+                let got = rows[index]
+                XCTAssertEqual(got.bandHz, row.band_hz, "\(kind) band \(index)")
+                close(got.ltasDB, row.ltas_db, 0.002, "\(kind) \(row.band_hz) ltas")
+                close(got.shapeDB, row.shape_db, 0.002, "\(kind) \(row.band_hz) shape")
+                close(got.p10DB, row.p10_db, 0.002, "\(kind) \(row.band_hz) p10")
+                close(got.p90DB, row.p90_db, 0.002, "\(kind) \(row.band_hz) p90")
+                close(got.sideMidDB, row.side_mid_db, 0.01, "\(kind) \(row.band_hz) width")
+            }
+        }
+    }
+
+    /// Restated rather than left to the numbers: a band with nothing in it
+    /// holds filter residue, which is uncorrelated and therefore reads as
+    /// WIDE. Reporting that would invert the vinyl-mono signal exactly where
+    /// it matters most, so the width has to be withheld instead.
+    func testWidthIsWithheldWhereABandIsEmpty() {
+        let rows = Spectrum.analyse(Fixtures.make(.tones, seconds: 4.0),
+                                    rate: Fixtures.rate)
+        let empty = rows.filter { ($0.shapeDB ?? 0) < Spectrum.minShapeForWidthDB }
+        XCTAssertFalse(empty.isEmpty, "the fixture no longer has an empty band")
+        for row in empty {
+            XCTAssertNil(row.sideMidDB, "\(row.bandHz) Hz reported a width")
+        }
+    }
+
+    // MARK: - Peak picking
+
+    func testPeakPickingMatches() {
+        for expected in golden.findPeaks {
+            let signal = Fixtures.xorshift(seed: expected.seed, count: 400)
+                .map { abs($0) * 1.6 }
+            let got = Peaks.find(signal, height: 0.8, distance: expected.distance)
+            XCTAssertEqual(got, expected.peaks,
+                           "seed \(expected.seed) distance \(expected.distance)")
+        }
+    }
+
+    // MARK: - Sub-bass
+
+    func testKickDetectionAndTheSubStageMatch() throws {
+        for (name, expected) in golden.subbass {
+            let bpm = Double(name.dropFirst("groove".count)) ?? 0
+            let x = Fixtures.groove(bpm: bpm)
+
+            let (kicks, strengths) = SubBass.detectKicks(x, rate: Fixtures.rate)
+            // Asserted position by position. "About the right number of
+            // onsets" is not the property that matters -- a burst laid a few
+            // milliseconds late against a 45 Hz cycle of 22 ms flams and
+            // partly cancels the kick it was meant to reinforce.
+            XCTAssertEqual(kicks, expected.kicks, "\(name) kick positions")
+            XCTAssertEqual(strengths.count, expected.strengths.count, "\(name) strengths")
+            for (index, value) in expected.strengths.enumerated() where index < strengths.count {
+                XCTAssertEqual(strengths[index], value, accuracy: 1e-7,
+                               "\(name) strength \(index)")
+            }
+
+            XCTAssertEqual(SubBass.lowBandActivity(x, rate: Fixtures.rate),
+                           expected.lowBandActivityDB, accuracy: 1e-6,
+                           "\(name) low band activity")
+            XCTAssertEqual(SubBass.attackContrast(x, rate: Fixtures.rate, kicks: kicks),
+                           expected.attackContrastDB, accuracy: 1e-5,
+                           "\(name) attack contrast")
+
+            let (out, report) = SubBass.enhance(x, rate: Fixtures.rate,
+                                                amountDB: 5.0, punchDB: 3.0)
+            XCTAssertEqual(report.appliedDB, expected.appliedDB, accuracy: 1e-6,
+                           "\(name) applied")
+            XCTAssertEqual(report.punchDB, expected.punchDB, accuracy: 1e-9, "\(name) punch")
+            XCTAssertEqual(report.sustainTrimDB, expected.sustainTrimDB, accuracy: 1e-6,
+                           "\(name) sustain trim")
+            XCTAssertEqual(report.bandLevelChangeDB, expected.bandLevelChangeDB,
+                           accuracy: 1e-6, "\(name) band level change")
+            XCTAssertEqual(report.safetyTrimDB, expected.safetyTrimDB, accuracy: 1e-6,
+                           "\(name) safety trim")
+            XCTAssertEqual(report.polarityFlipped, expected.polarityFlipped,
+                           "\(name) polarity")
+            XCTAssertEqual(rms(out), expected.outputRMS, accuracy: 1e-9, "\(name) rms")
+            XCTAssertEqual(peak(out), expected.outputPeak, accuracy: 1e-9, "\(name) peak")
+        }
+    }
+
+    /// The property that makes attack shaping a transient shaper rather than
+    /// an equaliser: the band it works on comes out holding the energy it
+    /// went in with, so only the distribution in time has changed. A port
+    /// that dropped the renormalisation would still match every number above
+    /// except this one.
+    func testAttackShapingDoesNotChangeTheBandsEnergy() {
+        let x = Fixtures.groove(bpm: 124)
+        let (kicks, strengths) = SubBass.detectKicks(x, rate: Fixtures.rate)
+        var report = SubBass.Report()
+        _ = SubBass.shapeAttacks(x, rate: Fixtures.rate, kicks: kicks,
+                                 strengths: strengths, boostDB: 6.0, report: &report)
+        XCTAssertLessThan(abs(report.bandLevelChangeDB), 0.001,
+                          "the punch band gained \(report.bandLevelChangeDB) dB")
+        XCTAssertLessThan(report.sustainTrimDB, 0, "nothing was trimmed back")
+    }
+
     // MARK: - Helpers
+
+    func close(_ got: Double?, _ expected: Double?, _ accuracy: Double, _ label: String) {
+        guard let expected else { XCTAssertNil(got, label); return }
+        guard let got else { XCTFail("\(label): expected \(expected), got nil"); return }
+        XCTAssertEqual(got, expected, accuracy: accuracy, label)
+    }
+
 
     func bank() -> [String: SOS] {
         ["subBand": FilterBank.subBand, "kickBand": FilterBank.kickBand,

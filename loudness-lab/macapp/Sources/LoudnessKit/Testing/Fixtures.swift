@@ -63,6 +63,55 @@ public enum Fixtures {
         }
     }
 
+    /// numpy's `arange(0, stop, step)`, which decides how many beats a bar
+    /// of a given tempo contains. Reimplemented rather than approximated: an
+    /// off-by-one here is one extra kick, and the kick count is asserted.
+    static func arange(to stop: Double, step: Double) -> [Double] {
+        let count = Int((stop / step).rounded(.up))
+        return (0..<max(0, count)).map { Double($0) * step }
+    }
+
+    /// Four-on-the-floor over a bassline: what the kick detector is for.
+    ///
+    /// The bassline changes note on every beat deliberately. That is the
+    /// thing a plain rising-edge detector kept calling a kick, and the reason
+    /// the detector keys on attack sharpness instead.
+    public static func groove(bpm: Double, seconds: Double = 8.0) -> [[Double]] {
+        let n = Int(seconds * rate)
+        let beat = 60.0 / bpm
+        var mix = [Double](repeating: 0, count: n)
+        let steps = [0, 7, 0, 5, 0, 7, 3, 7]
+
+        for (index, onset) in arange(to: seconds, step: beat).enumerated() {
+            let start = Int(onset * rate)
+            let span = min(Int(0.2 * rate), n - start)
+            if span <= 0 { break }
+            let click = xorshift(seed: UInt64(0x51DE + index), count: span)
+            var phase = 0.0
+            for i in 0..<span {
+                let u = Double(i) / rate
+                phase += 110.0 * exp(-u / 0.02) + 45.0
+                mix[start + i] += sin(2 * .pi * phase / rate) * exp(-u / 0.08)
+                mix[start + i] += click[i] * exp(-u / 0.002) * 0.3
+            }
+        }
+
+        for (index, onset) in arange(to: seconds, step: beat / 2).enumerated() {
+            let start = Int(onset * rate)
+            let span = min(Int(beat / 2 * rate * 0.9), n - start)
+            if span <= 0 { break }
+            let freq = 55.0 * pow(2, Double(steps[index % steps.count]) / 12)
+            for i in 0..<span {
+                let u = Double(i) / rate
+                mix[start + i] += 0.5 * sin(2 * .pi * freq * u) * exp(-u / 0.3)
+            }
+        }
+
+        let peak = mix.map(abs).max() ?? 1
+        let scale = 0.9 / peak
+        return [mix.map { $0 * scale }, mix.map { $0 * scale * 0.95 }]
+    }
+
     /// The fixture normalised and driven `overDB` past full scale, then hard
     /// clipped -- the de-clipper's input, with the truth still available.
     public static func clipped(_ kind: Kind, overDB: Double,

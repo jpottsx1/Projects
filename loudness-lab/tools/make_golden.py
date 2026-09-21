@@ -25,10 +25,10 @@ import sys
 from pathlib import Path
 
 import numpy as np
-from scipy.signal import butter, sosfilt, sosfiltfilt
+from scipy.signal import butter, find_peaks, sosfilt, sosfiltfilt
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from loudnesslab import bs1770, declip  # noqa: E402
+from loudnesslab import bs1770, declip, spectrum, subbass  # noqa: E402
 
 RATE = 48000
 OUT = Path(__file__).resolve().parents[1] / "macapp/Tests/LoudnessKitTests/Golden"
@@ -46,7 +46,8 @@ FILTERS = {
     "subCeiling":   (4, 75.0, "low"),
     "envelope20":   (2, 20.0, "low"),
     "envelope200":  (2, 200.0, "low"),
-    "onsetFast":    (2, 200.0, "low"),
+    "envelope60":   (2, 60.0, "low"),
+    "envelope3":    (2, 3.0, "low"),
 }
 
 
@@ -95,6 +96,42 @@ def fixture(kind: str, seconds: float = 3.0) -> np.ndarray:
     return stereo
 
 
+def groove(bpm: float, seconds: float = 8.0) -> np.ndarray:
+    """Four-on-the-floor over a bassline: what the kick detector is for.
+
+    The bassline changes note on every beat deliberately -- that is the thing
+    a plain rising-edge detector kept calling a kick.
+    """
+    n = int(seconds * RATE)
+    t = np.arange(n, dtype=np.float64) / RATE
+    beat = 60.0 / bpm
+    mix = np.zeros(n)
+    steps = [0, 7, 0, 5, 0, 7, 3, 7]
+
+    for index, onset in enumerate(np.arange(0.0, seconds, beat)):
+        start = int(onset * RATE)
+        span = min(int(0.2 * RATE), n - start)
+        if span <= 0:
+            break
+        u = np.arange(span) / RATE
+        sweep = 110.0 * np.exp(-u / 0.02) + 45.0
+        mix[start:start + span] += (np.sin(2 * np.pi * np.cumsum(sweep) / RATE)
+                                    * np.exp(-u / 0.08))
+        mix[start:start + span] += xorshift(0x51DE + index, span) * np.exp(-u / 0.002) * 0.3
+
+    for index, onset in enumerate(np.arange(0.0, seconds, beat / 2)):
+        start = int(onset * RATE)
+        span = min(int(beat / 2 * RATE * 0.9), n - start)
+        if span <= 0:
+            break
+        u = np.arange(span) / RATE
+        freq = 55.0 * 2 ** (steps[index % len(steps)] / 12.0)
+        mix[start:start + span] += 0.5 * np.sin(2 * np.pi * freq * u) * np.exp(-u / 0.3)
+
+    stereo = np.column_stack([mix, mix * 0.95])
+    return stereo / np.abs(stereo).max() * 0.9
+
+
 def clipped(kind: str, over_db: float, seconds: float = 3.0) -> np.ndarray:
     x = fixture(kind, seconds)
     x = x / np.abs(x).max() * 10 ** (over_db / 20)
@@ -126,6 +163,13 @@ def main() -> int:
             "peak": rounded(np.abs(fixture(kind)).max()),
         }
         for kind in ("tones", "programme", "noise", "quiet")
+    }
+    golden["grooves"] = {
+        f"{bpm:.0f}": {"frames": int(groove(bpm).shape[0]),
+                       "head": rounded(groove(bpm)[:8, 0]),
+                       "rms": rounded(np.sqrt(np.mean(groove(bpm) ** 2))),
+                       "peak": rounded(np.abs(groove(bpm)).max())}
+        for bpm in (100.0, 124.0)
     }
 
     # --- filter coefficients, and what they do to a known signal ---
@@ -186,6 +230,56 @@ def main() -> int:
             "firstRuns": [[int(s), int(e), int(sign)] for s, e, sign in runs[:5]],
             "outputRMS": rounded(np.sqrt(np.mean(restored ** 2)), 12),
             "outputPeak": rounded(np.abs(restored).max(), 12),
+        }
+
+    # --- 1/3-octave spectrum ---
+    # Note for whoever chases a small disagreement here: numpy's rfft on a
+    # float32 frame returns complex64, so the Python does this FFT in SINGLE
+    # precision while the Swift does it in double. Band levels differ by
+    # around a millionth of a decibel, which is why these are compared loosely
+    # and the Python rounds to three places on the way to the database anyway.
+    golden["spectrum"] = {}
+    for kind in ("tones", "programme"):
+        rows = spectrum.analyse(fixture(kind, 4.0), RATE)
+        golden["spectrum"][kind] = {
+            "bands": len(rows),
+            "rows": [{"band_hz": r["band_hz"], "ltas_db": r["ltas_db"],
+                      "shape_db": r["shape_db"], "p10_db": r["p10_db"],
+                      "p90_db": r["p90_db"], "side_mid_db": r["side_mid_db"]}
+                     for r in rows],
+        }
+
+    # --- peak picking, which decides where every sub burst lands ---
+    golden["findPeaks"] = []
+    for seed in (11, 29, 71):
+        values = np.abs(xorshift(seed, 400)) * 1.6
+        for distance in (1, 5, 17):
+            found, _ = find_peaks(values, height=0.8, distance=distance)
+            golden["findPeaks"].append({
+                "seed": seed, "distance": distance,
+                "peaks": [int(p) for p in found],
+            })
+
+    # --- kick detection and the sub stage ---
+    golden["subbass"] = {}
+    for bpm in (100.0, 124.0):
+        x = groove(bpm)
+        kicks, strengths = subbass.detect_kicks(x, RATE)
+        out, report = subbass.enhance(x, RATE, amount_db=5.0, punch_db=3.0)
+        golden["subbass"][f"groove{bpm:.0f}"] = {
+            "kicks": [int(k) for k in kicks],
+            "strengths": rounded(strengths, 9),
+            "lowBandActivityDB": rounded(subbass.low_band_activity(x, RATE)),
+            "attackContrastDB": rounded(
+                subbass.attack_contrast(x, RATE, kicks)),
+            "appliedDB": rounded(report["applied_db"]),
+            "punchDB": rounded(report["punch_db"]),
+            "sustainTrimDB": rounded(report["sustain_trim_db"]),
+            "bandLevelChangeDB": rounded(report["band_level_change_db"]),
+            "safetyTrimDB": rounded(report["safety_trim_db"]),
+            "polarityFlipped": bool(report["polarity_flipped"]),
+            "outputRMS": rounded(np.sqrt(np.mean(out ** 2)), 12),
+            "outputPeak": rounded(np.abs(out).max(), 12),
         }
 
     # --- clipping detection ---

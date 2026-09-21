@@ -21,16 +21,44 @@ tuning it away.
 - **Do not loosen a tolerance to make a test pass** until you know why it
   fails. Twice now a failing golden test was the port being right.
 
+## Who this is for
+
+Jeff is a DJ, not a developer. He does not want to run terminal commands,
+and should not have to: the Mac app is the product. If something can only
+be done from a shell, that is a gap in the app, not a thing to instruct
+him through. Build it, run it, read the errors and fix them yourself --
+that is what running locally is for.
+
+The app opens in Xcode from `macapp/Package.swift` (Cmd-R runs, Cmd-U
+tests), or by double-clicking `macapp/Build and Run LoudnessLab.command`,
+which pulls, builds and launches.
+
 ## Running things
 
 ```sh
 python3 -m unittest discover -s tests -t .   # ~205 tests, ~2 min
-swift test --package-path macapp             # 40 golden tests, ~2 min
-sh macapp/make-app.sh --open                 # build + launch LoudnessLab.app
-swift run --package-path macapp LoudnessLabUI  # faster, for seeing a change
+swift test --package-path macapp             # 42 golden tests, ~2 min
+python3 tools/check_golden.py                # vectors vs the Swift structs
+python3 tools/check_help.py                  # every setting has help text
 ```
 
 Needs `ffmpeg` and `ffprobe` on PATH, plus numpy/scipy for the Python.
+
+## The app
+
+Three panes. Left: folders, settings, Process. Middle: the tracks found,
+in the order they will be worked through -- thinnest low end first, with
+ticks deciding what runs. Right: two tabs, **Survey** and **Results**,
+then the A/B player and the log.
+
+Survey answers what a folder IS: how much of it arrived clipped, what
+levelling to each target would cost, and how far each folder's low end
+sits under a named reference. That last number is where a profile's cap
+comes from. Measure reads the files and writes nothing.
+
+`Processor` runs the chain off the main actor, two or three tracks at a
+time. It is bounded on purpose -- a six-minute stereo track is about
+250 MB as doubles and the chain holds several copies at once.
 
 ## The golden vectors
 
@@ -69,6 +97,13 @@ every machine but the one that made it for a while.
   rows stale so they re-measure.
 - **Python `round()` is banker's rounding** -- Swift needs
   `.rounded(.toNearestOrEven)` to match.
+- **Anything heavy on `@MainActor` freezes the window.** The whole chain
+  ran on the main thread once, so the progress bar could not move and Stop
+  could not be clicked. DSP belongs in the kit, not in an ObservableObject.
+- **Folder grouping uses `Library.folderLabels`,** not the parent's name:
+  two compilations each with a CD1 otherwise merge into one corpus, and a
+  corpus silently averaged with another is a wrong number that looks
+  exactly like a right one.
 
 ## Layout
 
@@ -83,11 +118,25 @@ macapp/
   Tests/                  the golden tests and their fixtures
 ```
 
-## Open
+## Open — in the order that matters
 
-- **The A/B switch has never been heard.** Versions are scheduled together
-  on one host clock so a switch lands on the same sample. Reasoned, not
-  proven. A tick or a flam on ⇧Space is the bug.
-- **The disco survey.** The `CLIPPING` block from the real 1970s folders
-  decides whether de-clipping earns its lossy generation on that material.
-- **The app's `Engine` and views have been type-checked, not exercised.**
+1. **Measure three folders: 1970s, 1980s, and something modern.** Name the
+   modern one as reference. Nothing else here can be decided without it.
+   This has been outstanding for days only because the previous session ran
+   in the cloud and could not reach the music.
+2. **Does `disco-70s` turn de-clipping on?** The clipped share of the real
+   disco folders decides it. About a third of the disco measured so far
+   carries clipped runs, but the honest gain through MP3 is 2.0 dB at light
+   clipping falling to 0.4 at heavy -- against the cost of a lossy
+   generation. Measure, then listen, then decide.
+3. **An `eighties` profile.** Legitimate -- `disco-70s` is the same kind of
+   thing, a policy you select rather than an era read off a year tag. But
+   its cap has to come from the measured deficit of an eighties corpus,
+   exactly as `disco-70s`'s 8 dB came from three 1970s corpora. Not before
+   step 1.
+4. **The A/B switch has never been heard.** Versions are scheduled together
+   on one host clock so a switch lands on the same sample. Reasoned, not
+   proven. A tick or a flam on Shift-Space is the bug, and it is the
+   feature the app exists for.
+5. **Process some music.** The app has never been through a full run on
+   real records.

@@ -8,6 +8,22 @@
 set -eu
 cd "$(dirname "$0")"
 
+# Pull first. Building a stale checkout is not a hypothetical problem: it
+# has already cost an afternoon, looking for a pane that existed in the
+# repository and not on this disk. "Pull and rebuild" should be one action,
+# not two things to remember in the right order.
+if command -v git >/dev/null 2>&1 && git rev-parse --git-dir >/dev/null 2>&1; then
+    echo "Updating…"
+    if git pull --ff-only; then
+        :
+    else
+        echo
+        echo "Could not update. Usually that means there are local edits here."
+        echo "Building what is on disk instead -- it may be out of date."
+    fi
+    echo
+fi
+
 echo "Building Loudness Lab. The first build takes a minute or two."
 echo
 

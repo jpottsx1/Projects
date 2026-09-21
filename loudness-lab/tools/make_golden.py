@@ -471,6 +471,12 @@ def main() -> int:
           f"{len(golden['measure'])} measurements, "
           f"{len(golden['declip'])} de-clip cases")
     warn_about_ignored_outputs()
+    # Type-check what was just written against the structs that have to
+    # decode it. There is no Swift toolchain here, so without this a wrong
+    # key is only found on a Mac, one key per build.
+    import check_golden
+    if check_golden.main() != 0:
+        return 1
     return 0
 
 

@@ -55,8 +55,16 @@ final class GoldenTests: XCTestCase {
         let frames: Int
         let seconds, lufs_i, s_p95, true_peak_dbtp, sample_peak_dbfs: Double
     }
+    /// `isOriginal` is 1, 0 or absent, NOT a boolean, because that is what
+    /// the Python writes -- it keeps the flag as an INTEGER so it can live
+    /// in the SQLite column the era reports aggregate with SUM(CASE WHEN
+    /// year_is_original = 0 ...). Swift models the same three states as
+    /// `Bool?`, which is the better type on this side and binds to exactly
+    /// the same 1/0/NULL. These structs describe the FILE, so this one
+    /// follows the file and the test bridges at the comparison, where the
+    /// difference is visible.
     struct YearTagCase: Decodable {
-        let tags: [String: String]; let year: Int?; let isOriginal: Bool?
+        let tags: [String: String]; let year: Int?; let isOriginal: Int?
     }
 
     struct MP3Case: Decodable {
@@ -708,7 +716,8 @@ final class GoldenTests: XCTestCase {
         for expected in golden.yearFromTags {
             let (year, original) = Tags.year(from: expected.tags)
             XCTAssertEqual(year, expected.year, "\(expected.tags)")
-            XCTAssertEqual(original, expected.isOriginal, "\(expected.tags) provenance")
+            XCTAssertEqual(original, expected.isOriginal.map { $0 != 0 },
+                           "\(expected.tags) provenance")
         }
     }
 

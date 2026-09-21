@@ -51,6 +51,29 @@ BUILT_IN = {
         "target": -16.0, "estimator": "s_p95", "peak_ceiling": -1.0,
         "auto": True, "max_amount": 6.0, "min_activity": 20.0, "punch": 0.0,
     },
+    # Measured, not guessed. Three independent 1970s disco corpora -- 108
+    # tracks over two compilations and a 2003 reissue -- agree within about
+    # 3 dB from 32 to 63 Hz, sitting 6 to 9 dB under a current reference.
+    # Nothing usable below 32 Hz: the 20 Hz band reads as empty on all three
+    # and 25 Hz on two of them, so a wider window would only lift noise.
+    # The 2003 reissue measures THINNER down low than the two older
+    # compilations, which is how we know it is era mastering being described
+    # rather than a remastering engineer.
+    "disco-70s": {
+        "description": "1970s disco. Deficit of 6-9 dB across 32-63 Hz, "
+                       "agreed by three independent corpora; nothing below "
+                       "32 Hz to lift. Needs `reference`. Lossy.",
+        "target": -16.0, "estimator": "s_p95", "peak_ceiling": -1.0,
+        "auto": True, "max_amount": 8.0,
+        # Lower than the default 20. Disco is the most groove-locked material
+        # in the project and sits nearest the threshold, and on a corpus this
+        # consistent a marginal track is better reviewed than silently
+        # dropped.
+        "min_activity": 18.0,
+        # Off to start: live drummers, and 2-6 kHz is full of hi-hat and
+        # tambourine rather than beater click.
+        "punch": 0.0,
+    },
 }
 
 DEFAULT_FILE = Path("profiles.json")

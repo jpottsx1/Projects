@@ -74,6 +74,33 @@ class TestLoading(unittest.TestCase):
         self.assertIn("level-only", str(caught.exception))
 
 
+class TestBuiltIns(unittest.TestCase):
+    def test_every_built_in_resolves_and_uses_known_keys(self):
+        loaded = profiles.load()
+        for name in profiles.BUILT_IN:
+            with self.subTest(profile=name):
+                settings = profiles.resolve(loaded, name)
+                self.assertEqual(set(settings), set(profiles.FIELDS))
+                self.assertTrue(settings["description"])
+
+    def test_the_disco_profile_carries_its_measured_numbers(self):
+        """The profile is a finding, not a preference: it records a deficit
+        of 6-9 dB across 32-63 Hz agreed by three corpora, so the cap and
+        the content threshold should not drift without new measurements."""
+        settings = profiles.resolve(profiles.load(), "disco-70s")
+        self.assertTrue(settings["auto"])
+        self.assertEqual(settings["max_amount"], 8.0)
+        self.assertEqual(settings["min_activity"], 18.0)
+        self.assertEqual(settings["punch"], 0.0)
+
+    def test_profiles_needing_a_reference_do_not_ship_with_one(self):
+        """A reference names the user's own folder, so it cannot be baked in."""
+        loaded = profiles.load()
+        for name in ("restore", "disco-70s"):
+            with self.subTest(profile=name):
+                self.assertIsNone(profiles.resolve(loaded, name)["reference"])
+
+
 class TestPrecedence(unittest.TestCase):
     def test_an_explicit_flag_beats_the_profile(self):
         settings = {"target": -16.0}

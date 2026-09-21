@@ -219,12 +219,21 @@ audited rather than retyped:
 ./loudness-lab subbass <path> --profile restore --reference "New Music 2026-09-02"
 ```
 
-Two are built in. `level-only` is lossless levelling and nothing else.
-`restore` adds a sub sized per track against a reference corpus. Your own go
-in `profiles.json` as an object of name to settings; anything there adds to
-the built-ins or overrides one by name, and an unknown key is an error rather
-than silently ignored -- a typo that changes nothing is a policy that differs
-from the one written down.
+Three are built in. `level-only` is lossless levelling and nothing else.
+`restore` adds a sub sized per track against a reference corpus. `disco-70s`
+is the same with numbers taken from measurement: three independent 1970s
+disco corpora, 108 tracks, agreeing within about 3 dB from 32 to 63 Hz and
+sitting 6-9 dB under a current reference, with nothing usable below 32 Hz.
+
+A profile derived from measurement is a finding rather than a preference, so
+it lives in the repository with the evidence that produced it. What cannot
+ship with it is `reference`, which names a folder on your machine -- supply
+that with `--reference`, or pin it in a local profile.
+
+Your own go in `profiles.json` as an object of name to settings; anything
+there adds to the built-ins or overrides one by name, and an unknown key is
+an error rather than silently ignored -- a typo that changes nothing is a
+policy that differs from the one written down.
 
 An explicit flag always beats the profile, which beats the default. Flags
 default to nothing rather than to a value, so "not given" can be told from

@@ -107,7 +107,7 @@ enum Help {
         again, and the result is the same length with a maximum sample \
         difference of 0.00003 — the codec, and no shift at all.
 
-        FLAC and AAC carry artist, title and album only — for now. Serato \
+        FLAC and AAC carry artist, title, album and artwork — for now. Serato \
         does store markers in both (base64 in FLAC's Vorbis comments, \
         freeform atoms in M4A), so this is a gap rather than a limit. \
         Going MP3 to MP3 the tag is copied unread, which is why it is \

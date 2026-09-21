@@ -95,7 +95,18 @@ public enum AudioWriter {
                              rate: Double = AudioDecoder.targetRate,
                              tagsFrom source: URL? = nil) throws {
         guard format != .flac else {
-            return try writeFLAC(audio, to: url, rate: rate)
+            try writeFLAC(audio, to: url, rate: rate)
+            // AVFoundation writes the samples and nothing else -- no
+            // artist, no title, no artwork. A library of untitled FLACs is
+            // one you cannot find anything in, so the tags are remuxed on
+            // afterwards. `-c:a copy` means the audio is not touched:
+            // verified identical by md5 either side.
+            //
+            // Best effort on purpose. If ffmpeg is missing the file is
+            // still written, just bare, and FLAC stays the format that
+            // needs nothing installed.
+            if let source { try? carryTagsIntoContainer(from: source, into: url) }
+            return
         }
         guard let ffmpeg = Tools.find("ffmpeg") else {
             throw Failure("ffmpeg is needed to write \(format.rawValue) and "
@@ -129,9 +140,16 @@ public enum AudioWriter {
             arguments += ["-map_metadata", "-1", "-write_id3v1", "0",
                           "-id3v2_version", "0"]
         } else if let source {
-            arguments += ["-i", source.path, "-map", "0:a:0", "-map_metadata", "1"]
+            // `1:v?` is the artwork, optional -- without the question mark
+            // a track with no cover fails the whole encode.
+            arguments += ["-i", source.path, "-map", "0:a:0", "-map", "1:v?",
+                          "-map_metadata", "1"]
         }
-        arguments += format.encoderArguments + [url.path]
+        arguments += format.encoderArguments
+        if !carryWholeTag && source != nil {
+            arguments += ["-c:v", "copy", "-disposition:v", "attached_pic"]
+        }
+        arguments += [url.path]
         try Tools.run(ffmpeg, arguments)
         if carryWholeTag, let source { try carryID3v2(from: source, to: url) }
     }
@@ -158,6 +176,31 @@ public enum AudioWriter {
             AVLinearPCMBitDepthKey: 24,
         ]
         try writePCM(audio, to: url, rate: rate, settings: settings)
+    }
+
+    /// Copy text tags and artwork into a file that already holds the audio.
+    ///
+    /// A remux rather than a re-encode: `-c:a copy` moves the existing
+    /// stream across untouched, which for FLAC means the samples are
+    /// bit-identical afterwards. Serato's markers do not come this way --
+    /// they would need translating out of ID3 and into whatever the target
+    /// container uses, which is a different job and needs a real file to
+    /// check against.
+    static func carryTagsIntoContainer(from source: URL, into url: URL) throws {
+        guard let ffmpeg = Tools.find("ffmpeg") else { return }
+        let scratch = url.deletingLastPathComponent()
+            .appendingPathComponent("tagging-\(UUID().uuidString)."
+                                    + url.pathExtension)
+        defer { try? FileManager.default.removeItem(at: scratch) }
+        try Tools.run(ffmpeg, [
+            "-nostdin", "-v", "error", "-y",
+            "-i", url.path, "-i", source.path,
+            "-map", "0:a:0", "-map", "1:v?", "-map_metadata", "1",
+            "-c:a", "copy", "-c:v", "copy", "-disposition:v", "attached_pic",
+            scratch.path,
+        ])
+        try FileManager.default.removeItem(at: url)
+        try FileManager.default.moveItem(at: scratch, to: url)
     }
 
     static func isMP3(_ url: URL?) -> Bool {

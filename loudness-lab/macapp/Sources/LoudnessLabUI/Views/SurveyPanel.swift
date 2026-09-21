@@ -232,6 +232,16 @@ struct SurveyPanel: View {
                 Text("No single folder matches \"\(reference)\".")
                     .font(.caption).foregroundStyle(.orange)
             }
+            // Said out loud rather than left to an empty column. With no
+            // reference every folder shows a mean and no comparison, which
+            // looks like a result and is only half of one.
+            if reference.isEmpty && survey.folders.count > 1 {
+                Text("Name one of the folders below to fill in the vs-ref "
+                     + "column — that comparison is the number a profile's "
+                     + "cap comes from.")
+                    .font(.caption).foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             ForEach(survey.folders) { row in
                 HStack(spacing: 8) {
                     Text(row.folder)

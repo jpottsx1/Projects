@@ -76,6 +76,46 @@ BUILT_IN = {
         # tambourine rather than beater click.
         "punch": 0.0,
     },
+    # Measured, like the disco one, and on a library this project did not
+    # come from: five discs of "100 Hits - The New Romantics (2011)", 100
+    # tracks, against 43 tracks of current music in the same database.
+    #
+    #   New Romantics discs   -25.81  -23.54  -23.32  -21.88  -21.07
+    #   current reference     -14.89
+    #
+    # That is 6.2 to 10.9 dB short across 31.5-63 Hz, a median near 8.2 --
+    # THINNER than the disco corpora, which sat 6 to 9 under the same kind
+    # of reference. Worth saying plainly because it was not the expected
+    # result: the compilation is a 2011 master, so the mastering is modern
+    # and the low end still was not put there.
+    #
+    # The 4.7 dB spread across five discs of one boxed set is the reason
+    # `auto` is on rather than a fixed amount. Within-era spread is the
+    # whole argument for measuring each track.
+    "eighties": {
+        "description": "1980s pop and new wave. Short by 6-11 dB across "
+                       "31.5-63 Hz, measured over five discs. Needs "
+                       "`reference`. Lossy.",
+        "target": -16.0, "estimator": "s_p95", "peak_ceiling": -1.0,
+        "auto": True,
+        # Ten, not disco's eight: the deficit measured higher here and a cap
+        # below what was measured would leave the thinnest discs short of
+        # the target the profile is aiming at.
+        "max_amount": 10.0,
+        # The default. Disco lowered this to 18 because that material sits
+        # near the threshold and was measured doing so; nothing has measured
+        # eighties activity, and moving a gate on a guess is how a static
+        # floor gets mistaken for a bassline.
+        "min_activity": 20.0,
+        # Off, and not yet decided. The library this came from measures 13.6%
+        # clipped overall while one disco reissue inside it measures 53%, so
+        # the honest answer needs this corpus's own clipped share rather than
+        # an average across everything else.
+        "declip": False,
+        # Drum machines already have beater click, and 2-6 kHz on this
+        # material is full of gated reverb rather than attack.
+        "punch": 0.0,
+    },
 }
 
 DEFAULT_FILE = Path("profiles.json")

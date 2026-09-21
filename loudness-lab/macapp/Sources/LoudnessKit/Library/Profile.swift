@@ -76,6 +76,35 @@ public struct Profile: Codable, Equatable, Sendable {
         // tambourine rather than beater click.
         disco.punch = 0
 
-        return ["level-only": levelOnly, "restore": restore, "disco-70s": disco]
+        // Measured the same way, on a library this project did not come
+        // from: five discs of "100 Hits - The New Romantics (2011)", 100
+        // tracks, against 43 tracks of current music in the same database.
+        //
+        //   New Romantics discs   -25.81  -23.54  -23.32  -21.88  -21.07
+        //   current reference     -14.89
+        //
+        // 6.2 to 10.9 dB short across 31.5-63 Hz, median near 8.2 --
+        // THINNER than the disco corpora at 6 to 9. Worth stating because
+        // it was not the expected result: that compilation is a 2011
+        // master, so the mastering is modern and the low end still was not
+        // put there. The 4.7 dB spread across five discs of one boxed set
+        // is why `auto` is on rather than a fixed amount.
+        var eighties = Profile()
+        eighties.description = "1980s pop and new wave. Short by 6-11 dB "
+            + "across 31.5-63 Hz, measured over five discs. Needs a "
+            + "reference. Lossy."
+        eighties.auto = true
+        // Ten, not disco's eight: the deficit measured higher here, and a
+        // cap below what was measured leaves the thinnest discs short of
+        // the target the profile is aiming at.
+        eighties.maxAmount = 10
+        // Left at the default. Disco lowered it to 18 because that material
+        // was measured sitting near the threshold; nothing has measured
+        // eighties activity, and moving a gate on a guess is how a static
+        // floor gets mistaken for a bassline.
+        eighties.minActivity = 20
+
+        return ["level-only": levelOnly, "restore": restore,
+                "disco-70s": disco, "eighties": eighties]
     }()
 }

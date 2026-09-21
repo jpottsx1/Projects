@@ -124,11 +124,15 @@ struct SettingsPanel: View {
                     .help("What every setting does, and why (⌘?)")
                 }
 
+                // Listed from the profiles themselves. Typed out by hand,
+                // a profile added to the kit stayed invisible in the app --
+                // which is the same drift the help checker exists to catch,
+                // one layer down.
                 Picker("Profile", selection: $profileName) {
                     Text("none").tag("")
-                    Text("level-only").tag("level-only")
-                    Text("restore").tag("restore")
-                    Text("disco-70s").tag("disco-70s")
+                    ForEach(Profile.builtIn.keys.sorted(), id: \.self) {
+                        Text($0).tag($0)
+                    }
                 }
                 .help(Help.profile.summary)
                 .onChange(of: profileName) { _, name in

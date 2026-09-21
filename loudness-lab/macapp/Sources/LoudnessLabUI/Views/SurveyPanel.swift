@@ -39,6 +39,7 @@ struct SurveyPanel: View {
                     VStack(alignment: .leading, spacing: 18) {
                         loudness(survey)
                         clipping(survey)
+                        topEnd(survey)
                         targets(survey)
                         lowEnd(survey)
                     }
@@ -176,6 +177,50 @@ struct SurveyPanel: View {
                 .font(.caption2).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
+    }
+
+    /// Whether "air" is worth offering on this material, which is a
+    /// question with an answer rather than a matter of taste: a shelf can
+    /// only lift what is there, and on a lossy file the top may already be
+    /// gone.
+    private func topEnd(_ survey: Survey) -> some View {
+        section("Top end, 8–16 kHz") {
+            ForEach(survey.folders.filter { $0.topMean.isFinite }) { row in
+                HStack(spacing: 8) {
+                    Text(row.folder).lineLimit(1).truncationMode(.middle)
+                    Spacer(minLength: 6)
+                    Text(String(format: "%+.2f", row.topMean))
+                        .font(.system(.caption, design: .monospaced))
+                        .frame(width: 52, alignment: .trailing)
+                    Text(row.topDeficitVsReference.map { String(format: "%+.2f", $0) }
+                         ?? (row.folder == survey.reference ? "ref" : "—"))
+                        .font(.system(.caption, design: .monospaced))
+                        .frame(width: 52, alignment: .trailing)
+                    Text(row.topCurve[16000].map { String(format: "%.0f", $0) } ?? "—")
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundStyle(cliff(row) ? .orange : .secondary)
+                        .frame(width: 44, alignment: .trailing)
+                        .help(cliff(row)
+                              ? "16 kHz falls off a cliff below 12.5 kHz — that is "
+                                + "an MP3 low-pass, not the master. Lifting it "
+                                + "would raise noise."
+                              : "16 kHz, for comparison with 12.5 kHz")
+                }
+                .font(.callout)
+            }
+            Text("Mean, dB against the reference, then 16 kHz on its own. "
+                 + "A 16 kHz figure far below the mean is the codec, not the "
+                 + "record — air cannot be added where nothing was kept.")
+                .font(.caption2).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    /// More than 15 dB between 12.5 and 16 kHz is not a mastering choice.
+    private func cliff(_ row: Survey.FolderLowEnd) -> Bool {
+        guard let mid = row.topCurve[12500], let top = row.topCurve[16000]
+        else { return false }
+        return mid - top > 15
     }
 
     private func lowEnd(_ survey: Survey) -> some View {

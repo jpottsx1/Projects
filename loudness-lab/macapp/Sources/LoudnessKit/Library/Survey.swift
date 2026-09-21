@@ -62,6 +62,20 @@ public struct Survey: Sendable {
         public let mean: Double
         /// dB under the reference folder, when one was named.
         public var deficitVsReference: Double?
+
+        /// The same, 8 to 16 kHz -- what an "air" stage would work on.
+        ///
+        /// Measured before being offered, because a high shelf can only
+        /// lift what is there. Where an MP3's low-pass has already removed
+        /// the top, a deficit is the codec being described rather than the
+        /// master, and boosting it raises noise and nothing else. Which is
+        /// why the bands are carried individually as well as averaged: a
+        /// cliff between 12.5 and 16 kHz is the codec, a gentle slope is
+        /// the record.
+        public var topCurve: [Double: Double] = [:]
+        public var topMean: Double = .nan
+        public var topDeficitVsReference: Double?
+
         public var id: String { folder }
     }
 
@@ -126,6 +140,7 @@ public struct Survey: Sendable {
 
         // --- low end, by folder ---
         let curves = try library.referenceCurves()
+        let tops = try library.curves(bands: Library.topShapeBands)
         // Counted across the WHOLE library, not just the selected folders,
         // because the curves are: `referenceCurves` has no root filter, and
         // it should not have one -- naming a reference folder measured in an
@@ -146,6 +161,18 @@ public struct Survey: Sendable {
         let referenceName = wanted.flatMap { Library.resolveReference(curves, $0) }
         survey.reference = referenceName
         let referenceCurve = referenceName.flatMap { curves[$0] }
+        let referenceTop = referenceName.flatMap { tops[$0] }
+
+        /// Mean of the bands both sides actually have. Averaging over a band
+        /// one corpus is missing compares a folder against a hole.
+        func gap(_ mine: [Double: Double], _ theirs: [Double: Double],
+                 _ bands: [Double]) -> Double? {
+            let pairs = bands.compactMap { band -> Double? in
+                guard let a = mine[band], let b = theirs[band] else { return nil }
+                return a - b
+            }
+            return pairs.isEmpty ? nil : pairs.reduce(0, +) / Double(pairs.count)
+        }
 
         survey.folders = curves.compactMap { folder, curve in
             let values = Library.lowShapeBands.compactMap { curve[$0] }
@@ -155,16 +182,19 @@ public struct Survey: Sendable {
                                    clipped: clipped[folder] ?? 0,
                                    curve: curve, mean: mean, deficitVsReference: nil)
             if let referenceCurve, folder != referenceName {
-                // Band by band, and only where both sides have the band --
-                // averaging over a band one corpus does not have compares a
-                // folder against a hole.
-                let pairs = Library.lowShapeBands.compactMap { band -> Double? in
-                    guard let mine = curve[band], let theirs = referenceCurve[band]
-                    else { return nil }
-                    return mine - theirs
+                row.deficitVsReference = gap(curve, referenceCurve,
+                                             Library.lowShapeBands)
+            }
+
+            if let top = tops[folder] {
+                row.topCurve = top
+                let values = Library.topShapeBands.compactMap { top[$0] }
+                if !values.isEmpty {
+                    row.topMean = values.reduce(0, +) / Double(values.count)
                 }
-                if !pairs.isEmpty {
-                    row.deficitVsReference = pairs.reduce(0, +) / Double(pairs.count)
+                if let referenceTop, folder != referenceName {
+                    row.topDeficitVsReference = gap(top, referenceTop,
+                                                    Library.topShapeBands)
                 }
             }
             return row
@@ -221,6 +251,26 @@ public struct Survey: Sendable {
                 out.append(String(format: "  %6d  %+6.2f  %@   %3d (%3.0f%%)   %@",
                                   row.tracks, row.mean, versus,
                                   row.clipped, row.clippedShare * 100, row.folder))
+            }
+        }
+        if !folders.isEmpty {
+            out += ["", "Top end by folder, 8-16 kHz"
+                    + (reference.map { " (against \($0))" } ?? ""),
+                    String(repeating: "-", count: 62),
+                    "  A high shelf can only lift what is there. A cliff "
+                    + "between 12.5k and 16k is",
+                    "  an MP3 low-pass, and boosting it raises noise; a gentle "
+                    + "slope is the record.", "",
+                    "   mean    vs ref      8k    10k   12.5k     16k   folder"]
+            for row in folders {
+                let versus = row.topDeficitVsReference.map { String(format: "%+7.2f", $0) }
+                    ?? "      -"
+                let bands = [8000.0, 10000.0, 12500.0, 16000.0].map { band in
+                    row.topCurve[band].map { String(format: "%6.1f", $0) } ?? "     -"
+                }.joined(separator: "  ")
+                out.append(String(format: "  %+6.2f  %@  %@   %@",
+                                  row.topMean.isFinite ? row.topMean : 0,
+                                  versus, bands, row.folder))
             }
         }
         return out.joined(separator: "\n")

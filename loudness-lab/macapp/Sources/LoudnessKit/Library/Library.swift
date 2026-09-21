@@ -376,6 +376,17 @@ public final class Library {
     /// there is nothing there to correct.
     public static let lowShapeBands = Spectrum.bandCentres.filter { (31.0...63.0).contains($0) }
 
+    /// The bands "air" would live in.
+    ///
+    /// Stopping at 16 kHz on purpose. 20 kHz is above what most people hear
+    /// and below the noise floor of most transfers, so including it would
+    /// average a real measurement with an empty band. 16 is kept because it
+    /// is where an MP3's low-pass usually shows itself -- which is a thing
+    /// worth seeing, not hiding.
+    public static let topShapeBands = Spectrum.bandCentres.filter {
+        (8000.0...16000.0).contains($0)
+    }
+
     /// A folder label for each track that is actually distinctive.
     ///
     /// The immediate parent name alone merges unrelated folders: two
@@ -438,7 +449,16 @@ public final class Library {
     /// Median low-band shape per folder -- the curve a track is measured
     /// against when the sub is sized per track rather than set by hand.
     public func referenceCurves() throws -> [String: [Double: Double]] {
-        let list = Library.sqlList(Library.lowShapeBands)
+        try curves(bands: Library.lowShapeBands)
+    }
+
+    /// Median shape per folder over any set of bands.
+    ///
+    /// Generalised from the low-end version so the top end can be looked at
+    /// the same way, rather than by a second copy of the same query with
+    /// different numbers in it.
+    public func curves(bands: [Double]) throws -> [String: [Double: Double]] {
+        let list = Library.sqlList(bands)
         let rows = try db.run("""
             SELECT t.path, b.band_hz, b.shape_db FROM tracks t
             JOIN bands b ON b.track_id = t.id

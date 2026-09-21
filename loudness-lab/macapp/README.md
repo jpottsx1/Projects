@@ -50,9 +50,10 @@ After changing anything the Swift depends on:
 | `Resampler` — Kaiser FIR, polyphase, true peak | ✅ golden-tested |
 | `Declip` — runs, merging, Hermite arcs, caps | ✅ golden-tested |
 | `Fixtures` — shared signal generator | ✅ golden-tested |
-| `Spectrum` — 1/3-octave LTAS | ⬜ not yet |
-| `SubBass` — kick detection, sub, attack shaping | ⬜ not yet |
-| `MP3Gain` — lossless `global_gain`, Serato GEOB safety | ⬜ not yet |
+| `Spectrum` — 1/3-octave LTAS, `FFT`, `Peaks` | ✅ golden-tested |
+| `SubBass` — kick detection, sub, attack shaping | ✅ golden-tested |
+| `MP3Gain` — lossless `global_gain`, Serato GEOB safety | ✅ golden-tested |
+| Audio decode via AVFoundation | ⬜ not yet |
 | Library database, reports | ⬜ not yet |
 | UI wiring to `LoudnessKit` instead of the CLI | ⬜ not yet |
 

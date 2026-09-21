@@ -1415,6 +1415,488 @@
    "true_peak_dbtp": -0.239033155
   }
  },
+ "mp3": {
+  "crc.mp3": {
+   "applied": {
+    "-1": {
+     "changedBytes": 264,
+     "crossed": 0,
+     "fnv": "11234908177335227",
+     "sameLength": true
+    },
+    "-2": {
+     "changedBytes": 226,
+     "crossed": 0,
+     "fnv": "13718078190795698813",
+     "sameLength": true
+    },
+    "1": {
+     "changedBytes": 266,
+     "crossed": 0,
+     "fnv": "17552685850039274924",
+     "sameLength": true
+    }
+   },
+   "crcFrames": 60,
+   "firstGainBits": [
+    3425,
+    3543,
+    6761,
+    6879,
+    10105,
+    10223
+   ],
+   "firstGains": [
+    137,
+    145,
+    132,
+    131,
+    134,
+    133
+   ],
+   "frames": 60,
+   "highestGain": 145,
+   "id3Bytes": 0,
+   "infoFrames": 1,
+   "lowestGain": 122,
+   "movable": 117,
+   "plans": {
+    "+1.5": {
+     "appliedDB": 1.505149978,
+     "clamped": false,
+     "crossingGranules": 0,
+     "granules": 117,
+     "headroomDownDB": -183.628297355,
+     "lowestCount": 4,
+     "lowestGain": 122,
+     "protectedFrames": 60,
+     "skippedGranules": 119,
+     "steps": 1
+    },
+    "-100.0": {
+     "appliedDB": -99.339898569,
+     "clamped": false,
+     "crossingGranules": 0,
+     "granules": 117,
+     "headroomDownDB": -183.628297355,
+     "lowestCount": 4,
+     "lowestGain": 122,
+     "protectedFrames": 60,
+     "skippedGranules": 119,
+     "steps": -66
+    },
+    "-3.0": {
+     "appliedDB": -3.010299957,
+     "clamped": false,
+     "crossingGranules": 0,
+     "granules": 117,
+     "headroomDownDB": -183.628297355,
+     "lowestCount": 4,
+     "lowestGain": 122,
+     "protectedFrames": 60,
+     "skippedGranules": 119,
+     "steps": -2
+    },
+    "-6.0": {
+     "appliedDB": -6.020599913,
+     "clamped": false,
+     "crossingGranules": 0,
+     "granules": 117,
+     "headroomDownDB": -183.628297355,
+     "lowestCount": 4,
+     "lowestGain": 122,
+     "protectedFrames": 60,
+     "skippedGranules": 119,
+     "steps": -4
+    }
+   },
+   "sourceFNV": "9379749814016568359"
+  },
+  "mono.mp3": {
+   "applied": {
+    "-1": {
+     "changedBytes": 153,
+     "crossed": 0,
+     "fnv": "5002467627167406801",
+     "sameLength": true
+    },
+    "-2": {
+     "changedBytes": 170,
+     "crossed": 0,
+     "fnv": "16428990116554084598",
+     "sameLength": true
+    },
+    "1": {
+     "changedBytes": 148,
+     "crossed": 0,
+     "fnv": "7370243757859128280",
+     "sameLength": true
+    }
+   },
+   "crcFrames": 0,
+   "firstGainBits": [
+    2935,
+    2994,
+    5439,
+    5498,
+    7951,
+    8010
+   ],
+   "firstGains": [
+    141,
+    138,
+    130,
+    129,
+    132,
+    131
+   ],
+   "frames": 60,
+   "highestGain": 141,
+   "id3Bytes": 45,
+   "infoFrames": 1,
+   "lowestGain": 126,
+   "movable": 117,
+   "plans": {
+    "+1.5": {
+     "appliedDB": 1.505149978,
+     "clamped": false,
+     "crossingGranules": 0,
+     "granules": 117,
+     "headroomDownDB": -189.648897268,
+     "lowestCount": 6,
+     "lowestGain": 126,
+     "protectedFrames": 0,
+     "skippedGranules": 1,
+     "steps": 1
+    },
+    "-100.0": {
+     "appliedDB": -99.339898569,
+     "clamped": false,
+     "crossingGranules": 0,
+     "granules": 117,
+     "headroomDownDB": -189.648897268,
+     "lowestCount": 6,
+     "lowestGain": 126,
+     "protectedFrames": 0,
+     "skippedGranules": 1,
+     "steps": -66
+    },
+    "-3.0": {
+     "appliedDB": -3.010299957,
+     "clamped": false,
+     "crossingGranules": 0,
+     "granules": 117,
+     "headroomDownDB": -189.648897268,
+     "lowestCount": 6,
+     "lowestGain": 126,
+     "protectedFrames": 0,
+     "skippedGranules": 1,
+     "steps": -2
+    },
+    "-6.0": {
+     "appliedDB": -6.020599913,
+     "clamped": false,
+     "crossingGranules": 0,
+     "granules": 117,
+     "headroomDownDB": -189.648897268,
+     "lowestCount": 6,
+     "lowestGain": 126,
+     "protectedFrames": 0,
+     "skippedGranules": 1,
+     "steps": -4
+    }
+   },
+   "sourceFNV": "14722782327238554793"
+  },
+  "mpeg2.mp3": {
+   "applied": {
+    "-1": {
+     "changedBytes": 66,
+     "crossed": 0,
+     "fnv": "6148610488873213993",
+     "sameLength": true
+    },
+    "-2": {
+     "changedBytes": 79,
+     "crossed": 0,
+     "fnv": "3193442638259094638",
+     "sameLength": true
+    },
+    "1": {
+     "changedBytes": 64,
+     "crossed": 0,
+     "fnv": "11038391251445403249",
+     "sameLength": true
+    }
+   },
+   "crcFrames": 0,
+   "firstGainBits": [
+    2087,
+    3751,
+    5423,
+    7095,
+    8767,
+    10439
+   ],
+   "firstGains": [
+    140,
+    137,
+    134,
+    135,
+    133,
+    133
+   ],
+   "frames": 61,
+   "highestGain": 141,
+   "id3Bytes": 45,
+   "infoFrames": 1,
+   "lowestGain": 74,
+   "movable": 60,
+   "plans": {
+    "+1.5": {
+     "appliedDB": 1.505149978,
+     "clamped": false,
+     "crossingGranules": 0,
+     "granules": 60,
+     "headroomDownDB": -111.381098396,
+     "lowestCount": 1,
+     "lowestGain": 74,
+     "protectedFrames": 0,
+     "skippedGranules": 60,
+     "steps": 1
+    },
+    "-100.0": {
+     "appliedDB": -99.339898569,
+     "clamped": false,
+     "crossingGranules": 1,
+     "granules": 60,
+     "headroomDownDB": -111.381098396,
+     "lowestCount": 1,
+     "lowestGain": 74,
+     "protectedFrames": 0,
+     "skippedGranules": 60,
+     "steps": -66
+    },
+    "-3.0": {
+     "appliedDB": -3.010299957,
+     "clamped": false,
+     "crossingGranules": 0,
+     "granules": 60,
+     "headroomDownDB": -111.381098396,
+     "lowestCount": 1,
+     "lowestGain": 74,
+     "protectedFrames": 0,
+     "skippedGranules": 60,
+     "steps": -2
+    },
+    "-6.0": {
+     "appliedDB": -6.020599913,
+     "clamped": false,
+     "crossingGranules": 0,
+     "granules": 60,
+     "headroomDownDB": -111.381098396,
+     "lowestCount": 1,
+     "lowestGain": 74,
+     "protectedFrames": 0,
+     "skippedGranules": 60,
+     "steps": -4
+    }
+   },
+   "sourceFNV": "13100482467055653383"
+  },
+  "serato.mp3": {
+   "applied": {
+    "-1": {
+     "changedBytes": 148,
+     "crossed": 0,
+     "fnv": "13317987852833555986",
+     "sameLength": true
+    },
+    "-2": {
+     "changedBytes": 119,
+     "crossed": 0,
+     "fnv": "11517288349799074646",
+     "sameLength": true
+    },
+    "1": {
+     "changedBytes": 149,
+     "crossed": 0,
+     "fnv": "509240637774101295",
+     "sameLength": true
+    }
+   },
+   "crcFrames": 0,
+   "firstGainBits": [
+    12705,
+    12823,
+    16041,
+    16159,
+    19385,
+    19503
+   ],
+   "firstGains": [
+    137,
+    145,
+    132,
+    131,
+    134,
+    133
+   ],
+   "frames": 60,
+   "highestGain": 145,
+   "id3Bytes": 1162,
+   "infoFrames": 1,
+   "lowestGain": 121,
+   "movable": 117,
+   "plans": {
+    "+1.5": {
+     "appliedDB": 1.505149978,
+     "clamped": false,
+     "crossingGranules": 0,
+     "granules": 117,
+     "headroomDownDB": -182.123147377,
+     "lowestCount": 1,
+     "lowestGain": 121,
+     "protectedFrames": 0,
+     "skippedGranules": 119,
+     "steps": 1
+    },
+    "-100.0": {
+     "appliedDB": -99.339898569,
+     "clamped": false,
+     "crossingGranules": 0,
+     "granules": 117,
+     "headroomDownDB": -182.123147377,
+     "lowestCount": 1,
+     "lowestGain": 121,
+     "protectedFrames": 0,
+     "skippedGranules": 119,
+     "steps": -66
+    },
+    "-3.0": {
+     "appliedDB": -3.010299957,
+     "clamped": false,
+     "crossingGranules": 0,
+     "granules": 117,
+     "headroomDownDB": -182.123147377,
+     "lowestCount": 1,
+     "lowestGain": 121,
+     "protectedFrames": 0,
+     "skippedGranules": 119,
+     "steps": -2
+    },
+    "-6.0": {
+     "appliedDB": -6.020599913,
+     "clamped": false,
+     "crossingGranules": 0,
+     "granules": 117,
+     "headroomDownDB": -182.123147377,
+     "lowestCount": 1,
+     "lowestGain": 121,
+     "protectedFrames": 0,
+     "skippedGranules": 119,
+     "steps": -4
+    }
+   },
+   "sourceFNV": "10296269181931553715"
+  },
+  "stereo.mp3": {
+   "applied": {
+    "-1": {
+     "changedBytes": 148,
+     "crossed": 0,
+     "fnv": "15366926372228528658",
+     "sameLength": true
+    },
+    "-2": {
+     "changedBytes": 119,
+     "crossed": 0,
+     "fnv": "13566226869194047318",
+     "sameLength": true
+    },
+    "1": {
+     "changedBytes": 149,
+     "crossed": 0,
+     "fnv": "2558179157169073967",
+     "sameLength": true
+    }
+   },
+   "crcFrames": 0,
+   "firstGainBits": [
+    3769,
+    3887,
+    7105,
+    7223,
+    10449,
+    10567
+   ],
+   "firstGains": [
+    137,
+    145,
+    132,
+    131,
+    134,
+    133
+   ],
+   "frames": 60,
+   "highestGain": 145,
+   "id3Bytes": 45,
+   "infoFrames": 1,
+   "lowestGain": 121,
+   "movable": 117,
+   "plans": {
+    "+1.5": {
+     "appliedDB": 1.505149978,
+     "clamped": false,
+     "crossingGranules": 0,
+     "granules": 117,
+     "headroomDownDB": -182.123147377,
+     "lowestCount": 1,
+     "lowestGain": 121,
+     "protectedFrames": 0,
+     "skippedGranules": 119,
+     "steps": 1
+    },
+    "-100.0": {
+     "appliedDB": -99.339898569,
+     "clamped": false,
+     "crossingGranules": 0,
+     "granules": 117,
+     "headroomDownDB": -182.123147377,
+     "lowestCount": 1,
+     "lowestGain": 121,
+     "protectedFrames": 0,
+     "skippedGranules": 119,
+     "steps": -66
+    },
+    "-3.0": {
+     "appliedDB": -3.010299957,
+     "clamped": false,
+     "crossingGranules": 0,
+     "granules": 117,
+     "headroomDownDB": -182.123147377,
+     "lowestCount": 1,
+     "lowestGain": 121,
+     "protectedFrames": 0,
+     "skippedGranules": 119,
+     "steps": -2
+    },
+    "-6.0": {
+     "appliedDB": -6.020599913,
+     "clamped": false,
+     "crossingGranules": 0,
+     "granules": 117,
+     "headroomDownDB": -182.123147377,
+     "lowestCount": 1,
+     "lowestGain": 121,
+     "protectedFrames": 0,
+     "skippedGranules": 119,
+     "steps": -4
+    }
+   },
+   "sourceFNV": "12345207701326526387"
+  }
+ },
  "note": "generated by tools/make_golden.py",
  "rate": 48000,
  "spectrum": {

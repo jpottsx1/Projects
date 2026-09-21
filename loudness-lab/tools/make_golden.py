@@ -28,7 +28,7 @@ import numpy as np
 from scipy.signal import butter, find_peaks, sosfilt, sosfiltfilt
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from loudnesslab import bs1770, declip, spectrum, subbass  # noqa: E402
+from loudnesslab import bs1770, declip, mp3gain, spectrum, subbass  # noqa: E402
 
 RATE = 48000
 OUT = Path(__file__).resolve().parents[1] / "macapp/Tests/LoudnessKitTests/Golden"
@@ -136,6 +136,16 @@ def clipped(kind: str, over_db: float, seconds: float = 3.0) -> np.ndarray:
     x = fixture(kind, seconds)
     x = x / np.abs(x).max() * 10 ** (over_db / 20)
     return np.clip(x, -1.0, 1.0)
+
+
+def fnv1a(data: bytes) -> str:
+    """Matches Checksum.fnv1a in the Swift. As a string, because JSON numbers
+    lose the top bits of a 64-bit value once a parser reaches for a double."""
+    mask = (1 << 64) - 1
+    hashed = 0xCBF29CE484222325
+    for byte in data:
+        hashed = ((hashed ^ byte) * 0x100000001B3) & mask
+    return str(hashed)
 
 
 def rounded(value, places: int = 9):
@@ -287,6 +297,53 @@ def main() -> int:
         f"programme+{over:.0f}dB": list(bs1770.count_clipping(clipped("programme", over)))
         for over in (0.0, 1.0, 3.0, 6.0)
     }
+
+    # --- lossless MP3 gain ---
+    # The fixtures are real files, because an MP3 cannot be defined by a
+    # formula the way a sine can. They cover the paths that differ: MPEG-1
+    # stereo and mono, MPEG-2 with one granule per frame, a CRC-protected
+    # stream whose checksum has to be recomputed over the bytes we change,
+    # and one carrying Serato GEOB frames that must come through untouched.
+    golden["mp3"] = {}
+    for path in sorted((OUT / "mp3").glob("*.mp3")):
+        data = path.read_bytes()
+        frames = mp3gain.parse_frames(data)
+        bits = mp3gain.gain_bits(data, frames)
+        gains = [mp3gain._u8_at(data, b) for b in bits]
+        entry = {
+            "frames": len(frames),
+            "infoFrames": sum(1 for f in frames if f.is_info_frame),
+            "crcFrames": sum(1 for f in frames if f.has_crc),
+            "id3Bytes": mp3gain.skip_id3v2(data),
+            "movable": len(bits),
+            "firstGainBits": bits[:6],
+            "firstGains": gains[:6],
+            "lowestGain": min(gains), "highestGain": max(gains),
+            "sourceFNV": fnv1a(data),
+            "plans": {}, "applied": {},
+        }
+        for target in (-3.0, -6.0, 1.5, -100.0):
+            result = mp3gain.plan(data, target)
+            entry["plans"][f"{target:+.1f}"] = {
+                "steps": result.steps, "appliedDB": rounded(result.applied_db),
+                "granules": result.granules,
+                "skippedGranules": result.skipped_granules,
+                "protectedFrames": result.protected_frames,
+                "clamped": bool(result.clamped),
+                "crossingGranules": result.crossing_granules,
+                "lowestGain": result.lowest_gain,
+                "lowestCount": result.lowest_count,
+                "headroomDownDB": rounded(result.headroom_down_db),
+            }
+        for steps in (-2, -1, 1):
+            shifted, crossed = mp3gain.apply_to(data, steps)
+            entry["applied"][str(steps)] = {
+                "fnv": fnv1a(shifted),
+                "crossed": len(crossed),
+                "changedBytes": sum(1 for a, b in zip(data, shifted) if a != b),
+                "sameLength": len(shifted) == len(data),
+            }
+        golden["mp3"][path.name] = entry
 
     write_filter_bank()
 

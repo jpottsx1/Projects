@@ -29,6 +29,25 @@ final class GoldenTests: XCTestCase {
         let spectrum: [String: SpectrumCase]
         let findPeaks: [PeaksCase]
         let subbass: [String: SubBassCase]
+        let mp3: [String: MP3Case]
+    }
+
+    struct MP3Case: Decodable {
+        let frames, infoFrames, crcFrames, id3Bytes, movable: Int
+        let firstGainBits, firstGains: [Int]
+        let lowestGain, highestGain: Int
+        let sourceFNV: String
+        let plans: [String: PlanCase]
+        let applied: [String: AppliedCase]
+    }
+    struct PlanCase: Decodable {
+        let steps, granules, skippedGranules, protectedFrames: Int
+        let crossingGranules, lowestGain, lowestCount: Int
+        let appliedDB, headroomDownDB: Double
+        let clamped: Bool
+    }
+    struct AppliedCase: Decodable {
+        let fnv: String; let crossed, changedBytes: Int; let sameLength: Bool
     }
 
     struct SpectrumCase: Decodable { let bands: Int; let rows: [BandRow] }
@@ -398,6 +417,176 @@ final class GoldenTests: XCTestCase {
         XCTAssertLessThan(abs(report.bandLevelChangeDB), 0.001,
                           "the punch band gained \(report.bandLevelChangeDB) dB")
         XCTAssertLessThan(report.sustainTrimDB, 0, "nothing was trimmed back")
+    }
+
+    // MARK: - Lossless MP3 gain
+
+    func loadMP3(_ name: String) throws -> [UInt8] {
+        let stem = String(name.dropLast(4))
+        let url = try XCTUnwrap(
+            Bundle.module.url(forResource: "Golden/mp3/\(stem)", withExtension: "mp3"),
+            "missing fixture \(name)")
+        return [UInt8](try Data(contentsOf: url))
+    }
+
+    func testTheMP3FixturesAreTheFilesPythonRead() throws {
+        for (name, expected) in golden.mp3 {
+            let data = try loadMP3(name)
+            XCTAssertEqual(String(Checksum.fnv1a(data)), expected.sourceFNV,
+                           "\(name) is not the file the vectors were made from")
+        }
+    }
+
+    func testFrameParsingMatches() throws {
+        for (name, expected) in golden.mp3 {
+            let data = try loadMP3(name)
+            let frames = MP3Gain.parseFrames(data)
+            XCTAssertEqual(frames.count, expected.frames, "\(name) frames")
+            XCTAssertEqual(frames.filter(\.isInfoFrame).count, expected.infoFrames,
+                           "\(name) info frames")
+            XCTAssertEqual(frames.filter(\.hasCRC).count, expected.crcFrames,
+                           "\(name) CRC frames")
+            XCTAssertEqual(MP3Gain.skipID3v2(data), expected.id3Bytes, "\(name) ID3 size")
+
+            let bits = MP3Gain.gainBits(data, frames: frames)
+            XCTAssertEqual(bits.count, expected.movable, "\(name) movable granules")
+            XCTAssertEqual(Array(bits.prefix(6)), expected.firstGainBits,
+                           "\(name) gain bit offsets")
+            let gains = MP3Gain.readGains(data, frames: frames)
+            XCTAssertEqual(Array(gains.prefix(6)), expected.firstGains, "\(name) gains")
+            XCTAssertEqual(gains.min(), expected.lowestGain, "\(name) lowest")
+            XCTAssertEqual(gains.max(), expected.highestGain, "\(name) highest")
+        }
+    }
+
+    func testPlanningMatches() throws {
+        for (name, expected) in golden.mp3 {
+            let data = try loadMP3(name)
+            for (target, want) in expected.plans {
+                let got = try MP3Gain.plan(data, targetDB: Double(target) ?? 0)
+                let label = "\(name) @ \(target)"
+                XCTAssertEqual(got.steps, want.steps, "\(label) steps")
+                XCTAssertEqual(got.appliedDB, want.appliedDB, accuracy: 1e-9,
+                               "\(label) applied")
+                XCTAssertEqual(got.granules, want.granules, "\(label) granules")
+                XCTAssertEqual(got.skippedGranules, want.skippedGranules,
+                               "\(label) skipped")
+                XCTAssertEqual(got.protectedFrames, want.protectedFrames,
+                               "\(label) protected")
+                XCTAssertEqual(got.clamped, want.clamped, "\(label) clamped")
+                XCTAssertEqual(got.crossingGranules, want.crossingGranules,
+                               "\(label) crossing")
+                XCTAssertEqual(got.lowestGain, want.lowestGain, "\(label) lowest")
+                XCTAssertEqual(got.lowestCount, want.lowestCount, "\(label) lowest count")
+                XCTAssertEqual(got.headroomDownDB, want.headroomDownDB, accuracy: 1e-9,
+                               "\(label) headroom")
+            }
+        }
+    }
+
+    func testApplyingProducesTheSameBytesAsPython() throws {
+        for (name, expected) in golden.mp3 {
+            let data = try loadMP3(name)
+            for (steps, want) in expected.applied {
+                let (out, crossed) = try MP3Gain.apply(data, steps: Int(steps) ?? 0)
+                let label = "\(name) \(steps) steps"
+                XCTAssertEqual(String(Checksum.fnv1a(out)), want.fnv, "\(label) bytes")
+                XCTAssertEqual(crossed.count, want.crossed, "\(label) crossed")
+                XCTAssertEqual(out.count == data.count, want.sameLength, "\(label) length")
+                let changed = zip(data, out).filter { $0 != $1 }.count
+                XCTAssertEqual(changed, want.changedBytes, "\(label) changed bytes")
+            }
+        }
+    }
+
+    /// The guarantee this whole approach exists for. Serato keeps cue points,
+    /// beatgrids and waveform overviews in ID3 GEOB frames; a gain pass that
+    /// disturbed a single byte of them would silently destroy someone's
+    /// preparation for a set, and they would not find out until they were
+    /// playing.
+    func testTheID3RegionIsNeverTouched() throws {
+        for (name, expected) in golden.mp3 where expected.id3Bytes > 0 {
+            let data = try loadMP3(name)
+            for steps in [-3, -1, 1, 2] {
+                let (out, _) = try MP3Gain.apply(data, steps: steps)
+                XCTAssertEqual(Array(out.prefix(expected.id3Bytes)),
+                               Array(data.prefix(expected.id3Bytes)),
+                               "\(name): \(steps) steps disturbed the ID3 tag")
+            }
+        }
+    }
+
+    /// Lossless means reversible, and reversible means byte-for-byte. Any
+    /// weaker reading of it would let a library drift with every pass.
+    func testAGainChangeIsExactlyReversible() throws {
+        for (name, _) in golden.mp3 {
+            let data = try loadMP3(name)
+            for steps in [-4, -2, -1, 1, 3] {
+                let (down, crossed) = try MP3Gain.apply(data, steps: steps)
+                // Granules pushed across the audible floor no longer look
+                // movable, so the way back has to be told about them by name.
+                // Without that the reversal quietly leaves them behind.
+                let (back, _) = try MP3Gain.apply(down, steps: -steps, alsoMove: crossed)
+                XCTAssertEqual(back, data, "\(name): \(steps) steps did not reverse")
+            }
+        }
+    }
+
+    /// A protected frame carries a CRC over the last two header bytes and the
+    /// side information -- exactly the bytes a gain change rewrites. Leave it
+    /// stale and a checking decoder drops the frame.
+    func testProtectedFramesGetACorrectCRC() throws {
+        let data = try loadMP3("crc.mp3")
+        let (out, _) = try MP3Gain.apply(data, steps: -2)
+        let frames = MP3Gain.parseFrames(out)
+        XCTAssertGreaterThan(frames.filter(\.hasCRC).count, 0, "fixture lost its CRCs")
+        for frame in frames where frame.hasCRC && !frame.isInfoFrame {
+            let header = try XCTUnwrap(MP3Gain.parseHeader(out, at: frame.offset))
+            let stored = (Int(out[frame.offset + 4]) << 8) | Int(out[frame.offset + 5])
+            let recomputed = MP3Gain.frameCRC(out, frame: frame,
+                                              sideInfoSize: header.sideInfoSize)
+            XCTAssertEqual(stored, recomputed,
+                           "stale CRC on the frame at \(frame.offset)")
+        }
+    }
+
+    /// Python rounds half to even. A track sitting exactly half a step from
+    /// the target would otherwise move here and not there.
+    func testStepRoundingIsHalfToEven() {
+        let half = MP3Gain.dbPerStep / 2
+        XCTAssertEqual(MP3Gain.steps(forDB: half), 0, "0.5 should round to 0")
+        XCTAssertEqual(MP3Gain.steps(forDB: 3 * half), 2, "1.5 should round to 2")
+        XCTAssertEqual(MP3Gain.steps(forDB: -half), 0, "-0.5 should round to 0")
+        XCTAssertEqual(MP3Gain.steps(forDB: -3 * half), -2, "-1.5 should round to -2")
+    }
+
+    /// The ceiling exists because rounding to the nearest 1.5 dB step can
+    /// round UP: a gain capped at +0.9 dB would become +1.505 and overshoot
+    /// the very limit that capped it.
+    func testAStepCeilingIsNeverExceeded() throws {
+        let data = try loadMP3("stereo.mp3")
+        let uncapped = try MP3Gain.plan(data, targetDB: 4.5)
+        XCTAssertGreaterThan(uncapped.steps, 0, "fixture has no room to go up")
+        let capped = try MP3Gain.plan(data, targetDB: 4.5, maxSteps: 1)
+        XCTAssertEqual(capped.steps, 1)
+        XCTAssertTrue(capped.clamped)
+    }
+
+    /// Nothing outside an audio frame may move, whatever the step.
+    func testOnlyAudioFrameBytesChange() throws {
+        let data = try loadMP3("serato.mp3")
+        let (out, _) = try MP3Gain.apply(data, steps: -2)
+        let frames = MP3Gain.parseFrames(data)
+        var insideAFrame = [Bool](repeating: false, count: data.count)
+        for frame in frames {
+            for i in frame.offset..<min(data.count, frame.offset + frame.length) {
+                insideAFrame[i] = true
+            }
+        }
+        for index in data.indices where data[index] != out[index] {
+            XCTAssertTrue(insideAFrame[index],
+                          "byte \(index) changed and is outside every audio frame")
+        }
     }
 
     // MARK: - Helpers

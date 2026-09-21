@@ -199,6 +199,12 @@ struct SurveyPanel: View {
                     Text(String(format: "%+.2f", row.mean))
                         .font(.system(.caption, design: .monospaced))
                         .frame(width: 52, alignment: .trailing)
+                    Text(row.clipped == 0 ? "—"
+                         : String(format: "%.0f%%", row.clippedShare * 100))
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundStyle(row.clippedShare > 0.25 ? .orange : .secondary)
+                        .frame(width: 44, alignment: .trailing)
+                        .help("\(row.clipped) of \(row.tracks) tracks arrived clipped")
                     Text(row.deficitVsReference.map { String(format: "%+.2f", $0) }
                          ?? (row.folder == survey.reference ? "ref" : "—"))
                         .font(.system(.caption, design: .monospaced))
@@ -210,6 +216,11 @@ struct SurveyPanel: View {
             }
             Text("Every folder measured, not only the ones selected — a "
                  + "reference measured in an earlier pass still counts.")
+                .font(.caption2).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Text("Mean shape, dB against the reference, then the share that "
+                 + "arrived clipped — per folder, because a library average "
+                 + "hides the one reissue that needs de-clipping.")
                 .font(.caption2).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             Text("Mean shape, then dB against the reference. A folder "

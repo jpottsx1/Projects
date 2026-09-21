@@ -44,6 +44,18 @@ public struct Survey: Sendable {
     public struct FolderLowEnd: Sendable, Identifiable {
         public let folder: String
         public let tracks: Int
+        /// Tracks in this folder carrying clipped runs.
+        ///
+        /// Per folder rather than only per library, because the library
+        /// figure hides exactly what matters: a 2003 disco reissue measured
+        /// 53% clipped while the library it sits in averaged 13.6%. Whether
+        /// a profile de-clips by default is a question about the material
+        /// that profile is for, and an average over everything else cannot
+        /// answer it.
+        public var clipped = 0
+        public var clippedShare: Double {
+            tracks == 0 ? 0 : Double(clipped) / Double(tracks)
+        }
         /// Median shape per band, 31.5 to 63 Hz.
         public let curve: [Double: Double]
         /// Mean of the above -- one number to sort and compare folders on.
@@ -125,8 +137,11 @@ public struct Survey: Sendable {
         let everything = try library.tracks()
         let labels = Library.folderLabels(everything.map(\.path))
         var counts: [String: Int] = [:]
+        var clipped: [String: Int] = [:]
         for row in everything {
-            counts[labels[row.path] ?? "(root)", default: 0] += 1
+            let label = labels[row.path] ?? "(root)"
+            counts[label, default: 0] += 1
+            if (row.clipRuns ?? 0) > 0 { clipped[label, default: 0] += 1 }
         }
         let referenceName = wanted.flatMap { Library.resolveReference(curves, $0) }
         survey.reference = referenceName
@@ -137,6 +152,7 @@ public struct Survey: Sendable {
             guard !values.isEmpty else { return nil }
             let mean = values.reduce(0, +) / Double(values.count)
             var row = FolderLowEnd(folder: folder, tracks: counts[folder] ?? 0,
+                                   clipped: clipped[folder] ?? 0,
                                    curve: curve, mean: mean, deficitVsReference: nil)
             if let referenceCurve, folder != referenceName {
                 // Band by band, and only where both sides have the band --
@@ -198,12 +214,13 @@ public struct Survey: Sendable {
             out += ["", "Low end by folder, 31.5-63 Hz"
                     + (reference.map { " (against \($0))" } ?? ""),
                     String(repeating: "-", count: 62),
-                    "   tracks   mean    vs ref   folder"]
+                    "   tracks   mean    vs ref   clipped   folder"]
             for row in folders {
                 let versus = row.deficitVsReference.map { String(format: "%+7.2f", $0) }
                     ?? "      -"
-                out.append(String(format: "  %6d  %+6.2f  %@   %@",
-                                  row.tracks, row.mean, versus, row.folder))
+                out.append(String(format: "  %6d  %+6.2f  %@   %3d (%3.0f%%)   %@",
+                                  row.tracks, row.mean, versus,
+                                  row.clipped, row.clippedShare * 100, row.folder))
             }
         }
         return out.joined(separator: "\n")

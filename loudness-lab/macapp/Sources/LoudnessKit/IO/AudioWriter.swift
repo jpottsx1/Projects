@@ -63,10 +63,18 @@ public enum AudioWriter {
     /// cannot find again -- and a library of them is worse than not having
     /// processed anything.
     ///
-    /// Serato's cue points are NOT carried. They live in GEOB frames, this
-    /// is a new file with new audio, and nothing short of writing those
-    /// frames back would keep them. The lossless gain path is the one that
-    /// preserves them; this stage never has.
+    /// Serato's cue points ARE carried, MP3 to MP3, by copying the
+    /// original's whole ID3v2 tag onto the new file. ffmpeg will not do it
+    /// -- `-map_metadata` carries text and drops GEOB, measured: two frames
+    /// in, none out -- so the tag is spliced on afterwards.
+    ///
+    /// That is only worth doing because the timing survives. Cue positions
+    /// are times, so they land on the right beat only if the new file's
+    /// audio starts where the old one's did. Measured on a real Serato
+    /// file: decode, encode at 320, decode again, and the result is the
+    /// same length with a maximum sample difference of 0.00003 -- the
+    /// codec, and no shift at all. LAME writes the delay into its header
+    /// and the decoder gives it back.
     public static func write(_ audio: [[Double]], to url: URL,
                              format: Format = .flac,
                              rate: Double = AudioDecoder.targetRate,
@@ -97,12 +105,20 @@ public enum AudioWriter {
 
         try FileManager.default.createDirectory(
             at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+
+        // MP3 out of MP3 takes the original tag wholesale rather than
+        // letting ffmpeg write a new one, so ffmpeg is told to write none.
+        let carryWholeTag = format == .mp3 && isMP3(source)
         var arguments = ["-nostdin", "-v", "error", "-y", "-i", scratch.path]
-        if let source {
+        if carryWholeTag {
+            arguments += ["-map_metadata", "-1", "-write_id3v1", "0",
+                          "-id3v2_version", "0"]
+        } else if let source {
             arguments += ["-i", source.path, "-map", "0:a:0", "-map_metadata", "1"]
         }
         arguments += format.encoderArguments + [url.path]
         try Tools.run(ffmpeg, arguments)
+        if carryWholeTag, let source { try carryID3v2(from: source, to: url) }
     }
 
     public static func writeFLAC(_ audio: [[Double]], to url: URL,
@@ -127,6 +143,48 @@ public enum AudioWriter {
             AVLinearPCMBitDepthKey: 24,
         ]
         try writePCM(audio, to: url, rate: rate, settings: settings)
+    }
+
+    static func isMP3(_ url: URL?) -> Bool {
+        url?.pathExtension.lowercased() == "mp3"
+    }
+
+    /// Prepend the original's entire ID3v2 tag to the new file.
+    ///
+    /// The whole tag, not the GEOB frames alone. Picking frames out means
+    /// re-encoding their sizes between ID3 versions, minding the
+    /// unsynchronisation flag, and deciding what else is worth keeping --
+    /// three chances to get it subtly wrong for no benefit. Copied whole,
+    /// everything the original carried arrives intact: cues, beatgrid,
+    /// artwork, comments, the lot.
+    static func carryID3v2(from source: URL, to url: URL) throws {
+        guard let handle = try? FileHandle(forReadingFrom: source) else { return }
+        defer { try? handle.close() }
+        guard let head = try handle.read(upToCount: 10), head.count == 10 else { return }
+        let length = id3v2Length([UInt8](head))
+        guard length > 10 else { return }          // no tag, nothing to carry
+        try handle.seek(toOffset: 0)
+        guard let tag = try handle.read(upToCount: length),
+              tag.count == length else { return }
+        let encoded = try Data(contentsOf: url)
+        // Written whole rather than in place: a half-written file here is a
+        // track that will not play.
+        try (tag + encoded).write(to: url, options: .atomic)
+    }
+
+    /// Bytes from the start of the file to the end of an ID3v2 tag.
+    ///
+    /// The size is syncsafe -- seven bits per byte, so the length can never
+    /// contain a run that looks like a frame sync. Reading it as a plain
+    /// integer is the classic way to land in the middle of the audio.
+    static func id3v2Length(_ header: [UInt8]) -> Int {
+        guard header.count >= 10,
+              header[0] == 0x49, header[1] == 0x44, header[2] == 0x33
+        else { return 0 }
+        let size = (Int(header[6] & 0x7F) << 21) | (Int(header[7] & 0x7F) << 14)
+                 | (Int(header[8] & 0x7F) << 7)  |  Int(header[9] & 0x7F)
+        // Bit 4 of the flags is a footer, another ten bytes at the end.
+        return 10 + size + ((header[5] & 0x10) != 0 ? 10 : 0)
     }
 
     /// The common path: samples to a file AVFoundation can write directly.

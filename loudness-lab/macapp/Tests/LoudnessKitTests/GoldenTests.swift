@@ -1024,6 +1024,41 @@ final class GoldenTests: XCTestCase {
         return cases
     }
 
+    /// The tag length that decides where the audio starts.
+    ///
+    /// Syncsafe: seven bits per byte, so a length can never contain a run
+    /// that looks like a frame sync. Read as a plain integer it comes out
+    /// too large and the splice lands in the middle of the audio, which
+    /// produces a file that looks right and will not play.
+    func testID3v2LengthIsReadAsSyncsafe() throws {
+        // 0x01 0x00 0x00 0x00 syncsafe is 2^21, not 16,777,216.
+        let header: [UInt8] = [0x49, 0x44, 0x33, 4, 0, 0, 0x01, 0x00, 0x00, 0x00]
+        XCTAssertEqual(AudioWriter.id3v2Length(header), 10 + (1 << 21))
+
+        // Every byte at its maximum: 0x7F7F7F7F syncsafe is 2^28 - 1.
+        let full: [UInt8] = [0x49, 0x44, 0x33, 4, 0, 0, 0x7F, 0x7F, 0x7F, 0x7F]
+        XCTAssertEqual(AudioWriter.id3v2Length(full), 10 + (1 << 28) - 1)
+
+        // The footer flag is another ten bytes at the end.
+        let footed: [UInt8] = [0x49, 0x44, 0x33, 4, 0, 0x10, 0, 0, 0x02, 0x00]
+        XCTAssertEqual(AudioWriter.id3v2Length(footed), 10 + 256 + 10)
+
+        // No tag at all, and a short read.
+        XCTAssertEqual(AudioWriter.id3v2Length([0xFF, 0xFB, 0xE0, 0x00]), 0)
+        XCTAssertEqual(AudioWriter.id3v2Length([]), 0)
+    }
+
+    /// The same answer the gain path already relies on, from a real file.
+    func testID3v2LengthAgreesWithTheGainPath() throws {
+        for name in ["serato.mp3", "stereo.mp3", "crc.mp3"] {
+            let data = try loadMP3(name)
+            XCTAssertEqual(AudioWriter.id3v2Length(Array(data.prefix(10))),
+                           MP3Gain.skipID3v2(data),
+                           "\(name): the writer and the gain path disagree "
+                           + "about where the audio starts")
+        }
+    }
+
     func testTheSchemaVersionMatchesThePython() {
         XCTAssertEqual(Library.schemaVersion, golden.library.schemaVersion,
                        "the two sides would stop opening each other's files")

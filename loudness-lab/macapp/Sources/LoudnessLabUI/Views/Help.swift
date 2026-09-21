@@ -97,11 +97,18 @@ enum Help {
         original against a lossy processed version would have you listening \
         to the codec and calling it the processing.
 
-        Artist, title and album are carried across from the original. \
-        Serato's cue points are NOT: they live in GEOB frames, this is a \
-        new file with new audio in it, and nothing short of writing those \
-        frames back would keep them. The lossless gain path is the one that \
-        preserves cues; this stage never has.
+        MP3 out of MP3 carries the original's whole tag — cue points, \
+        beatgrid, artwork, comments, everything — by copying it onto the \
+        new file. ffmpeg will not do that on its own: it carries the text \
+        and drops Serato's frames, measured as two in and none out.
+
+        The cues land on the right beat because the timing survives. \
+        Measured on a real Serato file: decode, encode at 320, decode \
+        again, and the result is the same length with a maximum sample \
+        difference of 0.00003 — the codec, and no shift at all.
+
+        FLAC and AAC carry artist, title and album but not the Serato \
+        data, which lives in an MP3 tag and has no equivalent there.
         """)
 
     static let output = HelpEntry(

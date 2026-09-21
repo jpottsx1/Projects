@@ -114,12 +114,18 @@ public struct Survey: Sendable {
 
         // --- low end, by folder ---
         let curves = try library.referenceCurves()
-        // The same labelling the curves were grouped by. Counting under a
-        // different scheme would put one folder's track count beside
-        // another folder's measurements.
-        let labels = Library.folderLabels(rows.map(\.path))
+        // Counted across the WHOLE library, not just the selected folders,
+        // because the curves are: `referenceCurves` has no root filter, and
+        // it should not have one -- naming a reference folder measured in an
+        // earlier pass is the normal case, not an edge one. Counting only
+        // the selection would show those folders with zero tracks.
+        //
+        // Labelled the same way the curves were grouped, or a track count
+        // would end up beside another folder's measurements.
+        let everything = try library.tracks()
+        let labels = Library.folderLabels(everything.map(\.path))
         var counts: [String: Int] = [:]
-        for row in rows {
+        for row in everything {
             counts[labels[row.path] ?? "(root)", default: 0] += 1
         }
         let referenceName = wanted.flatMap { Library.resolveReference(curves, $0) }
@@ -176,7 +182,10 @@ public struct Survey: Sendable {
         }
 
         if !targets.isEmpty {
-            out += ["", "How many tracks would need a BOOST", String(repeating: "-", count: 62),
+            out += ["", "How many tracks would need a BOOST (on s_p95)",
+                    String(repeating: "-", count: 62),
+                    "  A negative gain is free. A positive one eventually needs a limiter,",
+                    "  which is the thing this project exists to avoid.", "",
                     "   target   need boost   > +3 dB   over ceiling"]
             for row in targets {
                 out.append(String(format: "  %6.0f   %9.1f%%   %6.1f%%   %11.1f%%",

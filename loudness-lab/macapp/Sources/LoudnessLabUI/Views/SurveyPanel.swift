@@ -24,6 +24,7 @@ struct SurveyPanel: View {
                     VStack(alignment: .leading, spacing: 18) {
                         loudness(survey)
                         clipping(survey)
+                        targets(survey)
                         lowEnd(survey)
                     }
                     .padding(14)
@@ -124,6 +125,44 @@ struct SurveyPanel: View {
         }
     }
 
+    /// The other half of the original problem: everything plays at a
+    /// different level, and the question is what to level it TO. A negative
+    /// gain is free; a positive one eventually needs a limiter, which is the
+    /// thing this project exists to avoid. So the useful target is the
+    /// lowest row where almost nothing is turned up.
+    private func targets(_ survey: Survey) -> some View {
+        section("Levelling: how many tracks would need a boost") {
+            HStack(spacing: 8) {
+                Text("target").frame(width: 56, alignment: .trailing)
+                Text("boost").frame(width: 56, alignment: .trailing)
+                Text("> +3 dB").frame(width: 62, alignment: .trailing)
+                Text("over ceiling").frame(width: 84, alignment: .trailing)
+                Spacer()
+            }
+            .font(.caption2).foregroundStyle(.secondary)
+            ForEach(survey.targets) { row in
+                HStack(spacing: 8) {
+                    Text(String(format: "%.0f", row.targetLUFS))
+                        .frame(width: 56, alignment: .trailing)
+                    Text(String(format: "%.0f%%", row.needBoost * 100))
+                        .frame(width: 56, alignment: .trailing)
+                    Text(String(format: "%.0f%%", row.bigBoost * 100))
+                        .frame(width: 62, alignment: .trailing)
+                    Text(String(format: "%.0f%%", row.wouldExceedCeiling * 100))
+                        .frame(width: 84, alignment: .trailing)
+                        .foregroundStyle(row.wouldExceedCeiling > 0.05
+                                         ? .orange : .primary)
+                    Spacer()
+                }
+                .font(.system(.caption, design: .monospaced))
+            }
+            Text("On s_p95. The useful target is the lowest row where almost "
+                 + "nothing is turned up.")
+                .font(.caption2).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
     private func lowEnd(_ survey: Survey) -> some View {
         section("Low end by folder, 31.5–63 Hz") {
             TextField("reference folder", text: $reference)
@@ -154,6 +193,10 @@ struct SurveyPanel: View {
                 }
                 .font(.callout)
             }
+            Text("Every folder measured, not only the ones selected — a "
+                 + "reference measured in an earlier pass still counts.")
+                .font(.caption2).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
             Text("Mean shape, then dB against the reference. A folder "
                  + "sitting several dB under is what the sub stage is for, "
                  + "and how far under is what a profile's cap should be set "

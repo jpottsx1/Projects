@@ -14,7 +14,7 @@ import sys
 import time
 from pathlib import Path
 
-from . import (__version__, analyze, apply_gain, bs1770, db, decode,
+from . import (__version__, analyze, apply_gain, bs1770, db, declip, decode,
                mp3gain, profiles, report, spectrum, subbass)
 
 
@@ -147,6 +147,8 @@ def _policy_preview(outcomes: list) -> str:
 
 def _label(args: argparse.Namespace, amount: float | None = None) -> str:
     parts = []
+    if getattr(args, "declip", None):
+        parts.append("declipped")
     amount = args.amount if amount is None else amount
     if amount > 0:
         parts.append(f"sub{amount:+.1f}dB")
@@ -189,12 +191,12 @@ def cmd_subbass(args: argparse.Namespace) -> int:
     """
     if _settings(args) is None:
         return 2
-    if not args.auto and args.amount <= 0 and args.punch <= 0:
+    if not args.auto and args.amount <= 0 and args.punch <= 0 and not args.declip:
         # level-only is a gain policy. Running this command under it would
         # decode every track, change nothing, and write pairs of identical
         # files -- worse than useless, because it looks like work happened.
-        print("This profile asks for no spectral change (sub and punch are "
-              "both zero).")
+        print("This profile asks for no spectral change (sub, punch and "
+              "declip are all off).")
         print("Nothing for subbass to do -- levelling is the gain command:")
         print(f"  ./loudness-lab gain <path> --profile {args.profile or 'level-only'}")
         return 0
@@ -287,7 +289,8 @@ def cmd_subbass(args: argparse.Namespace) -> int:
     print(f"KICK PROTOTYPE  {heading} in "
           f"{subbass.SUB_LOW_HZ:.0f}-{subbass.SUB_HIGH_HZ:.0f} Hz  "
           f"punch={args.punch:+.1f} dB in "
-          f"{subbass.PUNCH_LOW_HZ / 1000:.0f}-{subbass.PUNCH_HIGH_HZ / 1000:.0f} kHz")
+          f"{subbass.PUNCH_LOW_HZ / 1000:.0f}-{subbass.PUNCH_HIGH_HZ / 1000:.0f} kHz"
+          + (f"  declip<={args.declip_max:.0f} dB" if args.declip else ""))
     print("=" * 104)
     print("  Lossy and irreversible, unlike the gain pass. Originals are never")
     print("  touched; these are new FLAC files to listen to and compare.")
@@ -298,16 +301,25 @@ def cmd_subbass(args: argparse.Namespace) -> int:
         print("  against the correction curve. 'added' is the energy put into the")
         print("  octave; the two differ because one is a mean of decibels and the")
         print("  other a sum of energies.")
+    if not args.summary_only and args.declip:
+        print()
+        print("  'clips' is how many runs of clipped samples were arced back over,")
+        print("  and 'lift' how far that raised the track's peak. The lift is not")
+        print("  a volume increase: it is headroom the levelling takes straight")
+        print("  back out. De-clipping runs FIRST, on the file as it arrived.")
     if not args.summary_only:
         print()
         print(f"  {'artist / title':<40s}{'kicks/min':>10s}{'shape was':>11s}"
               f"{'now':>8s}{'added':>8s}{'trim':>7s}{'dBTP':>7s}"
-              f"{'match':>8s}{'snap':>7s}")
+              f"{'match':>8s}{'snap':>7s}"
+              + (f"{'clips':>7s}{'lift':>7s}" if args.declip else ""))
 
     written = 0
     labels = report._folder_labels([r["path"] for r in rows])
     outcomes = []          # (folder, amount or None, reason when skipped)
+    clips = []             # one declip report per track decoded
     for row in rows:
+        note_skip = None
         source = Path(row["path"])
         folder = labels.get(row["path"], "(root)")
         name = " - ".join(p for p in (row["artist"], row["title"]) if p) \
@@ -321,33 +333,56 @@ def cmd_subbass(args: argparse.Namespace) -> int:
                 outcomes.append((folder, None, skip))
                 if not args.summary_only:
                     print(f"  {name[:39]:<40s}{'':>10}{'':>11}{'':>8}{'':>8}"
-                          f"{'':>7}{'':>7}{'':>8}{'':>7}  {skip}")
+                          f"{'':>7}{'':>7}{'':>8}{'':>7}"
+                          + (f"{'':>7}{'':>7}" if args.declip else "")
+                          + f"  {skip}")
                 continue
 
-            audio = decode.decode(source)
+            audio = original = decode.decode(source)
+            # First, on the file as it arrived. De-clipping puts peaks BACK,
+            # so it needs the audio before anything has attenuated it, and
+            # everything after it has to fit under the peak it restores.
+            clip = None
+            if args.declip:
+                audio, clip = declip.restore(audio, decode.TARGET_RATE,
+                                             max_restore_db=args.declip_max)
+                clips.append(clip)
             # The content check needs the audio, not the per-frame band
             # statistics, so it happens here rather than in the query.
-            if amount > 0:
+            if skip is None and amount > 0:
                 activity = subbass.low_band_activity(audio, decode.TARGET_RATE)
                 if np.isfinite(activity) and activity < args.min_activity:
                     skip = (f"sub octave barely moves ({activity:.0f} dB) -- "
                             f"a static floor rather than a bassline")
             if skip is not None:
-                outcomes.append((folder, None, skip))
-                if not args.summary_only:
-                    print(f"  {name[:39]:<40s}{'':>10}{'':>11}{'':>8}{'':>8}"
-                          f"{'':>7}{'':>7}{'':>8}{'':>7}  {skip}")
-                continue
+                # A track can want de-clipping and not want a sub. Where one
+                # was done there is a new file worth writing, so only the
+                # sub is dropped; where nothing was done, say so and move on.
+                amount = 0.0
+                if clip is None or not clip["restored"]:
+                    outcomes.append((folder, None, skip))
+                    if not args.summary_only:
+                        print(f"  {name[:39]:<40s}{'':>10}{'':>11}{'':>8}{'':>8}"
+                              f"{'':>7}{'':>7}{'':>8}{'':>7}"
+                              + (f"{'':>7}{'':>7}" if args.declip else "")
+                              + f"  {skip}")
+                    continue
+                note_skip = skip
             after, info = subbass.enhance(audio, decode.TARGET_RATE,
                                           amount_db=amount,
                                           freq=args.freq, decay_s=args.decay,
                                           punch_db=args.punch,
                                           punch_decay_ms=args.punch_decay)
             kicks, _ = subbass.detect_kicks(audio, decode.TARGET_RATE)
-            snap_before = subbass.attack_contrast(audio, decode.TARGET_RATE, kicks)
+            # Against the ORIGINAL, not against the de-clipped intermediate:
+            # the columns say "was", and what the track was is what arrived.
+            # Restored transients belong in the snap figure, not hidden in a
+            # baseline that already has them.
+            snap_before = subbass.attack_contrast(original, decode.TARGET_RATE,
+                                                  kicks)
             snap_after = subbass.attack_contrast(after, decode.TARGET_RATE, kicks)
             before_bands = {b["band_hz"]: b["shape_db"]
-                            for b in spectrum.analyse(audio, decode.TARGET_RATE)}
+                            for b in spectrum.analyse(original, decode.TARGET_RATE)}
             after_bands = {b["band_hz"]: b["shape_db"]
                            for b in spectrum.analyse(after, decode.TARGET_RATE)}
             processed = bs1770.measure(after)
@@ -371,11 +406,19 @@ def cmd_subbass(args: argparse.Namespace) -> int:
                 # is louder: adding sub raises loudness, and louder wins every
                 # blind test regardless of whether it is better. Both are
                 # brought DOWN to whichever is quieter, so neither can clip.
-                original_lufs = bs1770.measure(audio)["lufs_i"]
+                original_lufs = bs1770.measure(original)["lufs_i"]
                 target = min(original_lufs, processed["lufs_i"])
-                a = audio * (10 ** ((target - original_lufs) / 20))
+                a = original * (10 ** ((target - original_lufs) / 20))
                 b = after * (10 ** ((target - processed["lufs_i"]) / 20))
                 match_db = target - original_lufs
+                # A restored peak stands above full scale by design, and
+                # write_flac clips what it is given -- which would put back
+                # exactly the flat tops this pass just took out. Trim BOTH by
+                # the same amount so the level match survives the headroom.
+                room = max(float(np.abs(a).max()), float(np.abs(b).max()))
+                if room > 0.99:
+                    a, b = a * (0.99 / room), b * (0.99 / room)
+                    match_db += 20 * np.log10(0.99 / room)
                 # Both written as FLAC from the same decode, so no codec
                 # difference can creep into the comparison.
                 subbass.write_flac(out_dir / f"{source.stem} -- A original.flac",
@@ -395,7 +438,12 @@ def cmd_subbass(args: argparse.Namespace) -> int:
                       if table.get(b) is not None]
             return sum(values) / len(values) if values else float("nan")
 
-        note = "" if info["note"] is None else f"  {info['note']}"
+        # "no spectral change asked for" contradicts the header on a
+        # de-clipping run, where de-clipping IS the change that was asked for.
+        reason = note_skip or info["note"]
+        if args.declip and reason == "no spectral change asked for":
+            reason = None
+        note = "" if reason is None else f"  {reason}"
         if args.summary_only:
             written += 1
             continue
@@ -403,10 +451,15 @@ def cmd_subbass(args: argparse.Namespace) -> int:
               f"{mean_low(before_bands):>11.1f}{mean_low(after_bands):>8.1f}"
               f"{info['applied_db']:>+8.2f}{info['safety_trim_db']:>+7.2f}"
               f"{peak:>+7.2f}{match_db:>+8.2f}{snap_after - snap_before:>+7.2f}"
-              f"{note}")
+              + (f"{clip['restored']:>7d}{clip['restored_db']:>+7.2f}"
+                 if args.declip else "")
+              + f"{note}")
         written += 1
 
     print()
+    if args.declip:
+        print(declip.summarise(clips))
+        print()
     print(_policy_preview(outcomes))
     print()
     if args.dry_run:
@@ -441,8 +494,23 @@ def cmd_gain(args: argparse.Namespace) -> int:
     enough -- no separate scan step, and no database path to keep in step
     with it.
     """
-    if _settings(args) is None:
+    settings = _settings(args)
+    if settings is None:
         return 2
+    if settings.get("declip"):
+        # A silent no-op is the failure mode this project keeps guarding
+        # against: the profile says declip, the gain pass cannot, and without
+        # this the library comes out levelled and still clipped.
+        print("NOTE: this profile asks for de-clipping, which the gain pass "
+              "cannot do.")
+        print("  Lossless gain moves global_gain in the bitstream and never "
+              "touches a sample,")
+        print("  so a restored peak has nowhere to live. De-clipping needs a "
+              "decode:")
+        print(f"  ./loudness-lab subbass <path> --profile "
+              f"{args.profile or 'the same profile'} --declip --no-compare")
+        print("  Levelling below is unaffected and still correct.")
+        print()
     if args.in_place and args.out:
         sys.stderr.write("error: choose --out or --in-place, not both\n")
         return 2
@@ -920,6 +988,13 @@ def build_parser() -> argparse.ArgumentParser:
                           "44; values in between are a judgement call")
     sub.add_argument("--max-amount", type=float, default=None,
                      help="--auto: cap on the per-track amount (default: 6)")
+    sub.add_argument("--declip", action="store_true", default=None,
+                     help="restore peaks that were clipped before the file "
+                          "reached us, before anything else is done to it")
+    sub.add_argument("--declip-max", type=float, default=None,
+                     metavar="DB",
+                     help="cap on how far --declip may lift one peak "
+                          f"(default {profiles.FIELDS['declip_max']:.0f} dB)")
     sub.add_argument("--summary-only", action="store_true",
                      help="print only the policy preview, not a row per track")
     sub.add_argument("--dry-run", action="store_true",

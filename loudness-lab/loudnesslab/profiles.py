@@ -36,6 +36,8 @@ FIELDS = {
     "min_activity": 20.0,   # below this the sub octave is a floor, not a bassline
     "punch": 0.0,
     "punch_decay": 8.0,
+    "declip": False,        # restore peaks that were clipped before we got them
+    "declip_max": 6.0,      # dB, hard cap on how far one peak may be lifted
 }
 
 BUILT_IN = {

@@ -281,6 +281,14 @@ def shape_attacks(x: np.ndarray, rate: int, kicks: np.ndarray,
     return (rest + shaped).astype(np.float32), info
 
 
+def _blank_report(amount_db: float) -> dict:
+    """What enhance() reports before it has done anything."""
+    return {"kicks": 0, "kicks_per_minute": 0.0, "requested_db": amount_db,
+            "applied_db": 0.0, "polarity_flipped": False,
+            "safety_trim_db": 0.0, "punch_db": 0.0, "sustain_trim_db": 0.0,
+            "band_level_change_db": 0.0, "note": None}
+
+
 def enhance(x: np.ndarray, rate: int, amount_db: float = 5.0,
             freq: float = DEFAULT_FREQ_HZ,
             decay_s: float = DEFAULT_DECAY_S,
@@ -291,20 +299,18 @@ def enhance(x: np.ndarray, rate: int, amount_db: float = 5.0,
     Returns the new audio and a report of what was actually done, because the
     point of a prototype is to be checked rather than believed.
     """
+    if amount_db <= 0 and punch_db <= 0:
+        # Nothing asked for. Say so and return the same array, rather than
+        # spending a kick detection to arrive at x + 0.
+        report = _blank_report(amount_db)
+        report["note"] = "no spectral change asked for"
+        return x, report
+
     kicks, strengths = detect_kicks(x, rate)
-    report = {
-        "kicks": int(kicks.size),
-        "kicks_per_minute": (kicks.size / (x.shape[0] / rate / 60)
-                             if x.shape[0] else 0.0),
-        "requested_db": amount_db,
-        "applied_db": 0.0,
-        "polarity_flipped": False,
-        "safety_trim_db": 0.0,
-        "note": None,
-    }
-    report["punch_db"] = 0.0
-    report["sustain_trim_db"] = 0.0
-    report["band_level_change_db"] = 0.0
+    report = _blank_report(amount_db)
+    report["kicks"] = int(kicks.size)
+    report["kicks_per_minute"] = (kicks.size / (x.shape[0] / rate / 60)
+                                  if x.shape[0] else 0.0)
     if kicks.size < 8:
         report["note"] = "too few kick onsets to work from"
         return x, report

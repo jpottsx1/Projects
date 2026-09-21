@@ -21,6 +21,7 @@ Run after changing anything the Swift depends on:
 from __future__ import annotations
 
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -174,9 +175,16 @@ def main() -> int:
         }
         for kind in ("tones", "programme", "noise", "quiet")
     }
+    # Same shape as the fixtures above, tail included. It is tempting to
+    # leave the tail off -- the head already proves the generator agrees --
+    # but the groove is the one fixture whose END carries a kick, and the
+    # two sides decode this into the SAME Swift type. A section that is
+    # nearly the right shape does not fail its own test; it fails the whole
+    # file's decode, somewhere else entirely.
     golden["grooves"] = {
         f"{bpm:.0f}": {"frames": int(groove(bpm).shape[0]),
                        "head": rounded(groove(bpm)[:8, 0]),
+                       "tail": rounded(groove(bpm)[-4:, 1]),
                        "rms": rounded(np.sqrt(np.mean(groove(bpm) ** 2))),
                        "peak": rounded(np.abs(groove(bpm)).max())}
         for bpm in (100.0, 124.0)
@@ -462,7 +470,43 @@ def main() -> int:
     print(f"  {len(golden['filters'])} filters, "
           f"{len(golden['measure'])} measurements, "
           f"{len(golden['declip'])} de-clip cases")
+    warn_about_ignored_outputs()
     return 0
+
+
+def warn_about_ignored_outputs() -> None:
+    """Say so when git will quietly drop a fixture this just wrote.
+
+    `library.db` spent a while being generated here, passing here, and
+    absent on every other machine, because `*.db` in .gitignore is aimed at
+    scans of somebody's music library and caught a 57 kB fixture on the way
+    past. Nothing failed: the file existed locally, so the local run was
+    green, and the remote run reported a missing resource with no hint as
+    to why it was missing. A generator that knows what it wrote is the
+    cheapest place to notice.
+    """
+    outputs = sorted(
+        p for p in OUT.rglob("*")
+        if p.is_file() and not p.name.endswith(("-wal", "-shm"))
+    )
+    if not outputs:
+        return
+    try:
+        result = subprocess.run(
+            ["git", "check-ignore", "--no-index", *[str(p) for p in outputs]],
+            capture_output=True, text=True, cwd=Path(__file__).resolve().parents[1],
+        )
+    except (OSError, subprocess.SubprocessError):
+        return  # no git, or no repository -- not this script's problem
+    ignored = [line for line in result.stdout.splitlines() if line.strip()]
+    if not ignored:
+        return
+    print("\nWARNING: git is ignoring fixtures this just wrote. They will")
+    print("not reach any other machine, and the Swift tests that open them")
+    print("will fail there with a missing resource:")
+    for line in ignored:
+        print(f"  {line}")
+    print("Add a negation to .gitignore, e.g. !path/to/the/fixture\n")
 
 
 

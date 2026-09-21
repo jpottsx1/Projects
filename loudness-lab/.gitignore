@@ -1,6 +1,13 @@
 __pycache__/
 *.pyc
 *.db
+# ...except the one the Swift tests open. Everything else matching *.db in
+# this project is a scan of somebody's music library -- machine-specific,
+# large, and nobody else's business. This one is a FIXTURE: a few rows
+# written by the Python so the Swift can prove it reads the same file.
+# It is 57 kB, it regenerates byte-identically, and without it in the repo
+# the compatibility claim is untested on every machine but this one.
+!macapp/Tests/LoudnessKitTests/Golden/library.db
 *.db-wal
 *.db-shm
 *.csv

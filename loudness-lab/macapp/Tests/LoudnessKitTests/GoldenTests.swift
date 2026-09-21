@@ -126,14 +126,25 @@ final class GoldenTests: XCTestCase {
         }
     }
 
+    /// Loaded once, and it MUST say which of the two failures happened.
+    /// A `try?` around the decode here once turned "the generator and this
+    /// file disagree about one key in one section" into "the file is
+    /// missing" -- which sent the search to the build system and the
+    /// resource rules, while the actual mismatch sat in plain sight. The
+    /// decoding error names the key and the path to it; throwing that away
+    /// to get a tidier `guard` costs more than it saves.
     static let golden: Golden = {
-        guard let url = Bundle.module.url(forResource: "Golden/golden", withExtension: "json"),
-              let data = try? Data(contentsOf: url),
-              let decoded = try? JSONDecoder().decode(Golden.self, from: data) else {
-            fatalError("Golden/golden.json is missing or unreadable. "
+        guard let url = Bundle.module.url(forResource: "Golden/golden", withExtension: "json") else {
+            fatalError("Golden/golden.json is not in the test bundle. "
                        + "Run: python3 tools/make_golden.py")
         }
-        return decoded
+        do {
+            return try JSONDecoder().decode(Golden.self, from: Data(contentsOf: url))
+        } catch {
+            fatalError("Golden/golden.json did not decode: \(error)\n"
+                       + "The vectors and the structs in this file have drifted. "
+                       + "Re-run: python3 tools/make_golden.py")
+        }
     }()
 
     var golden: Golden { Self.golden }
@@ -342,6 +353,10 @@ final class GoldenTests: XCTestCase {
             XCTAssertEqual(x[0].count, expected.frames, bpm)
             for (index, value) in expected.head.enumerated() {
                 XCTAssertEqual(x[0][index], value, accuracy: 1e-9, "\(bpm) sample \(index)")
+            }
+            for (offset, value) in expected.tail.enumerated() {
+                XCTAssertEqual(x[1][x[1].count - expected.tail.count + offset], value,
+                               accuracy: 1e-9, "\(bpm) tail \(offset)")
             }
             XCTAssertEqual(rms(x), expected.rms, accuracy: 1e-9, bpm)
             XCTAssertEqual(peak(x), expected.peak, accuracy: 1e-9, bpm)

@@ -34,8 +34,8 @@ final class Engine: ObservableObject {
             let library = try Library(at: databaseURL)
 
             say("Measuring \(folders.count) folder(s)…")
-            let counts = await Analyzer.run(roots: folders, library: library) { step in
-                Task { @MainActor [weak self] in
+            let counts = await Analyzer.run(roots: folders, library: library) { [weak self] step in
+                Task { @MainActor in
                     self?.progress = step.total > 0
                         ? Double(step.done) / Double(step.total) : nil
                     if step.failed { self?.say("  failed: \(step.name)") }

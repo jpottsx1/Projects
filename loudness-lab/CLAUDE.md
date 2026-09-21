@@ -151,9 +151,14 @@ they are the fallback if bundling Python ever becomes the better answer.
   progress bar from that. Tested in `TestPorcelainProgress`.
 - Then read the database as now -- `Survey.of` and `Library` are unchanged
   and already work.
-- Processing: `./loudness-lab subbass ...` writes the FLACs and a
-  `manifest.json` that `Manifest.swift` already decodes. It has no
-  `--porcelain` yet; add one the same way, with a test.
+- **Measuring is wired.** `Engine.measurePass` runs the CLI and drives the
+  bar from its JSON; `CLI.swift` finds the tool by walking up from the app,
+  reassembles lines from the pipe, and terminates the process on Stop.
+  Both Measure and Process go through it.
+- **Processing is not.** `Engine.run` still uses the Swift `Processor`.
+  `./loudness-lab subbass ...` writes the FLACs and a `manifest.json` that
+  `Manifest.swift` already decodes; it needs a `--porcelain` like
+  `analyze`, with a test, and then `Engine.run` can drive that instead.
 - Finding the CLI: it lives at the repository root next to `macapp/`, and
   re-executes itself into `.venv`, so there is nothing to activate. The
   app needs a path to it and a clear message when it is missing, pointing

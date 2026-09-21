@@ -52,40 +52,67 @@ final class Engine: ObservableObject {
         defer { isRunning = false; progress = nil; progressNote = nil }
 
         do {
-            let library = try Library(at: databaseURL)
-            say("Measuring \(folders.count) folder(s), "
-                + "\(Concurrency.forMeasuring()) track(s) at a time…")
-            let counts = await Analyzer.run(
-                roots: folders, library: library,
-                isCancelled: { [flag] in flag.isCancelled }) { [weak self] step in
-                Task { @MainActor in
-                    self?.progress = step.total > 0
-                        ? Double(step.done) / Double(step.total) : nil
-                    self?.progressNote = step.scanning
-                        ? "Looking through \(step.name): \(step.done) of "
-                          + "\(step.total) files…"
-                        : "Measured \(step.done) of \(step.total) — \(step.name)"
-                    if step.failed { self?.say("  failed: \(step.name)") }
-                }
-            }
-            say("  \(counts.found) found, \(counts.analysed) measured, "
-                + "\(counts.skipped) already current, \(counts.errors) failed.")
-            let timing = counts.timingLine()
-            if !timing.isEmpty { say(timing) }
+            try await measurePass(folders: folders, databaseURL: databaseURL)
             if cancelled { say("  Stopped."); return }
+
             progress = nil
             progressNote = "Building the survey…"
-            // Off the main actor: it reads every track and every band row in
-            // the library and folds them together, which on a real library
-            // is long enough to freeze the window if done here. A second
-            // handle rather than passing this one across, because a SQLite
-            // connection belongs to the thread that opened it.
             survey = await Task.detached(priority: .userInitiated) {
                 guard let reader = try? Library(at: databaseURL) else { return nil }
                 return try? Survey.of(reader, under: folders, reference: reference)
             }.value
         } catch {
             failure = error.localizedDescription
+        }
+    }
+
+    /// Measure a set of folders into the database, by running the CLI.
+    ///
+    /// Shared by Measure and by Process, which needs the same numbers
+    /// before it can choose what to work on.
+    private func measurePass(folders: [URL], databaseURL: URL) async throws {
+        guard let tool = CLI.locate() else { throw CLI.Failure(CLI.missing) }
+        // The database's folder, because the CLI will not make it and a
+        // first run has nowhere to put the file.
+        try FileManager.default.createDirectory(
+            at: databaseURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true)
+
+        say("Measuring \(folders.count) folder(s)…")
+        progressNote = "Starting…"
+        let arguments = ["analyze"] + folders.map(\.path)
+            + ["--db", databaseURL.path, "--porcelain"]
+
+        try await CLI.run(tool, arguments,
+                          isCancelled: { [flag] in flag.isCancelled }) { [weak self] line in
+            guard let event = CLI.Event(line) else { return }
+            Task { @MainActor in self?.apply(event) }
+        }
+    }
+
+    /// One line of the CLI's report, turned into what is on screen.
+    ///
+    /// Only failures are written to the log. A line per track would bury
+    /// the two lines that matter under three hundred that do not, and the
+    /// progress bar already says which track is being worked on.
+    private func apply(_ event: CLI.Event) {
+        switch event.event {
+        case "progress":
+            if let done = event.done, let total = event.total, total > 0 {
+                progress = Double(done) / Double(total)
+                progressNote = "Measured \(done) of \(total) — \(event.name ?? "")"
+            }
+            if event.status != "ok" {
+                say("  failed: \(event.name ?? "?")"
+                    + (event.error.map { " — \($0)" } ?? ""))
+            }
+        case "done":
+            let seconds = event.seconds.map { String(format: " in %.1fs", $0) } ?? ""
+            say("  \(event.found ?? 0) found, \(event.analysed ?? 0) measured, "
+                + "\(event.skipped ?? 0) already current, "
+                + "\(event.errors ?? 0) failed\(seconds).")
+        default:
+            break
         }
     }
 
@@ -110,29 +137,14 @@ final class Engine: ObservableObject {
         defer { isRunning = false; progress = nil; progressNote = nil }
 
         do {
-            let library = try Library(at: databaseURL)
-
-            say("Measuring \(folders.count) folder(s), "
-                + "\(Concurrency.forMeasuring()) track(s) at a time…")
-            let counts = await Analyzer.run(
-                roots: folders, library: library,
-                isCancelled: { [flag] in flag.isCancelled }) { [weak self] step in
-                Task { @MainActor in
-                    self?.progress = step.total > 0
-                        ? Double(step.done) / Double(step.total) : nil
-                    self?.progressNote = step.scanning
-                        ? "Looking through \(step.name): \(step.done) of "
-                          + "\(step.total) files…"
-                        : "Measured \(step.done) of \(step.total) — \(step.name)"
-                    if step.failed { self?.say("  failed: \(step.name)") }
-                }
-            }
-            say("  \(counts.found) found, \(counts.analysed) measured, "
-                + "\(counts.skipped) already current, \(counts.errors) failed.")
-            let timing = counts.timingLine()
-            if !timing.isEmpty { say(timing) }
+            // Measured first, and by the CLI: Process needs the same numbers
+            // Measure does, and the database is opened afterwards so the
+            // reader is not holding a handle while another process writes.
+            try await measurePass(folders: folders, databaseURL: databaseURL)
             if cancelled { say("  Stopped."); return }
             progress = nil
+
+            let library = try Library(at: databaseURL)
 
             // Thinnest low end first -- the tracks the sub stage is for.
             let shape = try library.lowEndShape(under: folders)
@@ -147,7 +159,7 @@ final class Engine: ObservableObject {
                     : "Nothing measured under those folders."
                 return
             }
-            say("\(rows.count) of \(counts.found) track(s) selected.")
+            say("\(rows.count) track(s) selected.")
 
             // Sizing per track needs a corpus to measure against. Without
             // one the setting cannot be honoured, and applying the fixed

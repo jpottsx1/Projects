@@ -2,3 +2,6 @@
 .swiftpm/
 *.xcodeproj
 DerivedData/
+
+# Built by make-app.sh
+LoudnessLab.app/

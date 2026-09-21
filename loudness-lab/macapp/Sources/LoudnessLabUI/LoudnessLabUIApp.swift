@@ -1,7 +1,33 @@
 import SwiftUI
+import AppKit
+
+/// Without this the window does not come to the front, and may not appear
+/// at all.
+///
+/// `swift run` produces a bare executable with no bundle and no Info.plist,
+/// so macOS has nothing telling it this process owns windows. It launches
+/// as a background process: no Dock icon, no menu bar, and the window --
+/// built, laid out and live -- opens behind whatever is already on screen.
+/// The fix is two lines, and it is worth keeping even once the app is
+/// bundled, because running it straight from the package is the fastest way
+/// to see a change.
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        NSApp.setActivationPolicy(.regular)
+        NSApp.activate()
+    }
+
+    /// One window, one job. Leaving the process running with nothing on
+    /// screen would leave audio nodes holding the output device.
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        true
+    }
+}
 
 @main
 struct LoudnessLabUIApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
+
     var body: some Scene {
         WindowGroup("Loudness Lab") {
             ContentView()

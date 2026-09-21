@@ -53,6 +53,7 @@ public enum Processor {
     /// half-written FLAC is worse than a few more seconds of waiting.
     public static func run(_ jobs: [Job], profile: Profile, compare: Bool,
                            dryRun: Bool, outputDirectory: URL,
+                           format: AudioWriter.Format = .flac,
                            width: Int = defaultJobs(),
                            isCancelled: @escaping @Sendable () -> Bool = { false },
                            progress: (@Sendable (Progress) -> Void)? = nil
@@ -70,7 +71,8 @@ public enum Processor {
                 let index = next; next += 1
                 group.addTask {
                     (index, one(jobs[index], profile: profile, compare: compare,
-                                dryRun: dryRun, outputDirectory: outputDirectory))
+                                dryRun: dryRun, outputDirectory: outputDirectory,
+                                format: format))
                 }
             }
             for await (index, outcome) in group {
@@ -86,7 +88,8 @@ public enum Processor {
                 let following = next; next += 1
                 group.addTask {
                     (following, one(jobs[following], profile: profile, compare: compare,
-                                    dryRun: dryRun, outputDirectory: outputDirectory))
+                                    dryRun: dryRun, outputDirectory: outputDirectory,
+                                    format: format))
                 }
             }
         }
@@ -99,7 +102,8 @@ public enum Processor {
     /// One track. Never throws: a file that will not decode is a line in the
     /// log, not a run that stops halfway through a folder.
     public static func one(_ job: Job, profile: Profile, compare: Bool,
-                           dryRun: Bool, outputDirectory: URL) -> Outcome? {
+                           dryRun: Bool, outputDirectory: URL,
+                           format: AudioWriter.Format = .flac) -> Outcome? {
         let source = URL(fileURLWithPath: job.path)
         let rate = AudioDecoder.targetRate
         let folder = source.deletingLastPathComponent().lastPathComponent
@@ -173,16 +177,24 @@ public enum Processor {
                 if room > 0.99 {
                     a = scale(a, byFactor: 0.99 / room); b = scale(b, byFactor: 0.99 / room)
                 }
-                let aURL = outputDirectory.appendingPathComponent("\(stem) -- A original.flac")
-                let bURL = outputDirectory.appendingPathComponent("\(stem) -- B \(name).flac")
-                try AudioWriter.writeFLAC(a, to: aURL)
-                try AudioWriter.writeFLAC(b, to: bURL)
+                let suffix = format.fileExtension
+                let aURL = outputDirectory
+                    .appendingPathComponent("\(stem) -- A original.\(suffix)")
+                let bURL = outputDirectory
+                    .appendingPathComponent("\(stem) -- B \(name).\(suffix)")
+                // Both sides in the same format, always. A lossless original
+                // against a lossy processed version has you listening to the
+                // codec and calling it the processing.
+                try AudioWriter.write(a, to: aURL, format: format, tagsFrom: source)
+                try AudioWriter.write(b, to: bURL, format: format, tagsFrom: source)
                 variants = [variant("original", aURL, "original", a),
                             variant("processed", bURL, name, b)]
             } else {
                 let levelled = levelToTarget(processed, profile: profile, measured: measured)
-                let url = outputDirectory.appendingPathComponent("\(stem).flac")
-                try AudioWriter.writeFLAC(levelled, to: url)
+                let url = outputDirectory
+                    .appendingPathComponent("\(stem).\(format.fileExtension)")
+                try AudioWriter.write(levelled, to: url, format: format,
+                                      tagsFrom: source)
                 variants = [variant("processed", url, name, levelled)]
             }
         } catch {

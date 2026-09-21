@@ -133,6 +133,7 @@ final class Engine: ObservableObject {
     /// the next one into range rather than leaving a gap.
     func run(folders: [URL], profile: Profile, limit: Int, compare: Bool,
              dryRun: Bool, outputDirectory: URL, databaseURL: URL,
+             format: AudioWriter.Format = .flac,
              only: Set<String>? = nil) async {
         guard !isRunning, !folders.isEmpty else { return }
         isRunning = true; flag.reset(); failure = nil; manifest = nil
@@ -213,11 +214,11 @@ final class Engine: ObservableObject {
             // which is why the window froze and the Stop button could not be
             // clicked for the length of a run.
             progress = 0
-            say("Processing \(jobs.count) track(s), "
+            say("Processing \(jobs.count) track(s) to \(format.rawValue), "
                 + "\(Processor.defaultJobs()) at a time…")
             let outcomes = await Processor.run(
                 jobs, profile: profile, compare: compare, dryRun: dryRun,
-                outputDirectory: outputDirectory,
+                outputDirectory: outputDirectory, format: format,
                 isCancelled: { [flag] in flag.isCancelled },
                 progress: { [weak self] step in
                     Task { @MainActor in

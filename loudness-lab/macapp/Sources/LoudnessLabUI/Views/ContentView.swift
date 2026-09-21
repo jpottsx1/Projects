@@ -22,6 +22,8 @@ struct ContentView: View {
     /// the choice survives a restart -- being asked twice for the same
     /// answer is its own small insult.
     @AppStorage(CLI.overrideKey) private var cliOverride = ""
+    @AppStorage("outputDirectory") private var outputOverride = ""
+    @AppStorage("outputFormat") private var formatName = AudioWriter.Format.flac.rawValue
 
     /// Survey first, deliberately. You cannot choose a policy for a folder
     /// you have not looked at, and looking at it used to mean a terminal.
@@ -30,12 +32,30 @@ struct ContentView: View {
         var id: String { rawValue }
     }
 
+    /// Where processed files go. Changeable, because a DJ library does not
+    /// live where an app would like it to.
     private var outputDirectory: URL {
+        outputOverride.isEmpty ? defaultDirectory
+            : URL(fileURLWithPath: outputOverride, isDirectory: true)
+    }
+
+    private var defaultDirectory: URL {
         FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Music/LoudnessLab", isDirectory: true)
     }
+
+    /// The database does NOT follow the output directory.
+    ///
+    /// It holds every measurement ever taken, and pointing the output
+    /// somewhere else for one run should not hide them. Moving with the
+    /// output would mean a folder measured on Tuesday vanishing on
+    /// Wednesday because the files were being written elsewhere.
     private var databaseURL: URL {
-        outputDirectory.appendingPathComponent("library.db")
+        defaultDirectory.appendingPathComponent("library.db")
+    }
+
+    private var format: AudioWriter.Format {
+        AudioWriter.Format(rawValue: formatName) ?? .flac
     }
 
     var body: some View {
@@ -129,6 +149,7 @@ struct ContentView: View {
                 }
             }
             if CLI.locate() == nil { toolMissing }
+            output
             Text("Originals are never written to. Every version is rendered "
                  + "from one decode, which is what lets them be switched "
                  + "between mid-bar.")
@@ -136,6 +157,44 @@ struct ContentView: View {
                 .foregroundStyle(.secondary)
                 .help(Help.folders.detail)
                 .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    /// Where the results go, and in what.
+    private var output: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Picker("Format", selection: $formatName) {
+                ForEach(AudioWriter.Format.allCases, id: \.rawValue) {
+                    Text($0.rawValue).tag($0.rawValue)
+                }
+            }
+            .help(Help.format.summary)
+            HStack(spacing: 6) {
+                Text("To").frame(width: 24, alignment: .leading)
+                Text(outputDirectory.lastPathComponent)
+                    .lineLimit(1).truncationMode(.head)
+                    .help(outputDirectory.path)
+                Spacer()
+                Button("Change…") { chooseOutput() }
+                    .buttonStyle(.link)
+                if !outputOverride.isEmpty {
+                    Button("Default") { outputOverride = "" }
+                        .buttonStyle(.link)
+                }
+            }
+            .font(.callout)
+        }
+        .help(Help.output.detail)
+    }
+
+    private func chooseOutput() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = true
+        panel.message = "Where should the processed files go?"
+        if panel.runModal() == .OK, let url = panel.url {
+            outputOverride = url.path
         }
     }
 
@@ -187,7 +246,7 @@ struct ContentView: View {
             await engine.run(folders: folders, profile: profile, limit: limit,
                              compare: compare, dryRun: dryRun,
                              outputDirectory: outputDirectory,
-                             databaseURL: databaseURL,
+                             databaseURL: databaseURL, format: format,
                              only: queue.includedPaths)
             chosen = engine.manifest?.tracks.first
             // Measurements exist now that did not before, so the order and

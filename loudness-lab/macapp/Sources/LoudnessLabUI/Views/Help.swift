@@ -75,6 +75,47 @@ enum Help {
         what is already measured; it does not measure again.
         """)
 
+    static let format = HelpEntry(
+        title: "Format",
+        summary: "FLAC keeps everything; MP3 and AAC are for the copies you play.",
+        detail: """
+        FLAC is lossless and the honest default: this stage has already \
+        spent one decode, and a second lossy encode gives away more than \
+        the sub is worth. It is also about four times the size.
+
+        MP3 320 and AAC 256 are there because a set does not want lossless \
+        files. Both are encoded once, from the processed audio, by ffmpeg.
+
+        AAC says 256 rather than 320 because 320 is not something AAC \
+        actually does: asked for it, ffmpeg's encoder was measured handing \
+        back about 200 kbps and saying nothing. 256 is where AAC-LC is \
+        generally reckoned transparent, and what Apple ship music at. Where \
+        the ffmpeg build carries Apple's own encoder it is used in \
+        preference to the native one.
+
+        Both sides of an A/B pair always get the SAME format. A lossless \
+        original against a lossy processed version would have you listening \
+        to the codec and calling it the processing.
+
+        Artist, title and album are carried across from the original. \
+        Serato's cue points are NOT: they live in GEOB frames, this is a \
+        new file with new audio in it, and nothing short of writing those \
+        frames back would keep them. The lossless gain path is the one that \
+        preserves cues; this stage never has.
+        """)
+
+    static let output = HelpEntry(
+        title: "To",
+        summary: "Where processed files go. Originals are never written to.",
+        detail: """
+        Defaults to ~/Music/LoudnessLab. Change it to write straight into \
+        wherever your library lives.
+
+        The measurements do not follow it. They stay in one database, \
+        because pointing the output somewhere else for one run should not \
+        hide a folder you measured last week.
+        """)
+
     // MARK: - Profile
 
     static let profile = HelpEntry(
@@ -384,7 +425,7 @@ enum Help {
         HelpSection("Sub bass", [amount, auto, reference, maxAmount, minActivity]),
         HelpSection("Attack", [punch, punchDecay]),
         HelpSection("Level", [target, estimator, peakCeiling]),
-        HelpSection("The run", [limit, compare, dryRun]),
+        HelpSection("The run", [limit, format, output, compare, dryRun]),
         HelpSection("Listening", [switching, matchLoudness, blind]),
         HelpSection("Results", [results]),
     ]

@@ -171,6 +171,16 @@ final class GoldenTests: XCTestCase {
 
     // MARK: - Filters
 
+    /// The filter tests iterate `bank()`, so a filter missing from that table
+    /// would go untested in silence rather than fail. This is what makes
+    /// adding one to the generator and forgetting the test a loud mistake --
+    /// which it has already been once, when the kick detector's envelopes
+    /// turned out to be 60 and 3 Hz rather than the single 200 Hz guessed at.
+    func testEveryFilterInTheVectorsIsActuallyTested() {
+        XCTAssertEqual(Set(bank().keys), Set(golden.filters.keys),
+                       "the filter bank and the golden vectors have drifted apart")
+    }
+
     func testTheFilterBankCarriesTheCoefficientsScipyDesigned() throws {
         for (name, filter) in bank() {
             let expected = try XCTUnwrap(golden.filters[name], name)
@@ -893,7 +903,8 @@ final class GoldenTests: XCTestCase {
         ["subBand": FilterBank.subBand, "kickBand": FilterBank.kickBand,
          "punchBand": FilterBank.punchBand, "subFloor": FilterBank.subFloor,
          "subCeiling": FilterBank.subCeiling, "envelope20": FilterBank.envelope20,
-         "envelope200": FilterBank.envelope200, "onsetFast": FilterBank.onsetFast]
+         "envelope200": FilterBank.envelope200, "envelope60": FilterBank.envelope60,
+         "envelope3": FilterBank.envelope3]
     }
 
     func rms(_ x: [[Double]]) -> Double {

@@ -206,7 +206,13 @@ public struct Survey: Sendable {
 
     /// The same thing as text, for pasting into a note or a message.
     public func asText() -> String {
-        var out = ["LIBRARY  (\(measured) tracks measured)", String(repeating: "=", count: 62), ""]
+        // Says "selected" because it is: the figures above count the
+        // folders chosen, while the tables below cover everything measured.
+        // Both are wanted -- a reference folder has to keep counting after
+        // it is cleared from the list -- but a bare "177 tracks" over a
+        // table listing eight folders invites the wrong reading.
+        var out = ["LIBRARY  (\(measured) track(s) in the selected folder(s))",
+                   String(repeating: "=", count: 62), ""]
         func dB(_ value: Double?) -> String {
             value.map { String(format: "%.2f", $0) } ?? "--"
         }
@@ -242,7 +248,8 @@ public struct Survey: Sendable {
 
         if !folders.isEmpty {
             out += ["", "Low end by folder, 31.5-63 Hz"
-                    + (reference.map { " (against \($0))" } ?? ""),
+                    + (reference.map { " (against \($0))" }
+                       ?? "  — no reference named, so vs ref is blank"),
                     String(repeating: "-", count: 62),
                     "   tracks   mean    vs ref   clipped   folder"]
             for row in folders {

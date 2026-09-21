@@ -75,6 +75,17 @@ public struct Profile: Codable, Equatable, Sendable {
         // Off to start: live drummers, and 2-6 kHz is full of hi-hat and
         // tambourine rather than beater click.
         disco.punch = 0
+        // On, and measured rather than assumed. Two discs of a 2003 disco
+        // reissue: 9 of 17 clipped on one, 13 of 17 on the other -- 53% and
+        // 76%, against 0% on four of five discs of an eighties compilation
+        // in the same library. Worst offenders at 324 and 398 runs. The
+        // library average would have said 13.6% and decided nothing.
+        //
+        // The gain through a lossy codec is small -- about 2 dB at light
+        // clipping falling to 0.4 at heavy, and this is heavy -- so it is on
+        // because the damage is real and the method is self-limiting, not
+        // because it is free. Listen before committing a folder to it.
+        disco.declip = true
 
         // Measured the same way, on a library this project did not come
         // from: five discs of "100 Hits - The New Romantics (2011)", 100

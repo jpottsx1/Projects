@@ -75,6 +75,17 @@ BUILT_IN = {
         # Off to start: live drummers, and 2-6 kHz is full of hi-hat and
         # tambourine rather than beater click.
         "punch": 0.0,
+        # On, and measured rather than assumed. Two discs of a 2003 disco
+        # reissue: 9 of 17 clipped on one, 13 of 17 on the other -- 53% and
+        # 76%, against 0% on four of five discs of an eighties compilation
+        # in the same library. Worst offenders at 324 and 398 runs. The
+        # library average would have said 13.6% and decided nothing.
+        #
+        # The gain through a lossy codec is small -- about 2 dB at light
+        # clipping falling to 0.4 at heavy, and this is heavy -- so it is on
+        # because the damage is real and the method is self-limiting, not
+        # because it is free. Listen before committing a folder to it.
+        "declip": True,
     },
     # Measured, like the disco one, and on a library this project did not
     # come from: five discs of "100 Hits - The New Romantics (2011)", 100
@@ -107,10 +118,10 @@ BUILT_IN = {
         # eighties activity, and moving a gate on a guess is how a static
         # floor gets mistaken for a bassline.
         "min_activity": 20.0,
-        # Off, and not yet decided. The library this came from measures 13.6%
-        # clipped overall while one disco reissue inside it measures 53%, so
-        # the honest answer needs this corpus's own clipped share rather than
-        # an average across everything else.
+        # Off, and now measured rather than pending: four of the five
+        # discs carry no clipped runs at all and the fifth carries two, so
+        # 10% at worst against the disco reissue's 53 and 76. There is
+        # nothing here to restore.
         "declip": False,
         # Drum machines already have beater click, and 2-6 kHz on this
         # material is full of gated reverb rather than attack.

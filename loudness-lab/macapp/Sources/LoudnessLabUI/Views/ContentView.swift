@@ -12,6 +12,10 @@ struct ContentView: View {
     @State private var profile = Profile()
     @State private var profileName = ""
     @State private var limit = 10
+    /// Off by default: a folder added is a folder meant to be worked on,
+    /// and a silent cap of ten on three hundred tracks is a surprise
+    /// rather than a convenience.
+    @State private var limited = false
     @State private var compare = true
     @State private var dryRun = false
     @State private var chosen: Manifest.Track?
@@ -65,7 +69,9 @@ struct ContentView: View {
                 SourcePanel(folders: $folders)
                 Divider()
                 SettingsPanel(profile: $profile, profileName: $profileName,
-                              limit: $limit, compare: $compare, dryRun: $dryRun)
+                              limit: $limit, limited: $limited,
+                              compare: $compare, dryRun: $dryRun,
+                              folders: engine.survey?.folders.map(\.folder) ?? [])
                 Divider()
                 runControls
             }
@@ -73,7 +79,7 @@ struct ContentView: View {
             .frame(minWidth: 330, idealWidth: 350, maxWidth: 420)
 
             // What it will be done to.
-            QueuePanel(queue: queue, limit: limit)
+            QueuePanel(queue: queue, limit: limited ? limit : Int.max)
                 .frame(minWidth: 260, idealWidth: 320, maxWidth: 480)
 
             // What the folders are, and what came out of them.
@@ -243,7 +249,8 @@ struct ContentView: View {
         player.stop()
         chosen = nil
         Task {
-            await engine.run(folders: folders, profile: profile, limit: limit,
+            await engine.run(folders: folders, profile: profile,
+                             limit: limited ? limit : Int.max,
                              compare: compare, dryRun: dryRun,
                              outputDirectory: outputDirectory,
                              databaseURL: databaseURL, format: format,

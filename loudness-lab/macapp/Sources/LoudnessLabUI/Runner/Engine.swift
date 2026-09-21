@@ -93,6 +93,23 @@ final class Engine: ObservableObject {
         }
     }
 
+    /// What makes two rows the same record.
+    ///
+    /// Artist and title, with case, punctuation and spacing thrown away,
+    /// because "Earth, Wind & Fire - Let's Groove" and "Earth Wind and
+    /// Fire - Lets Groove" are the same song off two compilations. An
+    /// untagged file falls back to its own path, which is unique -- so a
+    /// track with no tags is never mistaken for another track with no tags.
+    static func identity(of row: Library.TrackRow) -> String {
+        let artist = row.artist ?? "", title = row.title ?? ""
+        guard !artist.isEmpty || !title.isEmpty else { return row.path }
+        let joined = (artist + "\u{001F}" + title).lowercased()
+        let kept = joined.unicodeScalars.filter {
+            CharacterSet.alphanumerics.contains($0) || $0 == "\u{001F}"
+        }
+        return String(String.UnicodeScalarView(kept))
+    }
+
     /// One line of the CLI's report, turned into what is on screen.
     ///
     /// Only failures are written to the log. A line per track would bury
@@ -189,7 +206,19 @@ final class Engine: ObservableObject {
             // Sizing first, because it is a database read: quick, and it
             // decides which tracks are worth decoding at all.
             var jobs: [Processor.Job] = []
+            // The same record twice in one batch is one decode, one encode
+            // and one lossy generation wasted -- and two files in the
+            // output that differ only by which compilation they came off.
+            // A library of disco compilations is mostly the same forty
+            // songs, so this is the normal case rather than an odd one.
+            var seen = Set<String>()
+            var duplicates = 0
             for row in rows {
+                let key = Engine.identity(of: row)
+                guard seen.insert(key).inserted else {
+                    duplicates += 1
+                    continue
+                }
                 var amount = profile.amount
                 var gate: String?
                 if profile.auto {
@@ -202,6 +231,10 @@ final class Engine: ObservableObject {
                 }
                 jobs.append(Processor.Job(path: row.path, name: row.name,
                                           amountDB: amount))
+            }
+            if duplicates > 0 {
+                say("  \(duplicates) duplicate(s) skipped — same artist and "
+                    + "title already in this batch.")
             }
             guard !jobs.isEmpty else {
                 failure = "Every selected track was gated out. "

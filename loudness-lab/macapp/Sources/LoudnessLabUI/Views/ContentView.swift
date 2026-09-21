@@ -5,6 +5,7 @@ struct ContentView: View {
     @Environment(\.openWindow) private var openWindow
     @StateObject private var engine = Engine()
     @StateObject private var player = ABPlayer()
+    @StateObject private var queue = Queue()
 
     @State private var folders: [URL] = []
     @State private var profile = Profile()
@@ -25,6 +26,7 @@ struct ContentView: View {
 
     var body: some View {
         HSplitView {
+            // What to do.
             VStack(alignment: .leading, spacing: 14) {
                 SourcePanel(folders: $folders)
                 Divider()
@@ -34,8 +36,13 @@ struct ContentView: View {
                 runControls
             }
             .padding(16)
-            .frame(minWidth: 330, maxWidth: 400)
+            .frame(minWidth: 330, idealWidth: 350, maxWidth: 420)
 
+            // What it will be done to.
+            QueuePanel(queue: queue, limit: limit)
+                .frame(minWidth: 260, idealWidth: 320, maxWidth: 480)
+
+            // What came out.
             VStack(spacing: 0) {
                 ResultsPanel(manifest: engine.manifest, chosen: $chosen)
                 Divider()
@@ -44,9 +51,13 @@ struct ContentView: View {
                 Divider()
                 LogPanel(text: engine.log, failure: engine.failure ?? player.problem)
             }
-            .frame(minWidth: 560)
+            .frame(minWidth: 520)
         }
         .onChange(of: chosen) { _, track in loadIntoPlayer(track) }
+        // The queue follows the folders, and refreshes after a run because
+        // a run measures tracks that had no numbers before.
+        .task(id: folders) { await queue.refresh(folders: folders,
+                                                 databaseURL: databaseURL) }
         .onReceive(NotificationCenter.default.publisher(for: .showHelp)) { _ in
             openWindow(id: "help")
         }
@@ -56,7 +67,8 @@ struct ContentView: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Button(engine.isRunning ? "Running…" : "Process") { start() }
-                    .disabled(engine.isRunning || folders.isEmpty)
+                    .disabled(engine.isRunning || folders.isEmpty
+                              || queue.includedPaths.isEmpty)
                     .keyboardShortcut(.return, modifiers: .command)
                     .help("Measure, then process the chosen folders (⌘↩). "
                           + "Originals are never written to.")
@@ -86,8 +98,12 @@ struct ContentView: View {
             await engine.run(folders: folders, profile: profile, limit: limit,
                              compare: compare, dryRun: dryRun,
                              outputDirectory: outputDirectory,
-                             databaseURL: databaseURL)
+                             databaseURL: databaseURL,
+                             only: queue.includedPaths)
             chosen = engine.manifest?.tracks.first
+            // Measurements exist now that did not before, so the order and
+            // the numbers in the list are no longer the best available.
+            await queue.refresh(folders: folders, databaseURL: databaseURL)
         }
     }
 

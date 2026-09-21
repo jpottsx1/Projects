@@ -20,7 +20,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 PROFILE = ROOT / "macapp/Sources/LoudnessKit/Library/Profile.swift"
 HELP = ROOT / "macapp/Sources/LoudnessLabUI/Views/Help.swift"
-PANELS = ROOT / "macapp/Sources/LoudnessLabUI/Views/Panels.swift"
+VIEWS = ROOT / "macapp/Sources/LoudnessLabUI/Views"
 
 # Profile fields that are not controls: prose, or set by the profile itself.
 NOT_A_CONTROL = {"description"}
@@ -44,10 +44,14 @@ DOCUMENTED_BY = {
 
 
 def main() -> int:
-    for path in (PROFILE, HELP, PANELS):
+    for path in (PROFILE, HELP):
         if not path.exists():
             print(f"missing {path}")
             return 2
+
+    if not VIEWS.is_dir():
+        print(f"missing {VIEWS}")
+        return 2
 
     fields = set(re.findall(r"public var (\w+)\s*:", PROFILE.read_text()))
     fields -= NOT_A_CONTROL
@@ -81,11 +85,11 @@ def main() -> int:
     # And every entry should be on something, not only in the window.
     # `Help.x.summary` on a modifier, and bare `Help.x` handed to the slider
     # helper, are both "attached" -- so match the name, not a trailing field.
-    shown = set(re.findall(r"Help\.(\w+)\b", PANELS.read_text()
-                           + (ROOT / "macapp/Sources/LoudnessLabUI/Views/"
-                              "ComparePanel.swift").read_text()
-                           + (ROOT / "macapp/Sources/LoudnessLabUI/Views/"
-                              "ContentView.swift").read_text()))
+    # Every view, not a list of three that goes stale the moment a pane is
+    # added -- which is exactly what happened when the queue pane arrived.
+    views = "".join(path.read_text() for path in sorted(VIEWS.glob("*.swift"))
+                    if path.name != "Help.swift")
+    shown = set(re.findall(r"Help\.(\w+)\b", views))
     for unused in sorted(entries - shown):
         problems.append(f"Help.{unused} is never attached to a control (no hover text).")
 

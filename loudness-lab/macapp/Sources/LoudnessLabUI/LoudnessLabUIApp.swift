@@ -31,7 +31,8 @@ struct LoudnessLabUIApp: App {
     var body: some Scene {
         WindowGroup("Loudness Lab") {
             ContentView()
-                .frame(minWidth: 940, minHeight: 620)
+                // Three panes: what to do, what to do it to, what came out.
+                .frame(minWidth: 1120, minHeight: 640)
         }
         .windowResizability(.contentMinSize)
         .commands {

@@ -36,6 +36,26 @@ enum Help {
         back smaller than you expected can be explained.
         """)
 
+    static let queue = HelpEntry(
+        title: "To process",
+        summary: "Everything found, in the order it will be worked through.",
+        detail: """
+        The order is the information. Tracks are taken thinnest low end \
+        first -- not alphabetically, not in folder order -- because those \
+        are the ones the sub stage is for. So "10 tracks" from a folder of \
+        three hundred means a particular ten, and this is where you see \
+        which.
+
+        Rows within the limit are highlighted; the rest are dimmed rather \
+        than hidden, because "not chosen" and "not found" are very different \
+        problems and you should be able to tell them apart. Untick anything \
+        you want left out -- doing so promotes the next track into range \
+        rather than leaving a gap.
+
+        Until a folder has been measured there are no numbers to sort on, so \
+        the list is in name order and says so. Press Process and it fills in.
+        """)
+
     // MARK: - Profile
 
     static let profile = HelpEntry(
@@ -339,7 +359,7 @@ enum Help {
     /// of tuples needs the element destructured in the closure, which is
     /// the sort of thing that compiles in one position and not the next.
     static let sections: [HelpSection] = [
-        HelpSection("Choosing music", [folders]),
+        HelpSection("Choosing music", [folders, queue]),
         HelpSection("Policy", [profile]),
         HelpSection("Clipped peaks", [declip, declipMax]),
         HelpSection("Sub bass", [amount, auto, reference, maxAmount, minActivity]),

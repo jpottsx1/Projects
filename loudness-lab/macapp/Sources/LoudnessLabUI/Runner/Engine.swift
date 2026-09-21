@@ -23,8 +23,13 @@ final class Engine: ObservableObject {
 
     func say(_ line: String) { log += line + "\n" }
 
+    /// `only` is the queue's selection: the paths the user left ticked. Nil
+    /// means everything found, which is what the command line does. The
+    /// selection is applied BEFORE the limit, so unticking a track promotes
+    /// the next one into range rather than leaving a gap.
     func run(folders: [URL], profile: Profile, limit: Int, compare: Bool,
-             dryRun: Bool, outputDirectory: URL, databaseURL: URL) async {
+             dryRun: Bool, outputDirectory: URL, databaseURL: URL,
+             only: Set<String>? = nil) async {
         guard !isRunning, !folders.isEmpty else { return }
         isRunning = true; cancelled = false; failure = nil; manifest = nil
         log = ""; progress = nil
@@ -49,10 +54,13 @@ final class Engine: ObservableObject {
             let shape = try library.lowEndShape(under: folders)
             let rows = try library.tracks(under: folders)
                 .filter { shape[$0.path] != nil }
+                .filter { only?.contains($0.path) ?? true }
                 .sorted { (shape[$0.path] ?? 0) < (shape[$1.path] ?? 0) }
                 .prefix(limit)
             guard !rows.isEmpty else {
-                failure = "Nothing measured under those folders."
+                failure = only?.isEmpty == true
+                    ? "Nothing is ticked in the list."
+                    : "Nothing measured under those folders."
                 return
             }
             say("\(rows.count) of \(counts.found) track(s) selected.")

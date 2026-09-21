@@ -65,7 +65,10 @@ final class Queue: ObservableObject {
         token += 1
         let mine = token
         guard !folders.isEmpty else {
-            items = []; note = nil; scanning = false
+            // Cleared, so the remembered ticks go too. Keeping them would
+            // mean a track unticked weeks ago silently staying out of a run
+            // its folder was added back for.
+            items = []; note = nil; scanning = false; excluded = []
             return
         }
         scanning = true

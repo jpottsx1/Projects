@@ -22,7 +22,22 @@ struct SourcePanel: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Music").font(.headline)
+            HStack {
+                Text("Music").font(.headline)
+                Spacer()
+                // One click rather than one per folder. Seven folders
+                // measured means seven minus buttons before a new one can
+                // be looked at on its own, and the list in the middle pane
+                // is sorted by low end -- so a folder added to an existing
+                // set arrives interleaved through it rather than together.
+                Button("Clear") { folders.removeAll() }
+                    .buttonStyle(.link)
+                    .disabled(folders.isEmpty)
+                    .help("Remove every folder, to start on something else. "
+                          + "Nothing measured is lost -- it stays in the "
+                          + "library and comes back the moment the folder "
+                          + "is added again.")
+            }
 
             if folders.isEmpty {
                 Text("No folders chosen.").font(.caption).foregroundStyle(.secondary)

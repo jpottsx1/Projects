@@ -364,6 +364,65 @@ public final class Library {
     /// there is nothing there to correct.
     public static let lowShapeBands = Spectrum.bandCentres.filter { (31.0...63.0).contains($0) }
 
+    /// A folder label for each track that is actually distinctive.
+    ///
+    /// The immediate parent name alone merges unrelated folders: two
+    /// compilations each with a CD1 land in one row, and a corpus silently
+    /// averaged with another corpus is worse than no answer. Labels are
+    /// taken relative to the common prefix of every path, so
+    /// "Now Yearbook 99 (2026)/CD1" stays apart from "NOW 100 Hits/CD1".
+    ///
+    /// A port of `report._folder_labels`, held to it by golden vectors.
+    public static func folderLabels(_ paths: [String]) -> [String: String] {
+        let unique = Set(paths).sorted()
+        guard !unique.isEmpty else { return [:] }
+        let parents = unique.map { ($0 as NSString).deletingLastPathComponent }
+        let distinct = Set(parents)
+        let base = distinct.count > 1
+            ? commonDirectory(Array(distinct))
+            : (parents[0] as NSString).deletingLastPathComponent
+
+        var labels: [String: String] = [:]
+        for path in unique {
+            let parent = (path as NSString).deletingLastPathComponent
+            var relative = parent
+            if !base.isEmpty {
+                if parent == base {
+                    relative = ""
+                } else if parent.hasPrefix(base + "/") {
+                    relative = String(parent.dropFirst(base.count + 1))
+                }
+            }
+            if relative.isEmpty || relative == "." || relative == "/" {
+                let name = (parent as NSString).lastPathComponent
+                relative = name.isEmpty ? "(root)" : name
+            }
+            labels[path] = relative
+        }
+        return labels
+    }
+
+    /// The deepest directory every path is inside. Component by component,
+    /// stopping at the first that differs -- comparing strings would make
+    /// /Music/Disco a prefix of /Music/Disco Classics, which it is not.
+    static func commonDirectory(_ paths: [String]) -> String {
+        guard let first = paths.first else { return "" }
+        let absolute = first.hasPrefix("/")
+        var common = first.split(separator: "/").map(String.init)
+        for path in paths.dropFirst() {
+            let parts = path.split(separator: "/").map(String.init)
+            var shared: [String] = []
+            for (mine, theirs) in zip(common, parts) {
+                if mine != theirs { break }
+                shared.append(mine)
+            }
+            common = shared
+            if common.isEmpty { break }
+        }
+        let joined = common.joined(separator: "/")
+        return absolute ? "/" + joined : joined
+    }
+
     /// Median low-band shape per folder -- the curve a track is measured
     /// against when the sub is sized per track rather than set by hand.
     public func referenceCurves() throws -> [String: [Double: Double]] {
@@ -373,13 +432,14 @@ public final class Library {
             JOIN bands b ON b.track_id = t.id
             WHERE t.status = 'ok' AND b.band_hz IN (\(list)) AND b.shape_db IS NOT NULL
             """)
+        let paths = rows.compactMap { $0["path"] as? String }
+        let labels = Library.folderLabels(paths)
         var gathered: [String: [Double: [Double]]] = [:]
         for row in rows {
             guard let path = row["path"] as? String,
                   let band = row["band_hz"] as? Double,
                   let shape = row["shape_db"] as? Double else { continue }
-            let folder = (path as NSString).deletingLastPathComponent
-            let name = (folder as NSString).lastPathComponent
+            let name = labels[path] ?? "(root)"
             gathered[name, default: [:]][band, default: []].append(shape)
         }
         return gathered.mapValues { bands in

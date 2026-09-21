@@ -1327,6 +1327,74 @@
    ]
   }
  },
+ "folderLabels": [
+  {
+   "labels": {
+    "/m/NOW 100 Hits Party/CD1/c.mp3": "NOW 100 Hits Party/CD1",
+    "/m/Now Yearbook 99 (2026)/CD1/a.mp3": "Now Yearbook 99 (2026)/CD1",
+    "/m/Now Yearbook 99 (2026)/CD1/b.mp3": "Now Yearbook 99 (2026)/CD1"
+   },
+   "paths": [
+    "/m/Now Yearbook 99 (2026)/CD1/a.mp3",
+    "/m/Now Yearbook 99 (2026)/CD1/b.mp3",
+    "/m/NOW 100 Hits Party/CD1/c.mp3"
+   ]
+  },
+  {
+   "labels": {
+    "/m/Disco/a.mp3": "Disco",
+    "/m/Disco/b.mp3": "Disco"
+   },
+   "paths": [
+    "/m/Disco/a.mp3",
+    "/m/Disco/b.mp3"
+   ]
+  },
+  {
+   "labels": {
+    "/m/Disco/a.mp3": "Disco",
+    "/m/Eighties/b.mp3": "Eighties"
+   },
+   "paths": [
+    "/m/Disco/a.mp3",
+    "/m/Eighties/b.mp3"
+   ]
+  },
+  {
+   "labels": {
+    "/m/Disco Classics/b.mp3": "Disco Classics",
+    "/m/Disco/a.mp3": "Disco"
+   },
+   "paths": [
+    "/m/Disco/a.mp3",
+    "/m/Disco Classics/b.mp3"
+   ]
+  },
+  {
+   "labels": {
+    "/m/A/B/C/a.mp3": "B/C",
+    "/m/A/b.mp3": "A"
+   },
+   "paths": [
+    "/m/A/B/C/a.mp3",
+    "/m/A/b.mp3"
+   ]
+  },
+  {
+   "labels": {
+    "/m/a.mp3": "m",
+    "/m/b.mp3": "m"
+   },
+   "paths": [
+    "/m/a.mp3",
+    "/m/b.mp3"
+   ]
+  },
+  {
+   "labels": {},
+   "paths": []
+  }
+ ],
  "grooves": {
   "100": {
    "frames": 384000,

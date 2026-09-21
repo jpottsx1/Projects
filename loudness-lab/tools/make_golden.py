@@ -30,6 +30,7 @@ from scipy.signal import butter, find_peaks, sosfilt, sosfiltfilt
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from loudnesslab import bs1770, decode, declip, mp3gain, spectrum, subbass  # noqa: E402
+from loudnesslab.report import _folder_labels  # noqa: E402
 
 RATE = 48000
 OUT = Path(__file__).resolve().parents[1] / "macapp/Tests/LoudnessKitTests/Golden"
@@ -461,6 +462,28 @@ def main() -> int:
         "curve": {str(k): rounded(v) for k, v in sorted(curve.items())},
         "shortfalls": shortfalls,
     }
+
+    # --- folder labelling, where a wrong answer merges two corpora ---
+    # The cases that matter are the ones the bare parent name gets wrong.
+    golden["folderLabels"] = []
+    for case in (
+        # Two compilations, each with a CD1: the thing the bare name merges.
+        ["/m/Now Yearbook 99 (2026)/CD1/a.mp3", "/m/Now Yearbook 99 (2026)/CD1/b.mp3",
+         "/m/NOW 100 Hits Party/CD1/c.mp3"],
+        # One folder only: the label is its own name, not an empty string.
+        ["/m/Disco/a.mp3", "/m/Disco/b.mp3"],
+        # Sibling folders under a common root.
+        ["/m/Disco/a.mp3", "/m/Eighties/b.mp3"],
+        # A prefix that is not a path prefix: /m/Disco vs /m/Disco Classics.
+        ["/m/Disco/a.mp3", "/m/Disco Classics/b.mp3"],
+        # Nested, different depths.
+        ["/m/A/B/C/a.mp3", "/m/A/b.mp3"],
+        # Files sitting directly in the common root.
+        ["/m/a.mp3", "/m/b.mp3"],
+        [],
+    ):
+        golden["folderLabels"].append(
+            {"paths": case, "labels": _folder_labels(case)})
 
     write_filter_bank()
 

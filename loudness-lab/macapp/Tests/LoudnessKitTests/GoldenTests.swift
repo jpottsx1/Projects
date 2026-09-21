@@ -34,6 +34,12 @@ final class GoldenTests: XCTestCase {
         let yearFromText: [String: Int?]
         let yearFromTags: [YearTagCase]
         let library: LibraryCase
+        let folderLabels: [FolderLabelCase]
+    }
+
+    struct FolderLabelCase: Decodable {
+        let paths: [String]
+        let labels: [String: String]
     }
 
     struct LibraryCase: Decodable {
@@ -915,6 +921,27 @@ final class GoldenTests: XCTestCase {
         XCTAssertEqual(Library.resolveReference(curves, "yearbook"), "Yearbook 99")
         XCTAssertNil(Library.resolveReference(curves, "disco"), "two folders match")
         XCTAssertNil(Library.resolveReference(curves, "nothing"))
+    }
+
+    /// Grouping on the bare parent name merges two compilations that each
+    /// have a CD1, and a corpus silently averaged with another corpus is
+    /// worse than no answer at all -- it is a wrong number that looks
+    /// exactly like a right one. This is the table a profile's caps get set
+    /// from, so it has to be the Python's answer and not merely a plausible
+    /// one.
+    func testFolderLabelsMatchPython() {
+        for expected in golden.folderLabels {
+            XCTAssertEqual(Library.folderLabels(expected.paths), expected.labels,
+                           "\(expected.paths)")
+        }
+    }
+
+    func testTwoCompilationsWithACD1StayApart() {
+        let labels = Library.folderLabels([
+            "/m/Now Yearbook 99 (2026)/CD1/a.mp3",
+            "/m/NOW 100 Hits Party/CD1/b.mp3"])
+        XCTAssertEqual(Set(labels.values).count, 2,
+                       "two different CD1 folders were merged into one corpus")
     }
 
     func testTheSchemaVersionMatchesThePython() {

@@ -114,11 +114,13 @@ public struct Survey: Sendable {
 
         // --- low end, by folder ---
         let curves = try library.referenceCurves()
+        // The same labelling the curves were grouped by. Counting under a
+        // different scheme would put one folder's track count beside
+        // another folder's measurements.
+        let labels = Library.folderLabels(rows.map(\.path))
         var counts: [String: Int] = [:]
         for row in rows {
-            let folder = ((row.path as NSString).deletingLastPathComponent
-                          as NSString).lastPathComponent
-            counts[folder, default: 0] += 1
+            counts[labels[row.path] ?? "(root)", default: 0] += 1
         }
         let referenceName = wanted.flatMap { Library.resolveReference(curves, $0) }
         survey.reference = referenceName

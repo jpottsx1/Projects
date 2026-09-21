@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
 import os
 
 import numpy as np
@@ -103,6 +104,40 @@ def _level_to_target(audio, args, measured: dict):
         wanted = args.peak_ceiling - peak
     levelled = (audio * (10 ** (wanted / 20))).astype(audio.dtype)
     return levelled, wanted, bs1770.measure(levelled)["true_peak_dbtp"]
+
+
+def _variant(kind: str, path: Path, label: str, audio) -> dict:
+    """One playable rendering of a track, with what the player needs to line
+    it up against the others and monitor it fairly."""
+    measured = bs1770.measure(audio)
+    return {
+        "kind": kind, "label": label, "path": str(path),
+        "seconds": round(audio.shape[0] / decode.TARGET_RATE, 4),
+        "lufs_i": measured["lufs_i"], "s_p95": measured["s_p95"],
+        "true_peak_dbtp": measured["true_peak_dbtp"],
+    }
+
+
+def _write_manifest(path: Path, args: argparse.Namespace,
+                    tracks: list) -> None:
+    """A record of the run that a player can read.
+
+    Every variant of a track is written from the SAME decode at the same
+    rate, so they are sample-aligned with each other by construction and a
+    player can switch between them mid-bar without seeking. That property is
+    the reason this file exists; a player given an original MP3 and a
+    processed FLAC would have to find the encoder delay itself.
+    """
+    payload = {
+        "version": 1,
+        "rate": decode.TARGET_RATE,
+        "aligned": True,
+        "settings": {key: getattr(args, key) for key in profiles.FIELDS
+                     if key != "description" and hasattr(args, key)},
+        "profile": args.profile,
+        "tracks": tracks,
+    }
+    path.write_text(json.dumps(payload, indent=2, default=str))
 
 
 def _policy_preview(outcomes: list) -> str:
@@ -320,8 +355,10 @@ def cmd_subbass(args: argparse.Namespace) -> int:
     labels = report._folder_labels([r["path"] for r in rows])
     outcomes = []          # (folder, amount or None, reason when skipped)
     clips = []             # one declip report per track decoded
+    manifest = []          # what the UI reads: paths, levels, what was done
     for row in rows:
         note_skip = None
+        variants = []
         source = Path(row["path"])
         folder = labels.get(row["path"], "(root)")
         name = " - ".join(p for p in (row["artist"], row["title"]) if p) \
@@ -401,8 +438,11 @@ def cmd_subbass(args: argparse.Namespace) -> int:
                 # part several dB hot.
                 after, match_db, final = _level_to_target(after, args, processed)
                 peak = final
-                subbass.write_flac(out_dir / (source.stem + ".flac"), after,
-                                   decode.TARGET_RATE, source)
+                written_path = out_dir / (source.stem + ".flac")
+                subbass.write_flac(written_path, after, decode.TARGET_RATE,
+                                   source)
+                variants = [_variant("processed", written_path,
+                                     _label(args, amount), after)]
             else:
                 # Level-match the pair, or the comparison just measures which
                 # is louder: adding sub raises loudness, and louder wins every
@@ -423,17 +463,28 @@ def cmd_subbass(args: argparse.Namespace) -> int:
                     match_db += 20 * np.log10(0.99 / room)
                 # Both written as FLAC from the same decode, so no codec
                 # difference can creep into the comparison.
-                subbass.write_flac(out_dir / f"{source.stem} -- A original.flac",
-                                   a, decode.TARGET_RATE, source)
-                subbass.write_flac(
-                    out_dir / f"{source.stem} -- B {_label(args, amount)}.flac",
-                    b, decode.TARGET_RATE, source)
+                a_path = out_dir / f"{source.stem} -- A original.flac"
+                b_path = out_dir / f"{source.stem} -- B {_label(args, amount)}.flac"
+                subbass.write_flac(a_path, a, decode.TARGET_RATE, source)
+                subbass.write_flac(b_path, b, decode.TARGET_RATE, source)
                 peak = bs1770.measure(b)["true_peak_dbtp"]
+                variants = [_variant("original", a_path, "original", a),
+                            _variant("processed", b_path,
+                                     _label(args, amount), b)]
         except Exception as exc:
             outcomes.append((folder, None, f"failed: {type(exc).__name__}"))
             print(f"  {source.name[:39]:<40s}  FAILED: {type(exc).__name__}: {exc}")
             continue
         outcomes.append((folder, amount, None))
+        if variants:
+            manifest.append({
+                "source": str(source), "name": name, "folder": folder,
+                "sub_db": round(float(info["applied_db"]), 3),
+                "punch_db": round(float(info["punch_db"]), 3),
+                "clips_restored": (clip or {}).get("restored", 0),
+                "clip_lift_db": round(float((clip or {}).get("lift_db", 0.0)), 3),
+                "variants": variants,
+            })
 
         def mean_low(table):
             values = [table[b] for b in report.LOW_SHAPE_BANDS
@@ -468,6 +519,8 @@ def cmd_subbass(args: argparse.Namespace) -> int:
         print(f"  DRY RUN -- nothing written. {written} track(s) would be "
               f"processed.")
         return 0
+    if manifest:
+        _write_manifest(out_dir / "manifest.json", args, manifest)
     if args.no_compare:
         print(f"  {written} file(s) written to {out_dir}/ as FLAC, levelled to "
               f"{args.target:+.1f} on {args.estimator}.")

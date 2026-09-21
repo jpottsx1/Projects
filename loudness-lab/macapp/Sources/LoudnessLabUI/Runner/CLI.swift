@@ -36,26 +36,47 @@ enum CLI {
     }
 
     static let missing = """
-        Could not find the loudness-lab command. It lives in the project \
-        folder, next to macapp. If this is a fresh checkout, run setup.sh \
-        there once to build its environment.
+        Could not find the loudness-lab command. It is the file of that \
+        name in the project folder, beside macapp. Choose it below, or run \
+        setup.sh there once if this is a fresh checkout.
         """
 
-    /// Walk up from the running binary looking for the launcher.
+    /// Where the launcher is, from several directions.
     ///
-    /// The app is built inside the project -- either into `.build` or as
-    /// `macapp/LoudnessLab.app` -- so the launcher is always a few levels
-    /// above it. Checked as a regular executable file rather than by name
-    /// alone, because the FOLDER is also called loudness-lab and finding
-    /// the directory instead of the script would fail later and less
-    /// clearly.
+    /// Walking up from the running binary is not enough, and the way it
+    /// fails is the way that matters: Xcode does not build into the
+    /// project. It builds into DerivedData, somewhere under
+    /// ~/Library/Developer, from which no amount of walking upward ever
+    /// reaches the repository. Only a `swift build` into `.build` or the
+    /// bundled app in `macapp/` sits where the first guess expects.
+    ///
+    /// So the source path is tried too. `#filePath` is this file's location
+    /// at compile time, which for any build made from this checkout points
+    /// straight into it, DerivedData or not. If the app is ever moved to a
+    /// machine without the sources that goes stale -- hence the others, and
+    /// hence a settable override for when none of them is right.
     static func locate() -> URL? {
-        if let override = UserDefaults.standard.string(forKey: "loudnessLabCLI"),
-           isRunnable(URL(fileURLWithPath: override)) {
+        if let override = UserDefaults.standard.string(forKey: overrideKey),
+           !override.isEmpty, isRunnable(URL(fileURLWithPath: override)) {
             return URL(fileURLWithPath: override)
         }
-        var directory = Bundle.main.bundleURL.resolvingSymlinksInPath()
-        for _ in 0..<10 {
+        let starts = [
+            URL(fileURLWithPath: #filePath),
+            Bundle.main.bundleURL,
+            Bundle.main.executableURL,
+            URL(fileURLWithPath: FileManager.default.currentDirectoryPath),
+        ].compactMap { $0?.resolvingSymlinksInPath() }
+        for start in starts {
+            if let found = walkUp(from: start) { return found }
+        }
+        return nil
+    }
+
+    static let overrideKey = "loudnessLabCLI"
+
+    private static func walkUp(from start: URL) -> URL? {
+        var directory = start
+        for _ in 0..<12 {
             let candidate = directory.appendingPathComponent("loudness-lab")
             if isRunnable(candidate) { return candidate }
             let parent = directory.deletingLastPathComponent()

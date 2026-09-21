@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import LoudnessKit
 
 struct ContentView: View {
@@ -16,6 +17,11 @@ struct ContentView: View {
     @State private var chosen: Manifest.Track?
     @State private var blind = false
     @State private var rightTab = RightTab.survey
+    /// Set only when the search fails and the file is pointed at by hand.
+    /// `@AppStorage` so the view redraws the moment it is chosen, and so
+    /// the choice survives a restart -- being asked twice for the same
+    /// answer is its own small insult.
+    @AppStorage(CLI.overrideKey) private var cliOverride = ""
 
     /// Survey first, deliberately. You cannot choose a policy for a folder
     /// you have not looked at, and looking at it used to mean a terminal.
@@ -122,6 +128,7 @@ struct ContentView: View {
                         .lineLimit(1).truncationMode(.middle)
                 }
             }
+            if CLI.locate() == nil { toolMissing }
             Text("Originals are never written to. Every version is rendered "
                  + "from one decode, which is what lets them be switched "
                  + "between mid-bar.")
@@ -129,6 +136,37 @@ struct ContentView: View {
                 .foregroundStyle(.secondary)
                 .help(Help.folders.detail)
                 .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    /// Shown only when the tool cannot be found. The work is done by the
+    /// command-line program, so without it the buttons below cannot do
+    /// anything -- better to say that here, with the fix attached, than to
+    /// let Measure fail and explain afterwards.
+    private var toolMissing: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label("The loudness-lab tool was not found.",
+                  systemImage: "exclamationmark.triangle")
+                .foregroundStyle(.orange)
+            Text("It is the file called loudness-lab in the project folder, "
+                 + "beside macapp.")
+                .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Button("Choose it…") { chooseTool() }
+        }
+        .padding(8)
+        .background(Color.orange.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+    }
+
+    private func chooseTool() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.message = "Select the loudness-lab file in the project folder."
+        if panel.runModal() == .OK, let url = panel.url {
+            cliOverride = url.path
         }
     }
 

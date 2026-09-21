@@ -105,10 +105,16 @@ public struct Profile: Codable, Equatable, Sendable {
             + "across 31.5-63 Hz, measured over five discs. Needs a "
             + "reference. Lossy."
         eighties.auto = true
-        // Ten, not disco's eight: the deficit measured higher here, and a
-        // cap below what was measured leaves the thinnest discs short of
-        // the target the profile is aiming at.
-        eighties.maxAmount = 10
+        // Eleven, just above the thinnest disc measured. It was ten until
+        // the full table came back with a reference set: Disc 4 sits 10.92
+        // under, so a cap of ten held about half that disc below what it
+        // actually needed -- the exact failure this comment warned about
+        // when the cap was first chosen from a partial reading.
+        //
+        // Disco's eight sits the same distance above ITS measured worst
+        // (7.35), so the two profiles bound their material the same way
+        // rather than by taste.
+        eighties.maxAmount = 11
         // Left at the default. Disco lowered it to 18 because that material
         // was measured sitting near the threshold; nothing has measured
         // eighties activity, and moving a gate on a guess is how a static

@@ -109,10 +109,16 @@ BUILT_IN = {
                        "`reference`. Lossy.",
         "target": -16.0, "estimator": "s_p95", "peak_ceiling": -1.0,
         "auto": True,
-        # Ten, not disco's eight: the deficit measured higher here and a cap
-        # below what was measured would leave the thinnest discs short of
-        # the target the profile is aiming at.
-        "max_amount": 10.0,
+        # Eleven, just above the thinnest disc measured. It was ten until
+        # the full table came back with a reference set: Disc 4 sits 10.92
+        # under, so a cap of ten held about half that disc below what it
+        # actually needed -- the exact failure this comment warned about
+        # when the cap was first chosen from a partial reading.
+        #
+        # Disco's eight sits the same distance above ITS measured worst
+        # (7.35), so the two profiles bound their material the same way
+        # rather than by taste.
+        "max_amount": 11.0,
         # The default. Disco lowered this to 18 because that material sits
         # near the threshold and was measured doing so; nothing has measured
         # eighties activity, and moving a gate on a guess is how a static

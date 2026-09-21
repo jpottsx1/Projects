@@ -173,7 +173,7 @@ class LeavesCleanAudioAlone(unittest.TestCase):
         restored, report = declip.restore(quiet, RATE)
         self.assertIs(restored, quiet)
         self.assertEqual(report["runs"], 0)
-        self.assertEqual(report["restored_db"], 0.0)
+        self.assertEqual(report["lift_db"], 0.0)
 
     def test_a_full_scale_peak_that_never_clipped_is_left_alone(self):
         """The self-limiting property, and the reason a false detection is
@@ -196,7 +196,7 @@ class LeavesCleanAudioAlone(unittest.TestCase):
                                    "fixture no longer trips the detector, so "
                                    "it no longer tests anything")
                 self.assertLess(float(np.abs(restored - clean).max()), 1e-6)
-                self.assertLess(abs(report["restored_db"]), 0.01)
+                self.assertLess(abs(report["peak_change_db"]), 0.01)
 
     def test_a_clean_channel_beside_a_clipped_one_is_untouched(self):
         truth = programme()
@@ -268,13 +268,30 @@ class Refusals(unittest.TestCase):
         truth = sine(220.0) * 10 ** (12 / 20)
         restored, report = declip.restore(np.clip(truth, -1.0, 1.0), RATE,
                                           max_restore_db=4.0)
-        self.assertLessEqual(report["restored_db"], 4.0 + 1e-6)
+        self.assertLessEqual(report["lift_max_db"], 4.0 + 1e-6)
         self.assertLessEqual(float(np.abs(restored).max()), 10 ** (4 / 20) + 1e-6)
 
     def test_every_run_is_either_restored_or_accounted_for(self):
         _, clipped = clipped_at(3.0)
         _, report = declip.restore(clipped, RATE)
         self.assertEqual(report["runs"], report["restored"] + report["refused"])
+
+
+class Reporting(unittest.TestCase):
+    def test_the_lift_is_measured_over_the_runs_not_the_file_peak(self):
+        """The file's peak is the wrong statistic and this is the case that
+        proves it: a sample louder than anything the arcs reach, so the file
+        peak cannot move however much was restored. An MP3 of a clipped
+        master IS this case -- codec overshoot puts its tallest sample above
+        the ceiling before we touch it -- and reporting the file peak read
+        +0.00 dB on a track where 402 runs had just been lifted."""
+        _, clipped = clipped_at(3.0, seconds=4.0)
+        clipped[0, :] = 2.0          # louder than any restored peak can reach
+        _, report = declip.restore(clipped, RATE)
+        self.assertGreater(report["restored"], 10)
+        self.assertEqual(report["peak_change_db"], 0.0)
+        self.assertGreater(report["lift_db"], 0.05)
+        self.assertGreaterEqual(report["lift_max_db"], report["lift_db"])
 
 
 class Detection(unittest.TestCase):

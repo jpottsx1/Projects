@@ -247,6 +247,8 @@ def _restore_channel(channel: np.ndarray, rate: int, tally: dict,
             excess *= (ceiling - peak) / (reached - peak)
         excess = np.minimum(excess, np.maximum(ceiling - signed, 0.0))
 
+        tally["lifts"].append(
+            float(20 * np.log10((signed + excess).max() / peak)) if peak > 0 else 0.0)
         if out is None:
             out = channel.copy()
         # Added to the sample rather than replacing it, so the restoration
@@ -276,7 +278,7 @@ def restore(x: np.ndarray, rate: int, threshold: float = CLIP_THRESHOLD,
     if shoulder < 2:
         raise ValueError(f"shoulder must be at least 2 samples, got {shoulder}")
 
-    tally = {"runs": 0, "restored": 0, "samples": 0, "flattened": 0}
+    tally = {"runs": 0, "restored": 0, "samples": 0, "flattened": 0, "lifts": []}
     tally.update({reason: 0 for reason in REFUSALS})
 
     work = x.astype(np.float64)
@@ -294,12 +296,22 @@ def restore(x: np.ndarray, rate: int, threshold: float = CLIP_THRESHOLD,
 def _report(before: np.ndarray, after: np.ndarray, tally: dict) -> dict:
     peak_before = float(np.abs(before).max()) if before.size else 0.0
     peak_after = float(np.abs(after).max()) if after.size else 0.0
+    lifts = tally.pop("lifts")
     report = dict(tally)
     report["refused"] = sum(tally[reason] for reason in REFUSALS)
     report["peak_before_dbfs"] = _db(peak_before)
     report["peak_after_dbfs"] = _db(peak_after)
-    report["restored_db"] = (0.0 if peak_before <= 0 or peak_after <= 0
-                             else float(20 * np.log10(peak_after / peak_before)))
+    # How far the restored peaks actually rose, across the runs themselves.
+    # The file's own peak is NOT that number and must not stand in for it: an
+    # MP3 of a clipped master decodes with overshoot -- one measured here at
+    # +2.27 dBFS before anything was done to it -- so the tallest sample in
+    # the file is set by the codec, sits above everything the arcs reach, and
+    # never moves. Reporting it read +0.00 dB on a track where 402 runs had
+    # just been lifted by a median of 0.29.
+    report["lift_db"] = float(np.median(lifts)) if lifts else 0.0
+    report["lift_max_db"] = float(max(lifts)) if lifts else 0.0
+    report["peak_change_db"] = (0.0 if peak_before <= 0 or peak_after <= 0
+                                else float(20 * np.log10(peak_after / peak_before)))
     report["headroom_db"] = (0.0 if peak_after <= 1.0
                              else float(20 * np.log10(peak_after)))
     return report
@@ -320,15 +332,20 @@ def summarise(reports: list[dict]) -> str:
                 "hard clipping only; a limiter leaves no run.")
     runs = sum(r["runs"] for r in acted)
     fixed = sum(r["restored"] for r in acted)
-    lifts = [r["restored_db"] for r in acted if r["restored"]]
+    lifts = [r["lift_db"] for r in acted if r["restored"]]
+    tallest = [r["lift_max_db"] for r in acted if r["restored"]]
     lines = ["CLIPPING", "-" * 78,
              f"  {len(acted)} of {len(reports)} track(s) carried clipped runs; "
              f"{fixed} of {runs} run(s) restored."]
     if lifts:
-        lines.append(f"  Peak lifted by {float(np.median(lifts)):+.2f} dB "
-                     f"median, {max(lifts):+.2f} dB at most. That headroom "
-                     f"comes back out")
-        lines.append("  in the levelling, so nothing here makes a file louder.")
+        lines.append(f"  Restored peaks rose {float(np.median(lifts)):+.2f} dB "
+                     f"median, {max(tallest):+.2f} dB at most -- measured over")
+        lines.append("  the runs themselves, not over the file's peak, which "
+                     "on an MP3 of a")
+        lines.append("  clipped master is set by codec overshoot and barely "
+                     "moves. The headroom")
+        lines.append("  comes back out in the levelling, so nothing here makes "
+                     "a file louder.")
     refusals = {reason: sum(r[reason] for r in acted) for reason in REFUSALS}
     named = {
         "too_long": "too long to be a peak",

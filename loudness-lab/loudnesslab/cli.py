@@ -304,9 +304,11 @@ def cmd_subbass(args: argparse.Namespace) -> int:
     if not args.summary_only and args.declip:
         print()
         print("  'clips' is how many runs of clipped samples were arced back over,")
-        print("  and 'lift' how far that raised the track's peak. The lift is not")
-        print("  a volume increase: it is headroom the levelling takes straight")
-        print("  back out. De-clipping runs FIRST, on the file as it arrived.")
+        print("  and 'lift' the median height those restored peaks gained -- over the")
+        print("  runs, not over the file's own peak, which on an MP3 of a clipped")
+        print("  master is set by codec overshoot and hardly moves. The lift is not a")
+        print("  volume increase: it is headroom the levelling takes straight back")
+        print("  out. De-clipping runs FIRST, on the file as it arrived.")
     if not args.summary_only:
         print()
         print(f"  {'artist / title':<40s}{'kicks/min':>10s}{'shape was':>11s}"
@@ -451,7 +453,7 @@ def cmd_subbass(args: argparse.Namespace) -> int:
               f"{mean_low(before_bands):>11.1f}{mean_low(after_bands):>8.1f}"
               f"{info['applied_db']:>+8.2f}{info['safety_trim_db']:>+7.2f}"
               f"{peak:>+7.2f}{match_db:>+8.2f}{snap_after - snap_before:>+7.2f}"
-              + (f"{clip['restored']:>7d}{clip['restored_db']:>+7.2f}"
+              + (f"{clip['restored']:>7d}{clip['lift_db']:>+7.2f}"
                  if args.declip else "")
               + f"{note}")
         written += 1

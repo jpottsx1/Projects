@@ -28,7 +28,7 @@ import numpy as np
 from scipy.signal import butter, find_peaks, sosfilt, sosfiltfilt
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from loudnesslab import bs1770, declip, mp3gain, spectrum, subbass  # noqa: E402
+from loudnesslab import bs1770, decode, declip, mp3gain, spectrum, subbass  # noqa: E402
 
 RATE = 48000
 OUT = Path(__file__).resolve().parents[1] / "macapp/Tests/LoudnessKitTests/Golden"
@@ -344,6 +344,43 @@ def main() -> int:
                 "sameLength": len(shifted) == len(data),
             }
         golden["mp3"][path.name] = entry
+
+    # --- the year rule, which is pure logic and must match exactly ---
+    golden["yearFromText"] = {
+        text: (lambda m: int(m.group(0)) if m else None)(decode._YEAR.search(text))
+        for text in ("1981", "1981-06-01", "recorded 1979, issued 2003", "2011",
+                     "99", "1899", "2100", "", "abc", "20111", "01981", "12019")
+    }
+    golden["yearFromTags"] = []
+    for tags in (
+        {"date": "2011", "originaldate": "1981"},
+        {"date": "2011"},
+        {"tdrc": "1999-08"},
+        {"tory": "1978", "year": "2003"},
+        {"album": "no year here"},
+        {"originalyear": "not a year", "date": "1984"},
+    ):
+        year, original = decode._year(tags)
+        golden["yearFromTags"].append(
+            {"tags": tags, "year": year, "isOriginal": original})
+
+    # --- decode, which has no reference to match, only a second opinion ---
+    # The Python shells out to ffmpeg; the app uses Apple's decoder. They do
+    # not agree sample for sample and may trim encoder priming differently,
+    # so this records what ffmpeg gives and the Swift test reports how far
+    # off it lands rather than pretending the two are interchangeable.
+    golden["decode"] = {}
+    for path in sorted((OUT / "mp3").glob("*.mp3")):
+        audio = decode.decode(path)
+        measured = bs1770.measure(audio)
+        golden["decode"][path.name] = {
+            "frames": int(audio.shape[0]),
+            "seconds": rounded(audio.shape[0] / decode.TARGET_RATE, 4),
+            "lufs_i": rounded(measured["lufs_i"]),
+            "s_p95": rounded(measured["s_p95"]),
+            "true_peak_dbtp": rounded(measured["true_peak_dbtp"]),
+            "sample_peak_dbfs": rounded(measured["sample_peak_dbfs"]),
+        }
 
     write_filter_bank()
 

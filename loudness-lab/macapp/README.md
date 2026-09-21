@@ -53,12 +53,20 @@ After changing anything the Swift depends on:
 | `Spectrum` — 1/3-octave LTAS, `FFT`, `Peaks` | ✅ golden-tested |
 | `SubBass` — kick detection, sub, attack shaping | ✅ golden-tested |
 | `MP3Gain` — lossless `global_gain`, Serato GEOB safety | ✅ golden-tested |
-| Audio decode via AVFoundation | ⬜ not yet |
+| `AudioDecoder`, `FileSurvey`, `Tags` | ✅ tested (see below) |
 | Library database, reports | ⬜ not yet |
 | UI wiring to `LoudnessKit` instead of the CLI | ⬜ not yet |
 
 Until the last row is done the app still shells out to `./loudness-lab`, so
 the Python has to be present and working.
+
+Decoding is the one piece with no reference to be held to: the Python shells
+out to ffmpeg, and the app uses Apple's decoder. They do not agree sample for
+sample and may trim encoder priming by different amounts, so that test
+asserts closeness rather than equality **and prints the actual difference**.
+If those printed numbers ever grow past a few hundredths of a decibel, the
+app and the command line will disagree about a library, and the cause is
+there rather than in the measurement.
 
 ## The comparison player
 

@@ -30,6 +30,17 @@ final class GoldenTests: XCTestCase {
         let findPeaks: [PeaksCase]
         let subbass: [String: SubBassCase]
         let mp3: [String: MP3Case]
+        let decode: [String: DecodeCase]
+        let yearFromText: [String: Int?]
+        let yearFromTags: [YearTagCase]
+    }
+
+    struct DecodeCase: Decodable {
+        let frames: Int
+        let seconds, lufs_i, s_p95, true_peak_dbtp, sample_peak_dbfs: Double
+    }
+    struct YearTagCase: Decodable {
+        let tags: [String: String]; let year: Int?; let isOriginal: Bool?
     }
 
     struct MP3Case: Decodable {
@@ -587,6 +598,112 @@ final class GoldenTests: XCTestCase {
             XCTAssertTrue(insideAFrame[index],
                           "byte \(index) changed and is outside every audio frame")
         }
+    }
+
+    // MARK: - Decoding
+
+    /// Not held to the Python sample for sample, because it cannot be. The
+    /// Python shells out to ffmpeg and this uses Apple's decoder; they
+    /// disagree slightly and may trim encoder priming by different amounts.
+    ///
+    /// That difference is worth knowing rather than assuming, so this prints
+    /// it. If the printed numbers are ever larger than a few hundredths of a
+    /// decibel, the app and the command line will disagree about a library
+    /// and the cause is here, not in the measurement.
+    func testDecodingAgreesWithFFmpegCloselyEnough() throws {
+        for (name, expected) in golden.decode {
+            let url = try XCTUnwrap(
+                Bundle.module.url(forResource: "Golden/mp3/\(name.dropLast(4))",
+                                  withExtension: "mp3"))
+            let (audio, _) = try AudioDecoder.decode(url)
+            let got = BS1770.measure(audio)
+
+            let frameDrift = abs(audio[0].count - expected.frames)
+            let integrated = abs(got.lufsI - expected.lufs_i)
+            let percentile = abs((got.sP95 ?? 0) - expected.s_p95)
+            let peak = abs(got.truePeakDBTP - expected.true_peak_dbtp)
+            print(String(format: "decode %@: %+d frames, LUFS-I %+.4f, "
+                         + "s_p95 %+.4f, true peak %+.4f",
+                         name, audio[0].count - expected.frames,
+                         got.lufsI - expected.lufs_i,
+                         (got.sP95 ?? 0) - expected.s_p95,
+                         got.truePeakDBTP - expected.true_peak_dbtp))
+
+            XCTAssertEqual(audio.count, 2, "\(name) should always come out stereo")
+            // A tenth of a second of priming difference is tolerable; a
+            // second means the file was decoded wrongly, not differently.
+            XCTAssertLessThan(frameDrift, 4800, "\(name) length drift")
+            XCTAssertLessThan(integrated, 0.25, "\(name) LUFS-I")
+            XCTAssertLessThan(percentile, 0.25, "\(name) s_p95")
+            XCTAssertLessThan(peak, 0.25, "\(name) true peak")
+        }
+    }
+
+    func testAMonoFileComesOutAsDualMono() throws {
+        let url = try XCTUnwrap(Bundle.module.url(forResource: "Golden/mp3/mono",
+                                                  withExtension: "mp3"))
+        let (audio, sourceChannels) = try AudioDecoder.decode(url)
+        // Deliberate: a mono record played in a club comes out of both
+        // stacks, so that is the signal worth measuring. What it really was
+        // is reported separately rather than lost.
+        XCTAssertEqual(sourceChannels, 1, "fixture is no longer mono")
+        XCTAssertEqual(audio.count, 2)
+        XCTAssertEqual(audio[0], audio[1], "the two channels should be identical")
+    }
+
+    // MARK: - The year rule
+
+    func testTheYearRegexMatchesPython() {
+        for (text, expected) in golden.yearFromText {
+            XCTAssertEqual(Tags.year(in: text), expected, "year in \(text.debugDescription)")
+        }
+    }
+
+    /// The rule that a compilation's plain `date` is the REISSUE year.
+    /// Reading 2011 off "100 Hits - The New Romantics (2011)" filed
+    /// early-eighties mastering into the modern reference curve and quietly
+    /// spoiled every era comparison drawn from it.
+    func testOriginalYearBeatsReleaseYear() {
+        for expected in golden.yearFromTags {
+            let (year, original) = Tags.year(from: expected.tags)
+            XCTAssertEqual(year, expected.year, "\(expected.tags)")
+            XCTAssertEqual(original, expected.isOriginal, "\(expected.tags) provenance")
+        }
+    }
+
+    // MARK: - Walking a library
+
+    func testTheSurveyCountsWhatItPassedOver() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("survey-\(UUID().uuidString)")
+        let nested = root.appendingPathComponent("CD1")
+        let hidden = root.appendingPathComponent(".Trashes")
+        try FileManager.default.createDirectory(at: nested, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: hidden, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        func write(_ url: URL) throws { try Data([0]).write(to: url) }
+        try write(root.appendingPathComponent("a.mp3"))
+        try write(root.appendingPathComponent("b.MP3"))          // case
+        try write(root.appendingPathComponent("notes.txt"))      // counted, skipped
+        try write(root.appendingPathComponent("._a.mp3"))        // AppleDouble
+        try write(nested.appendingPathComponent("c.flac"))
+        try write(hidden.appendingPathComponent("junk.mp3"))     // dot-directory
+
+        let result = FileSurvey.survey(root)
+        let names = result.audio.map(\.lastPathComponent).sorted()
+        XCTAssertEqual(names, ["a.mp3", "b.MP3", "c.flac"])
+        XCTAssertEqual(result.skipped["txt"], 1)
+        XCTAssertEqual(result.folders, 2, "the dot-directory should not be walked")
+        XCTAssertFalse(result.singleFile)
+    }
+
+    func testASingleFileIsReportedAsSuch() throws {
+        let url = try XCTUnwrap(Bundle.module.url(forResource: "Golden/mp3/stereo",
+                                                  withExtension: "mp3"))
+        let result = FileSurvey.survey(url)
+        XCTAssertTrue(result.singleFile)
+        XCTAssertEqual(result.audio, [url])
     }
 
     // MARK: - Helpers

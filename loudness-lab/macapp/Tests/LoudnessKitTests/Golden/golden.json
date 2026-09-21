@@ -142,6 +142,48 @@
    "too_long": 0
   }
  },
+ "decode": {
+  "crc.mp3": {
+   "frames": 216000,
+   "lufs_i": -33.849296093,
+   "s_p95": -33.816408789,
+   "sample_peak_dbfs": -27.65898412,
+   "seconds": 4.5,
+   "true_peak_dbtp": -27.653456834
+  },
+  "mono.mp3": {
+   "frames": 216000,
+   "lufs_i": -36.859594405,
+   "s_p95": -36.826683266,
+   "sample_peak_dbfs": -30.667328937,
+   "seconds": 4.5,
+   "true_peak_dbtp": -30.661801548
+  },
+  "mpeg2.mp3": {
+   "frames": 216000,
+   "lufs_i": -33.850119956,
+   "s_p95": -33.817126096,
+   "sample_peak_dbfs": -27.590569853,
+   "seconds": 4.5,
+   "true_peak_dbtp": -27.585042526
+  },
+  "serato.mp3": {
+   "frames": 216000,
+   "lufs_i": -33.849277128,
+   "s_p95": -33.816407704,
+   "sample_peak_dbfs": -27.658751239,
+   "seconds": 4.5,
+   "true_peak_dbtp": -27.653224102
+  },
+  "stereo.mp3": {
+   "frames": 216000,
+   "lufs_i": -33.849277128,
+   "s_p95": -33.816407704,
+   "sample_peak_dbfs": -27.658751239,
+   "seconds": 4.5,
+   "true_peak_dbtp": -27.653224102
+  }
+ },
  "filters": {
   "envelope20": {
    "btype": "low",
@@ -1419,25 +1461,25 @@
   "crc.mp3": {
    "applied": {
     "-1": {
-     "changedBytes": 264,
+     "changedBytes": 787,
      "crossed": 0,
-     "fnv": "11234908177335227",
+     "fnv": "5721023467496598669",
      "sameLength": true
     },
     "-2": {
-     "changedBytes": 226,
+     "changedBytes": 658,
      "crossed": 0,
-     "fnv": "13718078190795698813",
+     "fnv": "1914635104700782574",
      "sameLength": true
     },
     "1": {
-     "changedBytes": 266,
+     "changedBytes": 783,
      "crossed": 0,
-     "fnv": "17552685850039274924",
+     "fnv": "3594170994535664786",
      "sameLength": true
     }
    },
-   "crcFrames": 60,
+   "crcFrames": 175,
    "firstGainBits": [
     3425,
     3543,
@@ -1447,89 +1489,89 @@
     10223
    ],
    "firstGains": [
+    153,
+    138,
     137,
-    145,
     132,
-    131,
-    134,
-    133
+    132,
+    131
    ],
-   "frames": 60,
-   "highestGain": 145,
+   "frames": 175,
+   "highestGain": 153,
    "id3Bytes": 0,
    "infoFrames": 1,
-   "lowestGain": 122,
-   "movable": 117,
+   "lowestGain": 101,
+   "movable": 347,
    "plans": {
     "+1.5": {
      "appliedDB": 1.505149978,
      "clamped": false,
      "crossingGranules": 0,
-     "granules": 117,
-     "headroomDownDB": -183.628297355,
-     "lowestCount": 4,
-     "lowestGain": 122,
-     "protectedFrames": 60,
-     "skippedGranules": 119,
+     "granules": 347,
+     "headroomDownDB": -152.02014781,
+     "lowestCount": 1,
+     "lowestGain": 101,
+     "protectedFrames": 175,
+     "skippedGranules": 349,
      "steps": 1
     },
     "-100.0": {
      "appliedDB": -99.339898569,
      "clamped": false,
      "crossingGranules": 0,
-     "granules": 117,
-     "headroomDownDB": -183.628297355,
-     "lowestCount": 4,
-     "lowestGain": 122,
-     "protectedFrames": 60,
-     "skippedGranules": 119,
+     "granules": 347,
+     "headroomDownDB": -152.02014781,
+     "lowestCount": 1,
+     "lowestGain": 101,
+     "protectedFrames": 175,
+     "skippedGranules": 349,
      "steps": -66
     },
     "-3.0": {
      "appliedDB": -3.010299957,
      "clamped": false,
      "crossingGranules": 0,
-     "granules": 117,
-     "headroomDownDB": -183.628297355,
-     "lowestCount": 4,
-     "lowestGain": 122,
-     "protectedFrames": 60,
-     "skippedGranules": 119,
+     "granules": 347,
+     "headroomDownDB": -152.02014781,
+     "lowestCount": 1,
+     "lowestGain": 101,
+     "protectedFrames": 175,
+     "skippedGranules": 349,
      "steps": -2
     },
     "-6.0": {
      "appliedDB": -6.020599913,
      "clamped": false,
      "crossingGranules": 0,
-     "granules": 117,
-     "headroomDownDB": -183.628297355,
-     "lowestCount": 4,
-     "lowestGain": 122,
-     "protectedFrames": 60,
-     "skippedGranules": 119,
+     "granules": 347,
+     "headroomDownDB": -152.02014781,
+     "lowestCount": 1,
+     "lowestGain": 101,
+     "protectedFrames": 175,
+     "skippedGranules": 349,
      "steps": -4
     }
    },
-   "sourceFNV": "9379749814016568359"
+   "sourceFNV": "13408953588140220875"
   },
   "mono.mp3": {
    "applied": {
     "-1": {
-     "changedBytes": 153,
+     "changedBytes": 443,
      "crossed": 0,
-     "fnv": "5002467627167406801",
+     "fnv": "17617182619907245358",
      "sameLength": true
     },
     "-2": {
-     "changedBytes": 170,
+     "changedBytes": 506,
      "crossed": 0,
-     "fnv": "16428990116554084598",
+     "fnv": "17881957702621696181",
      "sameLength": true
     },
     "1": {
-     "changedBytes": 148,
+     "changedBytes": 441,
      "crossed": 0,
-     "fnv": "7370243757859128280",
+     "fnv": "8078532397228475992",
      "sameLength": true
     }
    },
@@ -1543,28 +1585,28 @@
     8010
    ],
    "firstGains": [
-    141,
     138,
-    130,
-    129,
+    142,
     132,
-    131
+    130,
+    130,
+    130
    ],
-   "frames": 60,
-   "highestGain": 141,
+   "frames": 175,
+   "highestGain": 142,
    "id3Bytes": 45,
    "infoFrames": 1,
-   "lowestGain": 126,
-   "movable": 117,
+   "lowestGain": 123,
+   "movable": 347,
    "plans": {
     "+1.5": {
      "appliedDB": 1.505149978,
      "clamped": false,
      "crossingGranules": 0,
-     "granules": 117,
-     "headroomDownDB": -189.648897268,
-     "lowestCount": 6,
-     "lowestGain": 126,
+     "granules": 347,
+     "headroomDownDB": -185.133447333,
+     "lowestCount": 1,
+     "lowestGain": 123,
      "protectedFrames": 0,
      "skippedGranules": 1,
      "steps": 1
@@ -1573,10 +1615,10 @@
      "appliedDB": -99.339898569,
      "clamped": false,
      "crossingGranules": 0,
-     "granules": 117,
-     "headroomDownDB": -189.648897268,
-     "lowestCount": 6,
-     "lowestGain": 126,
+     "granules": 347,
+     "headroomDownDB": -185.133447333,
+     "lowestCount": 1,
+     "lowestGain": 123,
      "protectedFrames": 0,
      "skippedGranules": 1,
      "steps": -66
@@ -1585,10 +1627,10 @@
      "appliedDB": -3.010299957,
      "clamped": false,
      "crossingGranules": 0,
-     "granules": 117,
-     "headroomDownDB": -189.648897268,
-     "lowestCount": 6,
-     "lowestGain": 126,
+     "granules": 347,
+     "headroomDownDB": -185.133447333,
+     "lowestCount": 1,
+     "lowestGain": 123,
      "protectedFrames": 0,
      "skippedGranules": 1,
      "steps": -2
@@ -1597,35 +1639,35 @@
      "appliedDB": -6.020599913,
      "clamped": false,
      "crossingGranules": 0,
-     "granules": 117,
-     "headroomDownDB": -189.648897268,
-     "lowestCount": 6,
-     "lowestGain": 126,
+     "granules": 347,
+     "headroomDownDB": -185.133447333,
+     "lowestCount": 1,
+     "lowestGain": 123,
      "protectedFrames": 0,
      "skippedGranules": 1,
      "steps": -4
     }
    },
-   "sourceFNV": "14722782327238554793"
+   "sourceFNV": "10857705607758522418"
   },
   "mpeg2.mp3": {
    "applied": {
     "-1": {
-     "changedBytes": 66,
+     "changedBytes": 200,
      "crossed": 0,
-     "fnv": "6148610488873213993",
+     "fnv": "4437852416795094600",
      "sameLength": true
     },
     "-2": {
-     "changedBytes": 79,
+     "changedBytes": 243,
      "crossed": 0,
-     "fnv": "3193442638259094638",
+     "fnv": "12882482461249281673",
      "sameLength": true
     },
     "1": {
-     "changedBytes": 64,
+     "changedBytes": 177,
      "crossed": 0,
-     "fnv": "11038391251445403249",
+     "fnv": "17004321137951133265",
      "sameLength": true
     }
    },
@@ -1639,89 +1681,89 @@
     10439
    ],
    "firstGains": [
-    140,
-    137,
-    134,
-    135,
+    144,
+    144,
+    136,
+    142,
     133,
-    133
+    134
    ],
-   "frames": 61,
-   "highestGain": 141,
+   "frames": 176,
+   "highestGain": 164,
    "id3Bytes": 45,
    "infoFrames": 1,
-   "lowestGain": 74,
-   "movable": 60,
+   "lowestGain": 127,
+   "movable": 174,
    "plans": {
     "+1.5": {
      "appliedDB": 1.505149978,
      "clamped": false,
      "crossingGranules": 0,
-     "granules": 60,
-     "headroomDownDB": -111.381098396,
-     "lowestCount": 1,
-     "lowestGain": 74,
+     "granules": 174,
+     "headroomDownDB": -191.154047247,
+     "lowestCount": 3,
+     "lowestGain": 127,
      "protectedFrames": 0,
-     "skippedGranules": 60,
+     "skippedGranules": 176,
      "steps": 1
     },
     "-100.0": {
      "appliedDB": -99.339898569,
      "clamped": false,
-     "crossingGranules": 1,
-     "granules": 60,
-     "headroomDownDB": -111.381098396,
-     "lowestCount": 1,
-     "lowestGain": 74,
+     "crossingGranules": 0,
+     "granules": 174,
+     "headroomDownDB": -191.154047247,
+     "lowestCount": 3,
+     "lowestGain": 127,
      "protectedFrames": 0,
-     "skippedGranules": 60,
+     "skippedGranules": 176,
      "steps": -66
     },
     "-3.0": {
      "appliedDB": -3.010299957,
      "clamped": false,
      "crossingGranules": 0,
-     "granules": 60,
-     "headroomDownDB": -111.381098396,
-     "lowestCount": 1,
-     "lowestGain": 74,
+     "granules": 174,
+     "headroomDownDB": -191.154047247,
+     "lowestCount": 3,
+     "lowestGain": 127,
      "protectedFrames": 0,
-     "skippedGranules": 60,
+     "skippedGranules": 176,
      "steps": -2
     },
     "-6.0": {
      "appliedDB": -6.020599913,
      "clamped": false,
      "crossingGranules": 0,
-     "granules": 60,
-     "headroomDownDB": -111.381098396,
-     "lowestCount": 1,
-     "lowestGain": 74,
+     "granules": 174,
+     "headroomDownDB": -191.154047247,
+     "lowestCount": 3,
+     "lowestGain": 127,
      "protectedFrames": 0,
-     "skippedGranules": 60,
+     "skippedGranules": 176,
      "steps": -4
     }
    },
-   "sourceFNV": "13100482467055653383"
+   "sourceFNV": "7149436290808461460"
   },
   "serato.mp3": {
    "applied": {
     "-1": {
-     "changedBytes": 148,
+     "changedBytes": 445,
      "crossed": 0,
-     "fnv": "13317987852833555986",
+     "fnv": "11949444149535577120",
      "sameLength": true
     },
     "-2": {
-     "changedBytes": 119,
+     "changedBytes": 360,
      "crossed": 0,
-     "fnv": "11517288349799074646",
+     "fnv": "5593035490842528009",
      "sameLength": true
     },
     "1": {
-     "changedBytes": 149,
+     "changedBytes": 447,
      "crossed": 0,
-     "fnv": "509240637774101295",
+     "fnv": "3532071275877799464",
      "sameLength": true
     }
    },
@@ -1735,89 +1777,89 @@
     19503
    ],
    "firstGains": [
+    153,
+    138,
     137,
-    145,
     132,
-    131,
-    134,
-    133
+    133,
+    131
    ],
-   "frames": 60,
-   "highestGain": 145,
+   "frames": 175,
+   "highestGain": 153,
    "id3Bytes": 1162,
    "infoFrames": 1,
-   "lowestGain": 121,
-   "movable": 117,
+   "lowestGain": 101,
+   "movable": 347,
    "plans": {
     "+1.5": {
      "appliedDB": 1.505149978,
      "clamped": false,
      "crossingGranules": 0,
-     "granules": 117,
-     "headroomDownDB": -182.123147377,
+     "granules": 347,
+     "headroomDownDB": -152.02014781,
      "lowestCount": 1,
-     "lowestGain": 121,
+     "lowestGain": 101,
      "protectedFrames": 0,
-     "skippedGranules": 119,
+     "skippedGranules": 349,
      "steps": 1
     },
     "-100.0": {
      "appliedDB": -99.339898569,
      "clamped": false,
      "crossingGranules": 0,
-     "granules": 117,
-     "headroomDownDB": -182.123147377,
+     "granules": 347,
+     "headroomDownDB": -152.02014781,
      "lowestCount": 1,
-     "lowestGain": 121,
+     "lowestGain": 101,
      "protectedFrames": 0,
-     "skippedGranules": 119,
+     "skippedGranules": 349,
      "steps": -66
     },
     "-3.0": {
      "appliedDB": -3.010299957,
      "clamped": false,
      "crossingGranules": 0,
-     "granules": 117,
-     "headroomDownDB": -182.123147377,
+     "granules": 347,
+     "headroomDownDB": -152.02014781,
      "lowestCount": 1,
-     "lowestGain": 121,
+     "lowestGain": 101,
      "protectedFrames": 0,
-     "skippedGranules": 119,
+     "skippedGranules": 349,
      "steps": -2
     },
     "-6.0": {
      "appliedDB": -6.020599913,
      "clamped": false,
      "crossingGranules": 0,
-     "granules": 117,
-     "headroomDownDB": -182.123147377,
+     "granules": 347,
+     "headroomDownDB": -152.02014781,
      "lowestCount": 1,
-     "lowestGain": 121,
+     "lowestGain": 101,
      "protectedFrames": 0,
-     "skippedGranules": 119,
+     "skippedGranules": 349,
      "steps": -4
     }
    },
-   "sourceFNV": "10296269181931553715"
+   "sourceFNV": "5952887288874802980"
   },
   "stereo.mp3": {
    "applied": {
     "-1": {
-     "changedBytes": 148,
+     "changedBytes": 445,
      "crossed": 0,
-     "fnv": "15366926372228528658",
+     "fnv": "1477127333415792672",
      "sameLength": true
     },
     "-2": {
-     "changedBytes": 119,
+     "changedBytes": 360,
      "crossed": 0,
-     "fnv": "13566226869194047318",
+     "fnv": "13567462748432295177",
      "sameLength": true
     },
     "1": {
-     "changedBytes": 149,
+     "changedBytes": 447,
      "crossed": 0,
-     "fnv": "2558179157169073967",
+     "fnv": "11506498533467566632",
      "sameLength": true
     }
    },
@@ -1831,70 +1873,70 @@
     10567
    ],
    "firstGains": [
+    153,
+    138,
     137,
-    145,
     132,
-    131,
-    134,
-    133
+    133,
+    131
    ],
-   "frames": 60,
-   "highestGain": 145,
+   "frames": 175,
+   "highestGain": 153,
    "id3Bytes": 45,
    "infoFrames": 1,
-   "lowestGain": 121,
-   "movable": 117,
+   "lowestGain": 101,
+   "movable": 347,
    "plans": {
     "+1.5": {
      "appliedDB": 1.505149978,
      "clamped": false,
      "crossingGranules": 0,
-     "granules": 117,
-     "headroomDownDB": -182.123147377,
+     "granules": 347,
+     "headroomDownDB": -152.02014781,
      "lowestCount": 1,
-     "lowestGain": 121,
+     "lowestGain": 101,
      "protectedFrames": 0,
-     "skippedGranules": 119,
+     "skippedGranules": 349,
      "steps": 1
     },
     "-100.0": {
      "appliedDB": -99.339898569,
      "clamped": false,
      "crossingGranules": 0,
-     "granules": 117,
-     "headroomDownDB": -182.123147377,
+     "granules": 347,
+     "headroomDownDB": -152.02014781,
      "lowestCount": 1,
-     "lowestGain": 121,
+     "lowestGain": 101,
      "protectedFrames": 0,
-     "skippedGranules": 119,
+     "skippedGranules": 349,
      "steps": -66
     },
     "-3.0": {
      "appliedDB": -3.010299957,
      "clamped": false,
      "crossingGranules": 0,
-     "granules": 117,
-     "headroomDownDB": -182.123147377,
+     "granules": 347,
+     "headroomDownDB": -152.02014781,
      "lowestCount": 1,
-     "lowestGain": 121,
+     "lowestGain": 101,
      "protectedFrames": 0,
-     "skippedGranules": 119,
+     "skippedGranules": 349,
      "steps": -2
     },
     "-6.0": {
      "appliedDB": -6.020599913,
      "clamped": false,
      "crossingGranules": 0,
-     "granules": 117,
-     "headroomDownDB": -182.123147377,
+     "granules": 347,
+     "headroomDownDB": -152.02014781,
      "lowestCount": 1,
-     "lowestGain": 121,
+     "lowestGain": 101,
      "protectedFrames": 0,
-     "skippedGranules": 119,
+     "skippedGranules": 349,
      "steps": -4
     }
    },
-   "sourceFNV": "12345207701326526387"
+   "sourceFNV": "13927314546464570148"
   }
  },
  "note": "generated by tools/make_golden.py",
@@ -2554,5 +2596,66 @@
    ],
    "sustainTrimDB": -0.353960869
   }
+ },
+ "yearFromTags": [
+  {
+   "isOriginal": 1,
+   "tags": {
+    "date": "2011",
+    "originaldate": "1981"
+   },
+   "year": 1981
+  },
+  {
+   "isOriginal": 0,
+   "tags": {
+    "date": "2011"
+   },
+   "year": 2011
+  },
+  {
+   "isOriginal": 0,
+   "tags": {
+    "tdrc": "1999-08"
+   },
+   "year": 1999
+  },
+  {
+   "isOriginal": 1,
+   "tags": {
+    "tory": "1978",
+    "year": "2003"
+   },
+   "year": 1978
+  },
+  {
+   "isOriginal": null,
+   "tags": {
+    "album": "no year here"
+   },
+   "year": null
+  },
+  {
+   "isOriginal": 0,
+   "tags": {
+    "date": "1984",
+    "originalyear": "not a year"
+   },
+   "year": 1984
+  }
+ ],
+ "yearFromText": {
+  "": null,
+  "01981": 1981,
+  "12019": 2019,
+  "1899": null,
+  "1981": 1981,
+  "1981-06-01": 1981,
+  "2011": 2011,
+  "20111": 2011,
+  "2100": null,
+  "99": null,
+  "abc": null,
+  "recorded 1979, issued 2003": 1979
  }
 }

@@ -78,6 +78,9 @@ final class Engine: ObservableObject {
             at: databaseURL.deletingLastPathComponent(),
             withIntermediateDirectories: true)
 
+        // First line of every run, so a result is never separated from the
+        // build that produced it.
+        say(BuildInfo.summary)
         say("Measuring \(folders.count) folder(s)…")
         progressNote = "Starting…"
         let arguments = ["analyze"] + folders.map(\.path)

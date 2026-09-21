@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import json
 import os
 import shutil
 import sqlite3
@@ -365,6 +366,58 @@ class TestSurvey(unittest.TestCase):
         found = decode.survey(self.root)
         self.assertEqual(found["audio"], [])
         self.assertEqual(found["errors"], [])
+
+
+@unittest.skipUnless(HAVE_FFMPEG, "ffmpeg/ffprobe not installed")
+class TestPorcelainProgress(unittest.TestCase):
+    """Progress a program can read.
+
+    The Mac app drives this CLI rather than reimplementing it, so it needs
+    progress it can parse. The human printer writes to stderr with carriage
+    returns -- right for a terminal, useless to anything driving a bar.
+    """
+
+    def setUp(self):
+        self.dir = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.dir, ignore_errors=True)
+        rate = decode.TARGET_RATE
+        t = np.arange(int(rate * 1.5)) / rate
+        wave_ = np.column_stack([0.4 * np.sin(2 * np.pi * 110 * t)] * 2)
+        for name in ("a.wav", "b.wav"):
+            with wave.open(str(self.dir / name), "wb") as handle:
+                handle.setnchannels(2)
+                handle.setsampwidth(2)
+                handle.setframerate(rate)
+                handle.writeframes(
+                    (np.clip(wave_, -1, 1) * 32767).astype("<i2").tobytes())
+
+    def _run(self) -> list[dict]:
+        out = subprocess.run(
+            [sys.executable, str(Path(__file__).resolve().parents[1] / "loudness-lab"),
+             "analyze", str(self.dir), "--db", str(self.dir / "library.db"),
+             "--porcelain"],
+            capture_output=True, text=True)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        return [json.loads(line) for line in out.stdout.splitlines() if line.strip()]
+
+    def test_every_line_is_json_and_the_last_one_is_the_total(self):
+        events = self._run()
+        self.assertTrue(events, "nothing was written")
+        progress = [e for e in events if e["event"] == "progress"]
+        self.assertEqual(len(progress), 2)
+        # Monotonic and bounded: a bar driven by these cannot go backwards.
+        self.assertEqual([e["done"] for e in progress], [1, 2])
+        self.assertTrue(all(e["total"] == 2 for e in progress))
+        self.assertTrue(all(e["status"] == "ok" for e in progress))
+        done = events[-1]
+        self.assertEqual(done["event"], "done")
+        self.assertEqual(done["analysed"], 2)
+        self.assertEqual(done["errors"], 0)
+
+    def test_nothing_but_json_goes_to_stdout(self):
+        """A stray print would break the caller on a line it cannot parse."""
+        for event in self._run():
+            self.assertIn("event", event)
 
 
 @unittest.skipUnless(HAVE_FFMPEG, "ffmpeg/ffprobe not installed")

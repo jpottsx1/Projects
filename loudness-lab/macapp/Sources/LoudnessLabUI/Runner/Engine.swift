@@ -55,7 +55,9 @@ final class Engine: ObservableObject {
             let library = try Library(at: databaseURL)
             say("Measuring \(folders.count) folder(s), "
                 + "\(Concurrency.forMeasuring()) track(s) at a time…")
-            let counts = await Analyzer.run(roots: folders, library: library) { [weak self] step in
+            let counts = await Analyzer.run(
+                roots: folders, library: library,
+                isCancelled: { [flag] in flag.isCancelled }) { [weak self] step in
                 Task { @MainActor in
                     self?.progress = step.total > 0
                         ? Double(step.done) / Double(step.total) : nil
@@ -68,6 +70,9 @@ final class Engine: ObservableObject {
             }
             say("  \(counts.found) found, \(counts.analysed) measured, "
                 + "\(counts.skipped) already current, \(counts.errors) failed.")
+            let timing = counts.timingLine()
+            if !timing.isEmpty { say(timing) }
+            if cancelled { say("  Stopped."); return }
             progress = nil
             progressNote = "Building the survey…"
             // Off the main actor: it reads every track and every band row in
@@ -109,7 +114,9 @@ final class Engine: ObservableObject {
 
             say("Measuring \(folders.count) folder(s), "
                 + "\(Concurrency.forMeasuring()) track(s) at a time…")
-            let counts = await Analyzer.run(roots: folders, library: library) { [weak self] step in
+            let counts = await Analyzer.run(
+                roots: folders, library: library,
+                isCancelled: { [flag] in flag.isCancelled }) { [weak self] step in
                 Task { @MainActor in
                     self?.progress = step.total > 0
                         ? Double(step.done) / Double(step.total) : nil
@@ -122,6 +129,9 @@ final class Engine: ObservableObject {
             }
             say("  \(counts.found) found, \(counts.analysed) measured, "
                 + "\(counts.skipped) already current, \(counts.errors) failed.")
+            let timing = counts.timingLine()
+            if !timing.isEmpty { say(timing) }
+            if cancelled { say("  Stopped."); return }
             progress = nil
 
             // Thinnest low end first -- the tracks the sub stage is for.

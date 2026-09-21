@@ -9,7 +9,29 @@ public enum Analyzer {
 
     public struct Counts: Sendable {
         public var found = 0, analysed = 0, skipped = 0, errors = 0
+        /// Seconds spent in each stage, summed across every track.
+        ///
+        /// Here because guessing at this from the code has now been wrong
+        /// twice: first that the fix was more parallelism, then that it was
+        /// the width. A number settles it.
+        public var decodeSeconds = 0.0
+        public var loudnessSeconds = 0.0
+        public var spectrumSeconds = 0.0
+        public var tagSeconds = 0.0
         public init() {}
+
+        /// One line saying where the time actually went.
+        public func timingLine() -> String {
+            let total = decodeSeconds + loudnessSeconds + spectrumSeconds + tagSeconds
+            guard total > 0, analysed > 0 else { return "" }
+            func share(_ value: Double, _ name: String) -> String {
+                String(format: "%@ %.1fs (%.0f%%)", name, value, value / total * 100)
+            }
+            return "  per track \(String(format: "%.1f", total / Double(analysed)))s — "
+                + [share(decodeSeconds, "decode"), share(loudnessSeconds, "loudness"),
+                   share(spectrumSeconds, "spectrum"), share(tagSeconds, "tags")]
+                    .joined(separator: ", ")
+        }
     }
 
     public struct Progress: Sendable {
@@ -28,6 +50,7 @@ public enum Analyzer {
     /// one place, because SQLite would rather not be written from several.
     public static func run(roots: [URL], library: Library,
                            jobs: Int = Concurrency.forMeasuring(),
+                           isCancelled: @escaping @Sendable () -> Bool = { false },
                            progress: (@Sendable (Progress) -> Void)? = nil) async -> Counts {
         var counts = Counts()
         var pending: [URL] = []
@@ -37,6 +60,7 @@ public enum Analyzer {
             counts.found += survey.audio.count
             var looked = 0
             for url in survey.audio {
+                if isCancelled() { return counts }
                 looked += 1
                 // Every hundredth, because the callback hops to the main
                 // actor and doing that per file would cost more than the
@@ -81,11 +105,19 @@ public enum Analyzer {
             for await result in group {
                 done += 1
                 if result.status == "ok" { counts.analysed += 1 } else { counts.errors += 1 }
+                counts.decodeSeconds += result.timings.decode
+                counts.loudnessSeconds += result.timings.loudness
+                counts.spectrumSeconds += result.timings.spectrum
+                counts.tagSeconds += result.timings.tags
                 try? library.store(result)
                 progress?(Progress(done: done, total: total,
                                    name: result.url.lastPathComponent,
                                    failed: result.status != "ok"))
-                if index < pending.count {
+                // Checked between tracks: a track already decoding runs to
+                // the end, but nothing new starts. Stop meaning "stop soon"
+                // is the difference between a button that works and one
+                // that is merely present.
+                if !isCancelled(), index < pending.count {
                     let url = pending[index]
                     index += 1
                     group.addTask { await analyse(url) }
@@ -103,22 +135,38 @@ public enum Analyzer {
         let modified = (attributes?[.modificationDate] as? Date) ?? .distantPast
         let nanoseconds = Int(modified.timeIntervalSince1970 * 1_000_000_000)
 
+        var timings = Library.Analysis.Timings()
+        func clock<T>(_ into: inout Double, _ work: () throws -> T) rethrows -> T {
+            let started = DispatchTime.now().uptimeNanoseconds
+            let value = try work()
+            into += Double(DispatchTime.now().uptimeNanoseconds - started) / 1e9
+            return value
+        }
+
         do {
-            let (audio, sourceChannels) = try AudioDecoder.decode(url)
+            let (audio, sourceChannels) = try clock(&timings.decode) {
+                try AudioDecoder.decode(url)
+            }
             // Awaited, not waited on. Blocking a cooperative-pool thread
             // with a semaphore while the Task it is waiting for needs that
             // same pool deadlocks as soon as the machine is busy, which is
             // exactly when a library scan runs.
+            let tagsStarted = DispatchTime.now().uptimeNanoseconds
             var tags = (try? await Tags.read(url)) ?? Tags()
+            timings.tags = Double(DispatchTime.now().uptimeNanoseconds - tagsStarted) / 1e9
             if tags.sourceChannels == nil { tags.sourceChannels = sourceChannels }
+
+            let loudness = clock(&timings.loudness) { BS1770.measure(audio) }
+            let bands = clock(&timings.spectrum) {
+                Spectrum.analyse(audio, rate: AudioDecoder.targetRate,
+                                 sourceIsMono: sourceChannels == 1)
+            }
 
             return Library.Analysis(
                 url: url, sizeBytes: size, mtimeNanoseconds: nanoseconds,
                 status: "ok", tags: tags,
                 codec: url.pathExtension.lowercased(),
-                loudness: BS1770.measure(audio),
-                bands: Spectrum.analyse(audio, rate: AudioDecoder.targetRate,
-                                        sourceIsMono: sourceChannels == 1))
+                loudness: loudness, bands: bands, timings: timings)
         } catch {
             return Library.Analysis(url: url, sizeBytes: size,
                                     mtimeNanoseconds: nanoseconds,

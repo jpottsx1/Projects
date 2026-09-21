@@ -118,6 +118,50 @@ macapp/
   Tests/                  the golden tests and their fixtures
 ```
 
+## The decision: the app drives the CLI
+
+The Swift port of the DSP was the wrong call and is being set aside.
+
+It existed so the app would need no Python and no ffmpeg. That bought
+nothing -- this machine has both, and `setup.sh` installs them. What it
+cost was a day of chasing performance the Python had already solved:
+float32 against Double, numpy's rfft in C against a hand-written radix-2
+loop, and a multiprocessing width someone had already tuned and written
+the reasoning for.
+
+So: **the Python measures and processes, the Swift presents.** Not a
+rewrite -- the pieces already fit. Both sides read the same SQLite
+database and there is a passing test proving the Swift opens one the
+Python wrote.
+
+What stays: every view, `Queue`, `Survey`, `Library`, `ABPlayer`,
+`Manifest`, and all of the Python.
+
+What is set aside: `Analyzer`, `Processor`, and in time the DSP under
+`LoudnessKit` -- `BS1770`, `Spectrum`, `Declip`, `SubBass`, `Resampler`,
+`FFT`, `MP3Gain`. Leave the files and their golden tests in the
+repository. They are validated work, they cost nothing sitting there, and
+they are the fallback if bundling Python ever becomes the better answer.
+
+### How
+
+- `./loudness-lab analyze <folders> --db <db> --porcelain` writes one JSON
+  object per line on stdout: `{"event":"progress","done":N,"total":M,
+  "name":...,"status":...}`, then `{"event":"done",...counts}`. Drive the
+  progress bar from that. Tested in `TestPorcelainProgress`.
+- Then read the database as now -- `Survey.of` and `Library` are unchanged
+  and already work.
+- Processing: `./loudness-lab subbass ...` writes the FLACs and a
+  `manifest.json` that `Manifest.swift` already decodes. It has no
+  `--porcelain` yet; add one the same way, with a test.
+- Finding the CLI: it lives at the repository root next to `macapp/`, and
+  re-executes itself into `.venv`, so there is nothing to activate. The
+  app needs a path to it and a clear message when it is missing, pointing
+  at `setup.sh`.
+
+Speed to expect: five short fixtures measured in 1.7 seconds through the
+Python.
+
 ## Open — in the order that matters
 
 1. **Measure three folders: 1970s, 1980s, and something modern.** Name the

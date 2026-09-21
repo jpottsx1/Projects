@@ -36,13 +36,51 @@ def _progress_printer(start: float):
     return show
 
 
+def _progress_json():
+    """One JSON object per line on stdout, for a caller that is not a person.
+
+    The human printer writes to stderr with carriage returns, which is right
+    for a terminal and useless to anything trying to drive a progress bar.
+    This is the same information, parseable: a UI reads a line, updates, and
+    never has to guess at a rewritten line or a partial write.
+    """
+    def show(done: int, total: int, result: dict) -> None:
+        track = result["track"]
+        sys.stdout.write(json.dumps({
+            "event": "progress",
+            "done": done,
+            "total": total,
+            "name": Path(track["path"]).name,
+            "path": track["path"],
+            "status": track["status"],
+            "error": track.get("error"),
+        }) + "\n")
+        sys.stdout.flush()
+    return show
+
+
 def cmd_analyze(args: argparse.Namespace) -> int:
     start = time.monotonic()
+    porcelain = getattr(args, "porcelain", False)
+    if porcelain:
+        reporter = _progress_json()
+    elif args.quiet:
+        reporter = None
+    else:
+        reporter = _progress_printer(start)
+
     counts = analyze.run(
         roots=args.path, db_path=args.db, jobs=args.jobs,
-        force=args.force, limit=args.limit,
-        progress=None if args.quiet else _progress_printer(start),
+        force=args.force, limit=args.limit, progress=reporter,
     )
+    if porcelain:
+        sys.stdout.write(json.dumps({
+            "event": "done",
+            "seconds": round(time.monotonic() - start, 3),
+            **counts,
+        }) + "\n")
+        sys.stdout.flush()
+        return 0
     if not args.quiet:
         sys.stderr.write("\n")
     elapsed = time.monotonic() - start
@@ -967,6 +1005,9 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--limit", type=int, default=None,
                      help="stop after this many files, for a quick trial run")
     run.add_argument("--quiet", action="store_true")
+    run.add_argument("--porcelain", action="store_true",
+                     help="one JSON object per line on stdout, for the Mac "
+                          "app rather than for reading")
     run.set_defaults(func=cmd_analyze)
 
     show = subparsers.add_parser("report", help="print a report")

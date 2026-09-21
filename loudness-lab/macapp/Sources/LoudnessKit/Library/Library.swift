@@ -167,13 +167,25 @@ public final class Library {
         public var codec: String?
         public var loudness: BS1770.Result?
         public var bands: [Spectrum.Band]
+        /// How long each stage took. Carried on the result rather than
+        /// logged where it happens, so the totals can be added up in one
+        /// place instead of interleaved across however many tracks are in
+        /// flight.
+        public var timings = Timings()
+
+        public struct Timings: Sendable {
+            public var decode = 0.0, loudness = 0.0, spectrum = 0.0, tags = 0.0
+            public init() {}
+        }
 
         public init(url: URL, sizeBytes: Int, mtimeNanoseconds: Int, status: String,
                     error: String? = nil, tags: Tags = Tags(), codec: String? = nil,
-                    loudness: BS1770.Result? = nil, bands: [Spectrum.Band] = []) {
+                    loudness: BS1770.Result? = nil, bands: [Spectrum.Band] = [],
+                    timings: Timings = Timings()) {
             self.url = url; self.sizeBytes = sizeBytes
             self.mtimeNanoseconds = mtimeNanoseconds; self.status = status
             self.error = error; self.tags = tags; self.codec = codec
+            self.timings = timings
             self.loudness = loudness; self.bands = bands
         }
     }

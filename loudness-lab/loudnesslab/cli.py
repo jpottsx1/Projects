@@ -86,6 +86,25 @@ def _auto_amount(conn, path: str, curve: dict, cap: float) -> tuple[float, str |
     return min(shortfall, cap), None
 
 
+def _level_to_target(audio, args, measured: dict):
+    """Bring the finished audio to the profile's level. Returns the audio,
+    the gain applied, and the resulting true peak.
+
+    Scaling a float buffer is exact, so nothing is lost doing this here
+    rather than in a separate pass -- and a separate pass is not available
+    anyway, since the lossless gain writer works only on MP3.
+    """
+    value = measured.get(args.estimator)
+    if value is None:
+        return audio, 0.0, measured.get("true_peak_dbtp", float("nan"))
+    wanted = args.target - value
+    peak = measured.get("true_peak_dbtp")
+    if peak is not None and peak + wanted > args.peak_ceiling:
+        wanted = args.peak_ceiling - peak
+    levelled = (audio * (10 ** (wanted / 20))).astype(audio.dtype)
+    return levelled, wanted, bs1770.measure(levelled)["true_peak_dbtp"]
+
+
 def _policy_preview(outcomes: list) -> str:
     """What the policy does across the library, folder by folder.
 
@@ -337,9 +356,16 @@ def cmd_subbass(args: argparse.Namespace) -> int:
             if args.dry_run:
                 match_db = 0.0
             elif args.no_compare:
+                # Level here, as the final operation. The gain command cannot
+                # do it: global_gain only exists in an MP3 bitstream, and
+                # what comes out of here is FLAC. Without this the pipeline
+                # simply ends un-levelled, which is the one state worse than
+                # not having started -- part of the library at the target and
+                # part several dB hot.
+                after, match_db, final = _level_to_target(after, args, processed)
+                peak = final
                 subbass.write_flac(out_dir / (source.stem + ".flac"), after,
-                                   decode.TARGET_RATE, source)  # noqa: E501
-                match_db = 0.0
+                                   decode.TARGET_RATE, source)
             else:
                 # Level-match the pair, or the comparison just measures which
                 # is louder: adding sub raises loudness, and louder wins every
@@ -388,7 +414,12 @@ def cmd_subbass(args: argparse.Namespace) -> int:
               f"processed.")
         return 0
     if args.no_compare:
-        print(f"  {written} file(s) written to {out_dir}/ as FLAC.")
+        print(f"  {written} file(s) written to {out_dir}/ as FLAC, levelled to "
+              f"{args.target:+.1f} on {args.estimator}.")
+        print("  That levelling happens here because the gain command cannot "
+              "do it:")
+        print("  global_gain exists only in an MP3 bitstream, and these are "
+              "FLAC.")
     else:
         print(f"  {written} pair(s) written to {out_dir}/ as FLAC: 'A original'")
         print("  and 'B sub', LEVEL-MATCHED so the comparison is about the bass")
@@ -861,6 +892,12 @@ def build_parser() -> argparse.ArgumentParser:
                      help="where the FLACs go (default: subbass-preview/)")
     sub.add_argument("--amount", type=float, default=None,
                      help="dB to add in the 31.5-63 Hz octave")
+    sub.add_argument("--target", type=float, default=None,
+                     help="level the written file to this, on --estimator. "
+                          "Only with --no-compare: a comparison pair is "
+                          "matched to itself instead")
+    sub.add_argument("--estimator", default=None, choices=report.ESTIMATORS)
+    sub.add_argument("--peak-ceiling", type=float, default=None)
     sub.add_argument("--punch", type=float, default=None,
                      help="dB of attack emphasis on each kick, in "
                           "2-6 kHz (default: 0, off). Adds no energy: the band "

@@ -453,8 +453,22 @@ intact and only the micro-detail moved. The metric that does respond is
 `attack_contrast` -- how far the band leaps above its usual level at each
 kick -- reported as `snap` in the output.
 
-Run the level pass again afterwards: adding energy moves loudness, so
-whatever happens last has to be the levelling.
+### Where the levelling happens
+
+With `--no-compare` the written file is levelled to the profile's target as
+its final operation. It has to happen here: `gain` works by rewriting
+`global_gain`, which exists only in an MP3 bitstream, and what this writes is
+FLAC. Leaving it out would strand the output several dB from the rest of the
+library -- worse than not having processed it at all.
+
+A comparison pair is matched to itself instead, since the point of a pair is
+to be listened to.
+
+**Attenuating before adding sub does nothing.** It is a natural thing to
+reach for on a hot master, but the sub is sized relative to the band, so
+scaling the input scales the sub by the same factor: trimming first and
+trimming after come out identical to within float epsilon. The safety trim
+already does the job.
 
 ## What this does not do
 

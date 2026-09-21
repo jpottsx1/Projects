@@ -281,6 +281,63 @@ class TestComparisonPairs(unittest.TestCase):
     """An unmatched A/B mostly measures which file is louder, and louder wins
     regardless of whether it is better. The pair must be loudness-matched."""
 
+    def test_no_compare_output_is_levelled_to_the_target(self):
+        """The pipeline has to end levelled. The gain command cannot do it --
+        global_gain exists only in an MP3 bitstream and this writes FLAC --
+        so leaving it out would strand the output several dB from everything
+        else, which is worse than not having processed it."""
+        from loudnesslab import bs1770, cli, decode
+        x, _ = programme(seconds=10.0)
+        with tempfile.TemporaryDirectory() as tmp:
+            root, out = Path(tmp) / "src", Path(tmp) / "out"
+            root.mkdir()
+            subbass.write_flac(root / "a.flac", x, RATE)
+            with contextlib.redirect_stdout(io.StringIO()):
+                code = cli.main(["subbass", str(root), "--db",
+                                 str(Path(tmp) / "l.db"), "--out", str(out),
+                                 "--amount", "4", "--no-compare",
+                                 "--target", "-16", "--jobs", "1", "--quiet"])
+            self.assertEqual(code, 0)
+            written = next(out.glob("*.flac"))
+            measured = bs1770.measure(decode.decode(written))
+        self.assertAlmostEqual(measured["s_p95"], -16.0, delta=0.15)
+        self.assertLessEqual(measured["true_peak_dbtp"], -1.0 + 0.2)
+
+    def test_levelling_never_breaches_the_peak_ceiling(self):
+        from loudnesslab import bs1770, cli, decode
+        x, _ = programme(seconds=10.0)
+        quiet = (x * 0.02).astype(np.float32)   # so the target wants a boost
+        with tempfile.TemporaryDirectory() as tmp:
+            root, out = Path(tmp) / "src", Path(tmp) / "out"
+            root.mkdir()
+            subbass.write_flac(root / "a.flac", quiet, RATE)
+            with contextlib.redirect_stdout(io.StringIO()):
+                cli.main(["subbass", str(root), "--db", str(Path(tmp) / "c.db"),
+                          "--out", str(out), "--amount", "3", "--no-compare",
+                          "--target", "0", "--peak-ceiling", "-1",
+                          "--jobs", "1", "--quiet"])
+            written = next(out.glob("*.flac"))
+            measured = bs1770.measure(decode.decode(written))
+        self.assertLessEqual(measured["true_peak_dbtp"], -1.0 + 0.2)
+
+    def test_a_comparison_pair_is_matched_to_itself_not_to_the_target(self):
+        """The pair exists to be listened to, so it must be matched to each
+        other; levelling both to a target would defeat that."""
+        from loudnesslab import bs1770, cli, decode
+        x, _ = programme(seconds=8.0)
+        with tempfile.TemporaryDirectory() as tmp:
+            root, out = Path(tmp) / "src", Path(tmp) / "out"
+            root.mkdir()
+            subbass.write_flac(root / "a.flac", x, RATE)
+            with contextlib.redirect_stdout(io.StringIO()):
+                cli.main(["subbass", str(root), "--db", str(Path(tmp) / "m.db"),
+                          "--out", str(out), "--amount", "4", "--target", "-16",
+                          "--jobs", "1", "--quiet"])
+            a = bs1770.measure(decode.decode(next(out.glob("*A original*"))))
+            b = bs1770.measure(decode.decode(next(out.glob("*B *"))))
+        self.assertAlmostEqual(a["lufs_i"], b["lufs_i"], delta=0.15)
+        self.assertGreater(a["s_p95"], -15.0)   # not dragged to the target
+
     def test_the_policy_preview_counts_each_outcome(self):
         """Per-track rows say what happens to a track; this says what happens
         to a library, which is what makes a policy agreeable in advance."""

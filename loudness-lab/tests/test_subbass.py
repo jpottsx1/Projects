@@ -281,6 +281,34 @@ class TestComparisonPairs(unittest.TestCase):
     """An unmatched A/B mostly measures which file is louder, and louder wins
     regardless of whether it is better. The pair must be loudness-matched."""
 
+    def test_only_tracks_under_the_given_path_are_processed(self):
+        """The database is shared, because the reference corpus must live in
+        it too. Selection previously ranged over everything it held, so a
+        command naming one album processed records from another."""
+        from loudnesslab import cli
+        x, _ = programme(seconds=8.0)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "src"
+            (root / "Wanted").mkdir(parents=True)
+            (root / "Other").mkdir(parents=True)
+            subbass.write_flac(root / "Wanted" / "chosen.flac", x, RATE)
+            subbass.write_flac(root / "Other" / "ignored.flac", x, RATE)
+            database = Path(tmp) / "shared.db"
+            # Both folders go into the database...
+            with contextlib.redirect_stdout(io.StringIO()):
+                cli.main(["subbass", str(root), "--db", str(database),
+                          "--amount", "3", "--dry-run", "--jobs", "1", "--quiet"])
+            # ...but a run naming one of them must touch only that one.
+            buffer = io.StringIO()
+            with contextlib.redirect_stdout(buffer):
+                code = cli.main(["subbass", str(root / "Wanted"), "--db",
+                                 str(database), "--amount", "3", "--dry-run",
+                                 "--limit", "50", "--jobs", "1", "--quiet"])
+            output = buffer.getvalue()
+        self.assertEqual(code, 0)
+        self.assertIn("chosen", output)
+        self.assertNotIn("ignored", output)
+
     def test_auto_sets_the_amount_from_the_measured_shortfall(self):
         """A single --amount suits one corpus at a time. Real material differs
         track to track, so the amount has to come from each track's own gap

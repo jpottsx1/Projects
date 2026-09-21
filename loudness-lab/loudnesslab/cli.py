@@ -116,9 +116,16 @@ def cmd_subbass(args: argparse.Namespace) -> int:
     conn = db.connect(database)
     try:
         bands = ", ".join(str(b) for b in report.LOW_SHAPE_BANDS)
-        # A match filter turns "the ten thinnest" into "these ones", which is
-        # how you iterate on a setting: same tracks, different amount.
-        clause, params = "", []
+        # Restrict to the folders actually named. The database is shared --
+        # the reference corpus has to live in it too -- so without this the
+        # selection ranged over every track it held and happily processed
+        # records from albums the command never mentioned.
+        scope, params = [], []
+        for root in args.path:
+            base = str(root).rstrip(os.sep)
+            scope.append("(t.path = ? OR t.path LIKE ?)")
+            params += [base, base + os.sep + "%"]
+        clause = " AND (" + " OR ".join(scope) + ")" if scope else ""
         if args.match:
             tests = []
             for pattern in args.match:
@@ -127,7 +134,7 @@ def cmd_subbass(args: argparse.Namespace) -> int:
                              "OR LOWER(COALESCE(t.title, '')) LIKE ? "
                              "OR LOWER(t.path) LIKE ?)")
                 params += [like, like, like]
-            clause = " AND (" + " OR ".join(tests) + ")"
+            clause += " AND (" + " OR ".join(tests) + ")"
         rows = conn.execute(
             f"SELECT t.path, t.artist, t.title, AVG(b.shape_db) AS low "
             f"FROM tracks t JOIN bands b ON b.track_id = t.id "
@@ -135,8 +142,13 @@ def cmd_subbass(args: argparse.Namespace) -> int:
             f"AND b.shape_db IS NOT NULL{clause} "
             f"GROUP BY t.id ORDER BY low ASC LIMIT ?", (*params, args.limit)
         ).fetchall()
-        analysed = conn.execute(
-            "SELECT COUNT(*) FROM tracks WHERE status = 'ok'").fetchone()[0]
+        in_scope = conn.execute(
+            f"SELECT COUNT(*) FROM tracks t WHERE t.status = 'ok'"
+            + (" AND (" + " OR ".join(scope) + ")" if scope else ""),
+            [v for root in args.path
+             for v in (str(root).rstrip(os.sep),
+                       str(root).rstrip(os.sep) + os.sep + "%")]).fetchone()[0]
+        analysed = in_scope
         reference_name, curve = (None, {})
         if args.auto:
             reference_name, curve = _reference_curve(conn, args.reference or "")
@@ -162,8 +174,8 @@ def cmd_subbass(args: argparse.Namespace) -> int:
         else:
             print("nothing analysed to work from")
         return 1
-    if args.match:
-        print(f"matched {len(rows)} of {analysed} analysed track(s)")
+    print(f"{len(rows)} of {analysed} track(s) under the given path(s) selected"
+          + (" by --match" if args.match else ""))
     if args.auto:
         print(f"reference: {reference_name}")
 
@@ -198,7 +210,7 @@ def cmd_subbass(args: argparse.Namespace) -> int:
             # statistics, so it happens here rather than in the query.
             if skip is None and amount > 0:
                 activity = subbass.low_band_activity(audio, decode.TARGET_RATE)
-                if np.isfinite(activity) and activity < subbass.MIN_LOW_ACTIVITY_DB:
+                if np.isfinite(activity) and activity < args.min_activity:
                     skip = (f"sub octave barely moves ({activity:.0f} dB) -- "
                             f"a static floor rather than a bassline")
             if skip is not None:
@@ -751,6 +763,12 @@ def build_parser() -> argparse.ArgumentParser:
                           "one figure for everything")
     sub.add_argument("--reference", default=None, metavar="TEXT",
                      help="--auto: the folder whose low end is the target")
+    sub.add_argument("--min-activity", type=float,
+                     default=subbass.MIN_LOW_ACTIVITY_DB,
+                     help="skip a track whose sub octave swings less than this "
+                          f"many dB (default: {subbass.MIN_LOW_ACTIVITY_DB:.0f}). "
+                          "Static rumble measures about 11, a real groove about "
+                          "44; values in between are a judgement call")
     sub.add_argument("--max-amount", type=float, default=6.0,
                      help="--auto: cap on the per-track amount (default: 6)")
     sub.add_argument("--dry-run", action="store_true",

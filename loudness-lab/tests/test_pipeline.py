@@ -130,6 +130,53 @@ class TestNormalisationGuard(unittest.TestCase):
                       report.loudness_report(self.conn))
 
 
+class TestPerFolderNormalisation(unittest.TestCase):
+    """Once several corpora share a database -- which is the point, since the
+    reference has to live alongside what it is compared to -- a database-wide
+    normalisation check cannot answer "is THIS corpus clean". That is exactly
+    when the question gets asked."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.conn = db.connect(Path(self.tmp.name) / "folders.db")
+        self.addCleanup(self.conn.close)
+
+    def _add(self, folder, levels):
+        for index, level in enumerate(levels):
+            path = f"/music/{folder}/{index}.mp3"
+            self.conn.execute(
+                "INSERT INTO tracks (path, status, year) VALUES (?, 'ok', 1977)",
+                (path,))
+            track = self.conn.execute(
+                "SELECT id FROM tracks WHERE path = ?", (path,)).fetchone()["id"]
+            self.conn.execute(
+                "INSERT INTO loudness (track_id, lufs_i, s_p95) VALUES (?, ?, ?)",
+                (track, level, level + 1.7))
+            for band in (31.5, 40.0, 50.0, 63.0):
+                self.conn.execute(
+                    "INSERT INTO bands (track_id, band_hz, shape_db) "
+                    "VALUES (?, ?, ?)", (track, band, -20.0))
+        self.conn.commit()
+
+    def test_a_normalised_folder_is_named(self):
+        self._add("Processed", [-11.5 + (i % 3) * 0.01 for i in range(25)])
+        self._add("Clean", [-16.0 + (i % 11) * 0.9 for i in range(25)])
+        text = report.folders_report(self.conn)
+        self.assertIn("ALREADY NORMALISED", text)
+        self.assertIn("Processed", text.split("ALREADY NORMALISED")[1])
+        self.assertNotIn("Clean", text.split("ALREADY NORMALISED")[1].split("\n")[0])
+
+    def test_a_clean_library_is_not_flagged_at_all(self):
+        self._add("Clean", [-16.0 + (i % 11) * 0.9 for i in range(25)])
+        self.assertNotIn("ALREADY NORMALISED", report.folders_report(self.conn))
+
+    def test_a_handful_of_tracks_is_not_enough_to_judge(self):
+        """Five similar tracks happen; they are not evidence of a limiter."""
+        self._add("Tiny", [-11.5] * 5)
+        self.assertNotIn("ALREADY NORMALISED", report.folders_report(self.conn))
+
+
 class TestYearTags(unittest.TestCase):
     """Era grouping is only meaningful when the year says when the record was
     MADE. A compilation tags every track with the reissue year."""

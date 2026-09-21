@@ -483,13 +483,14 @@ def folders_report(conn: sqlite3.Connection) -> str:
     out = [f"FOLDERS  ({len(rows)} tracks in {len(grouped)} folders)", "=" * 112,
            "  Medians per folder. The last four columns are 1/3-octave shape,",
            "  in dB relative to each track's own broadband level.", "",
-           f"  {'folder':<38s}{'n':>5s}{'yr':>6s}{'LUFS-I':>9s}{'s_p95':>8s}"
-           f"{'LRA':>7s}{'dBTP':>7s}"
+           f"  {'folder':<38s}{'n':>5s}{'yr':>6s}{'LUFS-I':>9s}{'sd':>6s}"
+           f"{'s_p95':>8s}{'LRA':>7s}{'dBTP':>7s}"
            + "".join(f"{band:>8.0f}" for band in LOW_SHAPE_BANDS)]
 
     def median(values: list) -> float | None:
         return float(np.median(values)) if values else None
 
+    normalised_folders: list[str] = []
     for folder in sorted(grouped):
         bucket = grouped[folder]
         curve = shapes.get(folder, {})
@@ -497,11 +498,32 @@ def folders_report(conn: sqlite3.Connection) -> str:
             f"{median(curve[band]):8.1f}" if curve.get(band) else "       -"
             for band in LOW_SHAPE_BANDS)
         year = median(bucket["year"])
+        # Spread of integrated loudness WITHIN the folder. The database-wide
+        # check cannot answer "is this corpus clean" once several corpora
+        # share a database, and that is exactly when the question is asked.
+        levels = bucket["lufs_i"]
+        spread = float(np.std(levels)) if len(levels) >= 2 else None
+        flagged = (spread is not None and len(levels) >= NORMALISED_MIN_TRACKS
+                   and spread < NORMALISED_SD_DB)
+        marker = "*" if flagged else " "
         out.append(
-            f"  {folder[-37:]:<38s}{len(bucket['lufs_i']):5d}"
+            f"  {folder[-37:]:<38s}{len(levels):5d}"
             f"{('' if year is None else f'{year:.0f}'):>6s}"
-            f"{_fmt(median(bucket['lufs_i'])):>9s}{_fmt(median(bucket['s_p95'])):>8s}"
+            f"{_fmt(median(levels)):>9s}"
+            f"{('-' if spread is None else f'{spread:.2f}{marker}'):>6s}"
+            f"{_fmt(median(bucket['s_p95'])):>8s}"
             f"{_fmt(median(bucket['lra'])):>7s}{_fmt(median(bucket['tp'])):>7s}{cells}")
+        if flagged:
+            normalised_folders.append(folder)
+
+    if normalised_folders:
+        out += ["",
+                f"  * ALREADY NORMALISED: {', '.join(normalised_folders)}",
+                f"    Integrated loudness there varies by under "
+                f"{NORMALISED_SD_DB:.1f} dB, which real music does not do.",
+                "    Fine to level; useless as a reference for how an era sounds,",
+                "    because its crest, loudness range and true peak are a",
+                "    normaliser's limiter rather than the records."]
 
     spread = {}
     for band in LOW_SHAPE_BANDS:

@@ -42,6 +42,11 @@ public enum Declip {
         public var peakAfterDBFS = -Double.infinity
 
         public var refused: Int { tooLong + atEdge + shoulderClipped + nothingToAdd }
+
+        /// Spelled out because a public struct's implicit initialiser is
+        /// internal, so another module cannot make one without this however
+        /// public its properties are.
+        public init() {}
     }
 
     public struct Run: Equatable, Sendable {

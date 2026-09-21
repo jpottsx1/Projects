@@ -9,6 +9,7 @@ public enum Analyzer {
 
     public struct Counts: Sendable {
         public var found = 0, analysed = 0, skipped = 0, errors = 0
+        public init() {}
     }
 
     public struct Progress: Sendable {

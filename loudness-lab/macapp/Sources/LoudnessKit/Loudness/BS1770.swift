@@ -50,6 +50,18 @@ public enum BS1770 {
         public var clipRuns: Int
         public var crestDB: Double?
         public var shortTerm: [Double]
+
+        public init(lufsI: Double, lra: Double?, sMax: Double?, sP95: Double?,
+                    sP90: Double?, sP50: Double?, sP10: Double?,
+                    truePeakDBTP: Double, samplePeakDBFS: Double,
+                    clippedSamples: Int, clipRuns: Int, crestDB: Double?,
+                    shortTerm: [Double]) {
+            self.lufsI = lufsI; self.lra = lra; self.sMax = sMax
+            self.sP95 = sP95; self.sP90 = sP90; self.sP50 = sP50; self.sP10 = sP10
+            self.truePeakDBTP = truePeakDBTP; self.samplePeakDBFS = samplePeakDBFS
+            self.clippedSamples = clippedSamples; self.clipRuns = clipRuns
+            self.crestDB = crestDB; self.shortTerm = shortTerm
+        }
     }
 
     // MARK: - K-weighting

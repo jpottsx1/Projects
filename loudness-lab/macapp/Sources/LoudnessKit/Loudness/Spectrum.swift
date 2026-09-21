@@ -41,6 +41,12 @@ public enum Spectrum {
         public let p10DB: Double?
         public let p90DB: Double?
         public let sideMidDB: Double?
+
+        public init(bandHz: Double, ltasDB: Double?, shapeDB: Double?,
+                    p10DB: Double?, p90DB: Double?, sideMidDB: Double?) {
+            self.bandHz = bandHz; self.ltasDB = ltasDB; self.shapeDB = shapeDB
+            self.p10DB = p10DB; self.p90DB = p90DB; self.sideMidDB = sideMidDB
+        }
     }
 
     struct Edge { let centre: Double; let first: Int; let last: Int }

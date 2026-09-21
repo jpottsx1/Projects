@@ -27,6 +27,8 @@ public struct Tags: Sendable {
     public var sourceRate: Int?
     public var sourceChannels: Int?
 
+    public init() {}
+
     public static let originalYearKeys = ["originaldate", "originalyear",
                                           "original_year", "original date",
                                           "tdor", "tory"]

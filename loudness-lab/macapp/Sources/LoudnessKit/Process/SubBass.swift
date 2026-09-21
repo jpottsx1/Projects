@@ -39,6 +39,8 @@ public enum SubBass {
         public var sustainTrimDB = 0.0
         public var bandLevelChangeDB = 0.0
         public var note: String?
+
+        public init() {}
     }
 
     // MARK: - Bands

@@ -37,7 +37,10 @@ def analyse_file(path_str: str) -> dict:
 
     try:
         meta = decode.probe(path)
-        samples = decode.decode(path)
+        # Hand over the channel count just probed: decode needs it to know
+        # whether to upmix, and probing twice per file across a library is
+        # a second process spawn for an answer already in hand.
+        samples = decode.decode(path, source_channels=meta.get("source_channels"))
         loudness = bs1770.measure(samples)
         loudness.pop("_short_term", None)
         bands = spectrum.analyse(

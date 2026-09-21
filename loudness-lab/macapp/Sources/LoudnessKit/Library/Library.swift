@@ -9,7 +9,7 @@ import Foundation
 /// should not have to do it again to open the app.
 public final class Library {
 
-    public static let schemaVersion = 4
+    public static let schemaVersion = 5
     public static let toolVersion = "0.1.0"
 
     public static let schema = """
@@ -115,6 +115,27 @@ public final class Library {
             throw SQLite.Failure(
                 "database is schema v\(version), newer than this build's "
                 + "v\(Library.schemaVersion). Update the app, or scan into a new file.")
+        }
+        if version < 5 {
+            // The mono upmix changed: `ffmpeg -ac 2` was attenuating mono
+            // sources by 1/sqrt(2), so every mono track measured by an
+            // older build is 3.01 LU quiet and would be normalised 3 dB
+            // loud. Marked stale rather than corrected -- the shortfall,
+            // the band shapes and the percentiles all move -- so reports
+            // skip them and the next scan re-measures them. Stereo tracks
+            // are left alone; nothing about them changed.
+            let columns = try db.run("PRAGMA table_info(tracks)")
+                .compactMap { $0["name"] as? String }
+            if columns.contains("source_channels") {
+                try db.run("UPDATE tracks SET status = 'stale' "
+                           + "WHERE source_channels = 1 AND status = 'ok'")
+            } else {
+                // A v1 database predates the column, so there is no way to
+                // tell which of its rows were mono. Everything goes: a
+                // library that re-measures is recoverable, one carrying
+                // silently wrong numbers is not.
+                try db.run("UPDATE tracks SET status = 'stale' WHERE status = 'ok'")
+            }
         }
         if version < 4 {
             let columns = try db.run("PRAGMA table_info(gain_log)")

@@ -371,25 +371,64 @@ final class GoldenTests: XCTestCase {
         }
     }
 
+    /// Below this, a band holds arithmetic and nothing else.
+    ///
+    /// A 16-bit master's noise floor is about -96 dBFS and a 24-bit file's
+    /// last bit is about -144. At -120 there is no record, no converter and
+    /// no room that has anything to say.
+    static let spectrumFloorDB = -120.0
+
     func testTheThirdOctaveSpectrumMatches() throws {
         // Loose on purpose. numpy's rfft on a float32 frame returns
         // complex64, so the Python does this FFT in SINGLE precision while
         // this does it in double; band levels differ by around a millionth
         // of a decibel, and the Python rounds to three places anyway.
+        //
+        // That holds only while there is signal in the band. The `tones`
+        // fixture puts tones in seven bands and leaves the other
+        // twenty-four holding filter residue at -150 to -240 dB, and down
+        // there the two languages are not disagreeing about the spectrum --
+        // float32 runs out of mantissa around -140 and flattens into its
+        // own rounding noise, while double keeps resolving to -247. Held to
+        // 0.002 dB that produced eighty-eight failures, every one of them
+        // an argument about a number neither side means.
+        //
+        // So the claim is stated the way it is actually true: where a band
+        // carries anything, the levels match; where it does not, both sides
+        // have to agree there is nothing there. The second half is not a
+        // free pass -- energy in the wrong band shows up as a floor band
+        // that is no longer empty, and the band it left as a signal band
+        // that moved.
         for (kind, expected) in golden.spectrum {
             let rows = Spectrum.analyse(Fixtures.make(Fixtures.Kind(rawValue: kind)!,
                                                       seconds: 4.0),
                                         rate: Fixtures.rate)
             XCTAssertEqual(rows.count, expected.bands, kind)
+            var compared = 0
             for (index, row) in expected.rows.enumerated() {
                 let got = rows[index]
                 XCTAssertEqual(got.bandHz, row.band_hz, "\(kind) band \(index)")
+                // One decision per band, taken on its absolute level: if the
+                // band is empty then its shape and percentiles are empty too.
+                guard (row.ltas_db ?? -.infinity) >= Self.spectrumFloorDB else {
+                    XCTAssertLessThan(got.ltasDB ?? -.infinity, Self.spectrumFloorDB,
+                                      "\(kind) \(row.band_hz): Python has nothing "
+                                      + "here and this does")
+                    continue
+                }
+                compared += 1
                 close(got.ltasDB, row.ltas_db, 0.002, "\(kind) \(row.band_hz) ltas")
                 close(got.shapeDB, row.shape_db, 0.002, "\(kind) \(row.band_hz) shape")
                 close(got.p10DB, row.p10_db, 0.002, "\(kind) \(row.band_hz) p10")
                 close(got.p90DB, row.p90_db, 0.002, "\(kind) \(row.band_hz) p90")
                 close(got.sideMidDB, row.side_mid_db, 0.01, "\(kind) \(row.band_hz) width")
             }
+            // Otherwise a fixture that went quiet, or a floor set too high,
+            // would leave this test asserting nothing and still passing.
+            XCTAssertGreaterThanOrEqual(compared, 8,
+                                        "\(kind): only \(compared) band(s) had enough "
+                                        + "level to compare -- this test has stopped "
+                                        + "testing the spectrum")
         }
     }
 
@@ -441,8 +480,21 @@ final class GoldenTests: XCTestCase {
             XCTAssertEqual(SubBass.lowBandActivity(x, rate: Fixtures.rate),
                            expected.lowBandActivityDB, accuracy: 1e-6,
                            "\(name) low band activity")
+            // Loose for a reason, and the reason is on the PYTHON's side:
+            // `subbass.enhance` returns `.astype(np.float32)`, because
+            // float32 is what the pipeline decodes to and writes back out.
+            // So the recorded numbers carry float32's seven digits, while
+            // this runs in double. The giveaway was `outputPeak`: Python
+            // says 0.990000009537, which is float32(0.99) exactly, against
+            // this side's flat 0.99.
+            //
+            // Attack contrast gets the loosest of these because it is dB of
+            // a ratio whose denominator is near silence between kicks -- a
+            // 200 dB number amplifies the last float32 digit into the third
+            // decimal. Even so 0.01 dB is a thousand times finer than any
+            // difference this stage is trying to make.
             XCTAssertEqual(SubBass.attackContrast(x, rate: Fixtures.rate, kicks: kicks),
-                           expected.attackContrastDB, accuracy: 1e-5,
+                           expected.attackContrastDB, accuracy: 0.01,
                            "\(name) attack contrast")
 
             let (out, report) = SubBass.enhance(x, rate: Fixtures.rate,
@@ -458,8 +510,11 @@ final class GoldenTests: XCTestCase {
                            "\(name) safety trim")
             XCTAssertEqual(report.polarityFlipped, expected.polarityFlipped,
                            "\(name) polarity")
-            XCTAssertEqual(rms(out), expected.outputRMS, accuracy: 1e-9, "\(name) rms")
-            XCTAssertEqual(peak(out), expected.outputPeak, accuracy: 1e-9, "\(name) peak")
+            // float32 again: these come off an array Python cast on the way
+            // out. 1e-6 is still forty times tighter than the quietest bit
+            // of a 24-bit file.
+            XCTAssertEqual(rms(out), expected.outputRMS, accuracy: 1e-6, "\(name) rms")
+            XCTAssertEqual(peak(out), expected.outputPeak, accuracy: 1e-6, "\(name) peak")
         }
     }
 
@@ -623,13 +678,30 @@ final class GoldenTests: XCTestCase {
     /// The ceiling exists because rounding to the nearest 1.5 dB step can
     /// round UP: a gain capped at +0.9 dB would become +1.505 and overshoot
     /// the very limit that capped it.
+    ///
+    /// `clamped` is NOT part of that. It means the FILE had less headroom
+    /// than was asked for, and a ceiling is applied before the headroom is
+    /// consulted -- so a request the ceiling cut down, and the file then
+    /// granted in full, is not clamped. This test asserted otherwise and
+    /// failed against a port that was right; the Python, asked the same
+    /// question, also answers false. Both meanings are worth having, so
+    /// both are checked, and the flag is exercised where it genuinely
+    /// fires rather than left to the one case that does not.
     func testAStepCeilingIsNeverExceeded() throws {
         let data = try loadMP3("stereo.mp3")
         let uncapped = try MP3Gain.plan(data, targetDB: 4.5)
         XCTAssertGreaterThan(uncapped.steps, 0, "fixture has no room to go up")
+        XCTAssertEqual(uncapped.steps, 3, "4.5 dB is three 1.505 dB steps")
+
         let capped = try MP3Gain.plan(data, targetDB: 4.5, maxSteps: 1)
-        XCTAssertEqual(capped.steps, 1)
-        XCTAssertTrue(capped.clamped)
+        XCTAssertEqual(capped.steps, 1, "the ceiling was exceeded")
+        XCTAssertFalse(capped.clamped,
+                       "the file granted the ceiling's request in full")
+
+        // What clamped does mean: 160 dB down, from a file holding 152.
+        let beyond = try MP3Gain.plan(data, targetDB: -160)
+        XCTAssertTrue(beyond.clamped, "asked for more than the file had")
+        XCTAssertEqual(beyond.steps, -101, "and got exactly what it had")
     }
 
     /// Nothing outside an audio frame may move, whatever the step.

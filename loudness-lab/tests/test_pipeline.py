@@ -17,7 +17,7 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from loudnesslab import (SCHEMA_VERSION, analyze, apply_gain, cli,  # noqa: E402
+from loudnesslab import (SCHEMA_VERSION, analyze, apply_gain, bs1770, cli,  # noqa: E402
                          db, decode, report)
 
 RATE = 48000
@@ -253,6 +253,49 @@ class TestSchemaMigration(unittest.TestCase):
         # Unknown, not "not original" -- the old database never recorded it.
         self.assertIsNone(row["year_is_original"])
 
+    def _make_v4(self) -> None:
+        """A database as the previous build left it: mono and stereo rows,
+        all measured, all marked ok."""
+        conn = db.connect(self.path)
+        conn.execute("UPDATE meta SET value = '4' WHERE key = 'schema_version'")
+        for path, channels in (("/mono.mp3", 1), ("/stereo.mp3", 2),
+                               ("/broken.mp3", 1)):
+            conn.execute(
+                "INSERT INTO tracks (path, status, source_channels, tool_version) "
+                "VALUES (?, ?, ?, '0.1.0')",
+                (path, "error" if path == "/broken.mp3" else "ok", channels))
+        conn.commit()
+        conn.close()
+
+    def test_v5_marks_mono_rows_stale_and_leaves_stereo_alone(self):
+        """The mono upmix changed by 3.01 LU, so every mono row measured by
+        an older build is wrong. Reports filter on status = 'ok', so marking
+        them stale stops the wrong figure being averaged in AND makes the
+        next scan re-measure them -- without re-measuring a whole library to
+        fix the handful of mono singles in it."""
+        self._make_v4()
+        conn = db.connect(self.path)
+        try:
+            status = {row["path"]: row["status"] for row in
+                      conn.execute("SELECT path, status FROM tracks")}
+        finally:
+            conn.close()
+        self.assertEqual(status["/mono.mp3"], "stale", "mono was left as measured")
+        self.assertEqual(status["/stereo.mp3"], "ok",
+                         "stereo re-measures for nothing -- it did not change")
+        self.assertEqual(status["/broken.mp3"], "error",
+                         "a failure was overwritten by the migration")
+
+    def test_a_stale_row_is_analysed_again(self):
+        """Marking it stale is only worth anything if a scan acts on it."""
+        self._make_v4()
+        conn = db.connect(self.path)
+        try:
+            stat = os.stat_result((0o100644, 0, 0, 1, 0, 0, 0, 0, 0, 0))
+            self.assertTrue(db.needs_analysis(conn, Path("/mono.mp3"), stat))
+        finally:
+            conn.close()
+
     def test_a_newer_database_is_refused(self):
         conn = sqlite3.connect(self.path)
         conn.executescript(
@@ -322,6 +365,73 @@ class TestSurvey(unittest.TestCase):
         found = decode.survey(self.root)
         self.assertEqual(found["audio"], [])
         self.assertEqual(found["errors"], [])
+
+
+@unittest.skipUnless(HAVE_FFMPEG, "ffmpeg/ffprobe not installed")
+class TestMonoIsUpmixedAtUnity(unittest.TestCase):
+    """The same recording must measure the same stored mono or dual mono.
+
+    It did not. `ffmpeg -ac 2` upmixes one channel to two through a
+    1/sqrt(2) rematrix, which preserves total power -- a mixdown convention
+    meant to stop a mono source clipping a stereo bus. Applied here it made
+    every mono file read 3.01 LU quieter than the identical audio stored as
+    stereo, so a mono single was normalised 3 dB LOUD against the stereo
+    tracks either side of it in a set. Three decibels is not a rounding
+    error; it is the difference between a record sitting in the mix and
+    jumping out of it.
+
+    Found by porting the decoder to Swift, where the upmix was written
+    explicitly and disagreed. Neither implementation was obviously wrong on
+    its own -- it took two of them to see it.
+    """
+
+    def setUp(self):
+        self.dir = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.dir, ignore_errors=True)
+        # Something with real content: a gated bass tone, so the loudness
+        # gate has material to keep and the answer is not -inf.
+        t = np.arange(int(decode.TARGET_RATE * 3.0)) / decode.TARGET_RATE
+        wave_ = 0.5 * np.sin(2 * np.pi * 110.0 * t)
+        wave_ *= (np.sin(2 * np.pi * 2.0 * t) > 0)
+        self.signal = wave_
+
+    def _write(self, name: str, channels: int) -> Path:
+        path = self.dir / name
+        x = (self.signal if channels == 1
+             else np.column_stack([self.signal, self.signal]))
+        with wave.open(str(path), "wb") as handle:
+            handle.setnchannels(channels)
+            handle.setsampwidth(2)
+            handle.setframerate(decode.TARGET_RATE)
+            handle.writeframes((np.clip(x, -1, 1) * 32767).astype("<i2").tobytes())
+        return path
+
+    def test_a_mono_file_measures_the_same_as_the_same_audio_in_stereo(self):
+        mono = decode.decode(self._write("mono.wav", 1))
+        stereo = decode.decode(self._write("stereo.wav", 2))
+        self.assertEqual(mono.shape, stereo.shape)
+        # Identical audio, identical measurement. Under `-ac 2` these were
+        # 3.0103 LU apart.
+        self.assertAlmostEqual(bs1770.measure(mono)["lufs_i"],
+                               bs1770.measure(stereo)["lufs_i"], places=4)
+        self.assertLess(float(np.abs(mono - stereo).max()), 1e-4)
+
+    def test_the_mono_upmix_is_unity_not_power_preserving(self):
+        """State the amplitude directly, so the 1/sqrt(2) cannot come back."""
+        mono = decode.decode(self._write("mono.wav", 1))
+        self.assertAlmostEqual(float(np.abs(mono).max()), 0.5, places=3)
+        np.testing.assert_array_equal(mono[:, 0], mono[:, 1])
+
+    def test_a_wrong_channel_hint_does_not_silently_attenuate(self):
+        """The hint saves a probe on the scan path; it must not cost truth.
+
+        Passing the wrong count is a caller's bug, but a 3 dB one that no
+        test would notice is worse than a loud one.
+        """
+        path = self._write("mono.wav", 1)
+        honest = decode.decode(path)
+        hinted = decode.decode(path, source_channels=1)
+        np.testing.assert_array_equal(honest, hinted)
 
 
 @unittest.skipUnless(HAVE_FFMPEG, "ffmpeg/ffprobe not installed")

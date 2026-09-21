@@ -153,11 +153,11 @@
   },
   "mono.mp3": {
    "frames": 216000,
-   "lufs_i": -36.859594405,
-   "s_p95": -36.826683266,
-   "sample_peak_dbfs": -30.667328937,
+   "lufs_i": -33.849294305,
+   "s_p95": -33.816383166,
+   "sample_peak_dbfs": -27.657029051,
    "seconds": 4.5,
-   "true_peak_dbtp": -30.661801548
+   "true_peak_dbtp": -27.651501448
   },
   "mpeg2.mp3": {
    "frames": 216000,
@@ -1410,14 +1410,14 @@
    63.0
   ],
   "referenceFolder": "mp3",
-  "schemaVersion": 4,
+  "schemaVersion": 5,
   "shortfalls": [
    {
     "meanDeficitDB": 0.13725,
     "path": "crc.mp3"
    },
    {
-    "meanDeficitDB": -5.50675,
+    "meanDeficitDB": -5.507,
     "path": "mono.mp3"
    },
    {
@@ -1444,9 +1444,9 @@
    },
    {
     "artist": "Artist 1",
-    "lufs_i": -36.859594405,
+    "lufs_i": -33.849294305,
     "path": "mono.mp3",
-    "s_p95": -36.826683266,
+    "s_p95": -33.816383166,
     "title": "Title 1",
     "year": 1979
    },

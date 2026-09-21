@@ -85,23 +85,44 @@ def probe(path: Path) -> dict:
     }
 
 
-def decode(path: Path, rate: int = TARGET_RATE) -> np.ndarray:
+def decode(path: Path, rate: int = TARGET_RATE,
+           source_channels: int | None = None) -> np.ndarray:
     """Decode to (n_samples, 2) float32 at `rate`.
 
     Mono sources are upmixed to dual mono deliberately: a mono record played
     in a club comes out of both stacks, so that is the signal we want to
     measure. `source_channels` in the database records what it really was.
+
+    The upmix is done HERE rather than by `-ac 2`, which is not the same
+    thing. ffmpeg's mono-to-stereo rematrix multiplies by 1/sqrt(2) so that
+    total power is preserved -- a mixdown convention, meant to stop a mono
+    source clipping a stereo bus. It is wrong for this tool: it makes the
+    SAME recording measure 3.01 LU quieter stored as mono than stored as
+    dual-mono stereo, so a mono single gets normalised 3 dB loud against
+    the stereo tracks either side of it in a set. Both stacks get the
+    signal at the fader setting, so both channels get it at unity.
+
+    `source_channels` is a hint from a `probe` of the same file, so the
+    scan path does not pay for a second one; without it this probes.
+    Anything other than 1 channel is left to ffmpeg, whose 5.1 downmix
+    normalisation IS wanted.
     """
+    if source_channels is None:
+        source_channels = probe(path).get("source_channels") or 2
+    mono = source_channels == 1
     out = subprocess.run(
         ["ffmpeg", "-nostdin", "-v", "error", "-i", str(path),
-         "-map", "0:a:0", "-ac", "2", "-ar", str(rate), "-f", "f32le", "-"],
+         "-map", "0:a:0", "-ac", "1" if mono else "2",
+         "-ar", str(rate), "-f", "f32le", "-"],
         capture_output=True,
     )
     if out.returncode != 0:
         raise DecodeError(f"ffmpeg failed: {out.stderr.decode(errors='replace').strip()[:200]}")
     samples = np.frombuffer(out.stdout, dtype="<f4")
-    if samples.size < 2:
+    if samples.size < (1 if mono else 2):
         raise DecodeError("decoded to empty audio")
+    if mono:
+        return np.repeat(samples.reshape(-1, 1), 2, axis=1)
     return samples[: samples.size // 2 * 2].reshape(-1, 2)
 
 

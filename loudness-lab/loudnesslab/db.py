@@ -20,7 +20,7 @@ CREATE TABLE IF NOT EXISTS tracks (
     mtime_ns        INTEGER,
     analyzed_at     TEXT,
     tool_version    TEXT,
-    status          TEXT NOT NULL,          -- 'ok' or 'error'
+    status          TEXT NOT NULL,          -- 'ok', 'error' or 'stale'
     error           TEXT,
     codec           TEXT,
     source_rate     INTEGER,
@@ -124,6 +124,27 @@ def _migrate(conn: sqlite3.Connection, version: int) -> None:
             f"database is schema v{version}, newer than this build's "
             f"v{SCHEMA_VERSION}. Update loudness-lab, or analyse into a new file."
         )
+    if version < 5:
+        # The mono upmix changed. `ffmpeg -ac 2` was attenuating mono
+        # sources by 1/sqrt(2), so every mono track in this database was
+        # measured 3.01 LU quiet and would be normalised 3 dB loud. The
+        # numbers cannot be corrected in place -- the shortfall against a
+        # reference curve, the band shapes and the percentiles all move --
+        # so the rows are marked stale: reports skip them (they filter on
+        # status = 'ok') instead of averaging in a wrong figure, and the
+        # next scan re-measures them. Stereo tracks are untouched, because
+        # nothing about them changed; re-measuring a whole library to fix
+        # the mono singles in it would cost hours for no reason.
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(tracks)")}
+        if "source_channels" in columns:
+            conn.execute("UPDATE tracks SET status = 'stale' "
+                         "WHERE source_channels = 1 AND status = 'ok'")
+        else:
+            # A v1 database predates the column, so there is no way to tell
+            # which of its rows were mono. Everything goes, because a
+            # library that re-measures is recoverable and one carrying
+            # silently wrong numbers is not.
+            conn.execute("UPDATE tracks SET status = 'stale' WHERE status = 'ok'")
     # v3 only adds the gain_log table, which CREATE TABLE IF NOT EXISTS
     # above has already made; nothing to alter.
     if version < 4:

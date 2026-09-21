@@ -342,12 +342,23 @@ enum Help {
     // MARK: - The run
 
     static let limit = HelpEntry(
-        title: "Tracks",
-        summary: "How many to process, thinnest low end first.",
+        title: "Only the first",
+        summary: "Off by default: everything ticked gets processed.",
         detail: """
-        Selection is by measured low end, not by folder order, so a small \
-        number gives you the tracks that stand to gain most rather than \
-        whatever sorted first.
+        Off means all of it. A folder added is a folder meant to be worked \
+        on, and a silent cap of ten on three hundred tracks is a surprise \
+        rather than a convenience.
+
+        Turned on, the count applies to the order in the middle pane — \
+        measured low end, not folder order — so a small number gives you \
+        the tracks that stand to gain most rather than whatever sorted \
+        first. Useful for trying a profile before committing a folder to it.
+
+        Either way, the same record twice in one batch is processed once, \
+        matched on artist and title with case and punctuation ignored. A \
+        library of compilations is largely the same songs, and two files \
+        differing only in which disc they came off is not something anyone \
+        wants two of.
         """)
 
     static let compare = HelpEntry(

@@ -15,7 +15,7 @@ import time
 from pathlib import Path
 
 from . import (__version__, analyze, apply_gain, bs1770, db, decode,
-               mp3gain, report, spectrum, subbass)
+               mp3gain, profiles, report, spectrum, subbass)
 
 
 def _progress_printer(start: float):
@@ -86,6 +86,46 @@ def _auto_amount(conn, path: str, curve: dict, cap: float) -> tuple[float, str |
     return min(shortfall, cap), None
 
 
+def _policy_preview(outcomes: list) -> str:
+    """What the policy does across the library, folder by folder.
+
+    Per-track rows say what happens to a track. This says what happens to a
+    library, which is what makes a policy something you can agree to in
+    advance rather than audit afterwards.
+    """
+    if not outcomes:
+        return "  Nothing to summarise."
+    grouped: dict = {}
+    for folder, amount, reason in outcomes:
+        bucket = grouped.setdefault(folder, {"sub": [], "none": 0, "gated": 0})
+        if amount is not None and amount > 0:
+            bucket["sub"].append(amount)
+        elif reason and "barely moves" in reason:
+            bucket["gated"] += 1
+        else:
+            bucket["none"] += 1
+
+    width = max(10, min(38, max(len(f) for f in grouped)))
+    lines = ["POLICY PREVIEW  (what this profile does, folder by folder)",
+             "-" * 78,
+             f"  {'folder'.ljust(width)}{'n':>5}{'level only':>12}{'sub':>6}"
+             f"{'gated':>7}{'median':>8}{'max':>7}"]
+    for folder in sorted(grouped):
+        bucket = grouped[folder]
+        subs = bucket["sub"]
+        total = len(subs) + bucket["none"] + bucket["gated"]
+        median = f"{float(np.median(subs)):+.1f}" if subs else "-"
+        largest = f"{max(subs):+.1f}" if subs else "-"
+        lines.append(f"  {folder[-width:]:<{width}}{total:>5}{bucket['none']:>12}"
+                     f"{len(subs):>6}{bucket['gated']:>7}{median:>8}{largest:>7}")
+    lines += ["",
+              "  'level only' is a track already at the reference, so gain is all",
+              "  it needs. 'gated' is one whose sub octave holds a floor rather",
+              "  than a bassline. Neither is a failure; both are the policy",
+              "  declining to act, which is most of what a good policy does."]
+    return "\n".join(lines)
+
+
 def _label(args: argparse.Namespace, amount: float | None = None) -> str:
     parts = []
     amount = args.amount if amount is None else amount
@@ -96,6 +136,31 @@ def _label(args: argparse.Namespace, amount: float | None = None) -> str:
     return " ".join(parts) or "unchanged"
 
 
+def _settings(args: argparse.Namespace) -> dict | None:
+    """Merge profile and flags, or print the reason it cannot be done."""
+    try:
+        available = profiles.load(args.profiles)
+        settings = profiles.resolve(available, args.profile)
+    except profiles.ProfileError as exc:
+        sys.stderr.write(f"error: {exc}\n")
+        return None
+    for key in profiles.FIELDS:
+        if key == "description":
+            continue
+        if hasattr(args, key):
+            setattr(args, key, profiles.setting(getattr(args, key), settings, key))
+    return settings
+
+
+def cmd_profiles(args: argparse.Namespace) -> int:
+    try:
+        print(profiles.describe(profiles.load(args.profiles)))
+    except profiles.ProfileError as exc:
+        sys.stderr.write(f"error: {exc}\n")
+        return 1
+    return 0
+
+
 def cmd_subbass(args: argparse.Namespace) -> int:
     """PROTOTYPE: kick-synchronised sub-bass, for listening to.
 
@@ -103,6 +168,21 @@ def cmd_subbass(args: argparse.Namespace) -> int:
     writes FLAC into a separate folder and picks the tracks that measure
     thinnest rather than processing everything.
     """
+    if _settings(args) is None:
+        return 2
+    if not args.auto and args.amount <= 0 and args.punch <= 0:
+        # level-only is a gain policy. Running this command under it would
+        # decode every track, change nothing, and write pairs of identical
+        # files -- worse than useless, because it looks like work happened.
+        print("This profile asks for no spectral change (sub and punch are "
+              "both zero).")
+        print("Nothing for subbass to do -- levelling is the gain command:")
+        print(f"  ./loudness-lab gain <path> --profile {args.profile or 'level-only'}")
+        return 0
+    if args.auto and not args.reference:
+        sys.stderr.write("error: --auto needs a reference corpus. Give "
+                         "--reference, or set it in the profile.\n")
+        return 2
     database = args.db or (Path("scans") / f"{_slug(args.path[0])}.db")
     database.parent.mkdir(parents=True, exist_ok=True)
     out_dir = args.out or Path("subbass-preview")
@@ -181,6 +261,8 @@ def cmd_subbass(args: argparse.Namespace) -> int:
 
     if not args.dry_run:
         out_dir.mkdir(parents=True, exist_ok=True)
+    if args.profile:
+        print(f"profile: {args.profile}")
     heading = ("sub=auto (per track)" if args.auto
                else f"sub={args.amount:+.1f} dB")
     print(f"KICK PROTOTYPE  {heading} in "
@@ -191,33 +273,51 @@ def cmd_subbass(args: argparse.Namespace) -> int:
     print("  Lossy and irreversible, unlike the gain pass. Originals are never")
     print("  touched; these are new FLAC files to listen to and compare.")
     print()
-    print("  'shape' is the mean 1/3-octave level relative to the track's own")
-    print("  broadband, in the same units as report lowend, so it can be read")
-    print("  against the correction curve. 'added' is the energy put into the")
-    print("  octave; the two differ because one is a mean of decibels and the")
-    print("  other a sum of energies.")
-    print()
-    print(f"  {'artist / title':<40s}{'kicks/min':>10s}{'shape was':>11s}"
-          f"{'now':>8s}{'added':>8s}{'trim':>7s}{'dBTP':>7s}{'match':>8s}{'snap':>7s}")
+    if not args.summary_only:
+        print("  'shape' is the mean 1/3-octave level relative to the track's own")
+        print("  broadband, in the same units as report lowend, so it can be read")
+        print("  against the correction curve. 'added' is the energy put into the")
+        print("  octave; the two differ because one is a mean of decibels and the")
+        print("  other a sum of energies.")
+    if not args.summary_only:
+        print()
+        print(f"  {'artist / title':<40s}{'kicks/min':>10s}{'shape was':>11s}"
+              f"{'now':>8s}{'added':>8s}{'trim':>7s}{'dBTP':>7s}"
+              f"{'match':>8s}{'snap':>7s}")
 
     written = 0
+    labels = report._folder_labels([r["path"] for r in rows])
+    outcomes = []          # (folder, amount or None, reason when skipped)
     for row in rows:
         source = Path(row["path"])
+        folder = labels.get(row["path"], "(root)")
+        name = " - ".join(p for p in (row["artist"], row["title"]) if p) \
+            or source.stem
         try:
-            audio = decode.decode(source)
             amount, skip = amounts.get(str(source), (args.amount, None))
+            # Decide before decoding where the database already settles it.
+            # A policy preview over a whole library should not spend minutes
+            # decoding tracks it has already determined need nothing.
+            if skip is not None:
+                outcomes.append((folder, None, skip))
+                if not args.summary_only:
+                    print(f"  {name[:39]:<40s}{'':>10}{'':>11}{'':>8}{'':>8}"
+                          f"{'':>7}{'':>7}{'':>8}{'':>7}  {skip}")
+                continue
+
+            audio = decode.decode(source)
             # The content check needs the audio, not the per-frame band
             # statistics, so it happens here rather than in the query.
-            if skip is None and amount > 0:
+            if amount > 0:
                 activity = subbass.low_band_activity(audio, decode.TARGET_RATE)
                 if np.isfinite(activity) and activity < args.min_activity:
                     skip = (f"sub octave barely moves ({activity:.0f} dB) -- "
                             f"a static floor rather than a bassline")
             if skip is not None:
-                name = " - ".join(p for p in (row["artist"], row["title"]) if p) \
-                    or source.stem
-                print(f"  {name[:39]:<40s}{'':>10}{'':>11}{'':>8}{'':>8}"
-                      f"{'':>7}{'':>7}{'':>8}{'':>7}  skipped: {skip}")
+                outcomes.append((folder, None, skip))
+                if not args.summary_only:
+                    print(f"  {name[:39]:<40s}{'':>10}{'':>11}{'':>8}{'':>8}"
+                          f"{'':>7}{'':>7}{'':>8}{'':>7}  {skip}")
                 continue
             after, info = subbass.enhance(audio, decode.TARGET_RATE,
                                           amount_db=amount,
@@ -259,16 +359,20 @@ def cmd_subbass(args: argparse.Namespace) -> int:
                     b, decode.TARGET_RATE, source)
                 peak = bs1770.measure(b)["true_peak_dbtp"]
         except Exception as exc:
+            outcomes.append((folder, None, f"failed: {type(exc).__name__}"))
             print(f"  {source.name[:39]:<40s}  FAILED: {type(exc).__name__}: {exc}")
             continue
+        outcomes.append((folder, amount, None))
 
         def mean_low(table):
             values = [table[b] for b in report.LOW_SHAPE_BANDS
                       if table.get(b) is not None]
             return sum(values) / len(values) if values else float("nan")
 
-        name = " - ".join(p for p in (row["artist"], row["title"]) if p) or source.stem
         note = "" if info["note"] is None else f"  {info['note']}"
+        if args.summary_only:
+            written += 1
+            continue
         print(f"  {name[:39]:<40s}{info['kicks_per_minute']:>10.0f}"
               f"{mean_low(before_bands):>11.1f}{mean_low(after_bands):>8.1f}"
               f"{info['applied_db']:>+8.2f}{info['safety_trim_db']:>+7.2f}"
@@ -276,6 +380,8 @@ def cmd_subbass(args: argparse.Namespace) -> int:
               f"{note}")
         written += 1
 
+    print()
+    print(_policy_preview(outcomes))
     print()
     if args.dry_run:
         print(f"  DRY RUN -- nothing written. {written} track(s) would be "
@@ -304,6 +410,8 @@ def cmd_gain(args: argparse.Namespace) -> int:
     enough -- no separate scan step, and no database path to keep in step
     with it.
     """
+    if _settings(args) is None:
+        return 2
     if args.in_place and args.out:
         sys.stderr.write("error: choose --out or --in-place, not both\n")
         return 2
@@ -346,6 +454,8 @@ def cmd_gain(args: argparse.Namespace) -> int:
         blocked = [p for p in proposals if not p.ok]
         moving = [p for p in usable if p.plan.steps != 0]
 
+        if args.profile:
+            print(f"profile: {args.profile}")
         print(f"LOSSLESS GAIN  estimator={args.estimator}  "
               f"target={args.target:+.1f}  step={mp3gain.DB_PER_STEP:.3f} dB")
         print("=" * 100)
@@ -742,35 +852,39 @@ def build_parser() -> argparse.ArgumentParser:
     sub = subparsers.add_parser(
         "subbass", help="PROTOTYPE: kick-synchronised sub-bass (lossy, writes FLAC)")
     sub.add_argument("path", type=Path, nargs="+")
+    sub.add_argument("--profile", default=None,
+                     help="a named settings bundle; see the profiles command")
+    sub.add_argument("--profiles", type=Path, default=None,
+                     help="where profiles live (default: ./profiles.json)")
     sub.add_argument("--db", type=Path, default=None)
     sub.add_argument("--out", type=Path, default=None,
                      help="where the FLACs go (default: subbass-preview/)")
-    sub.add_argument("--amount", type=float, default=5.0,
-                     help="dB to add in the 31.5-63 Hz octave (default: 5)")
-    sub.add_argument("--punch", type=float, default=0.0,
+    sub.add_argument("--amount", type=float, default=None,
+                     help="dB to add in the 31.5-63 Hz octave")
+    sub.add_argument("--punch", type=float, default=None,
                      help="dB of attack emphasis on each kick, in "
                           "2-6 kHz (default: 0, off). Adds no energy: the band "
                           "is renormalised, so this redistributes rather than "
                           "boosts")
-    sub.add_argument("--punch-decay", type=float,
-                     default=subbass.DEFAULT_PUNCH_DECAY_MS,
+    sub.add_argument("--punch-decay", type=float, default=None,
                      help="ms the attack emphasis decays over (default: 8)")
     sub.add_argument("--freq", type=float, default=subbass.DEFAULT_FREQ_HZ)
     sub.add_argument("--decay", type=float, default=subbass.DEFAULT_DECAY_S)
-    sub.add_argument("--auto", action="store_true",
+    sub.add_argument("--auto", action="store_true", default=None,
                      help="set the sub amount per track from its own measured "
                           "shortfall against --reference, rather than using "
                           "one figure for everything")
     sub.add_argument("--reference", default=None, metavar="TEXT",
                      help="--auto: the folder whose low end is the target")
-    sub.add_argument("--min-activity", type=float,
-                     default=subbass.MIN_LOW_ACTIVITY_DB,
+    sub.add_argument("--min-activity", type=float, default=None,
                      help="skip a track whose sub octave swings less than this "
                           f"many dB (default: {subbass.MIN_LOW_ACTIVITY_DB:.0f}). "
                           "Static rumble measures about 11, a real groove about "
                           "44; values in between are a judgement call")
-    sub.add_argument("--max-amount", type=float, default=6.0,
+    sub.add_argument("--max-amount", type=float, default=None,
                      help="--auto: cap on the per-track amount (default: 6)")
+    sub.add_argument("--summary-only", action="store_true",
+                     help="print only the policy preview, not a row per track")
     sub.add_argument("--dry-run", action="store_true",
                      help="report what would be done and write nothing")
     sub.add_argument("--match", action="append", default=None, metavar="TEXT",
@@ -790,15 +904,19 @@ def build_parser() -> argparse.ArgumentParser:
         "gain", help="apply lossless gain by rewriting global_gain (mp3 only)")
     gain.add_argument("path", type=Path, nargs="*",
                       help="files or folders that have already been analysed")
+    gain.add_argument("--profile", default=None,
+                     help="a named settings bundle; see the profiles command")
+    gain.add_argument("--profiles", type=Path, default=None,
+                     help="where profiles live (default: ./profiles.json)")
     gain.add_argument("--db", type=Path, default=None,
                       help="default: scans/<folder-name>.db")
     gain.add_argument("--no-analyze", action="store_true",
                       help="fail on unmeasured files instead of measuring them")
     gain.add_argument("--jobs", type=int, default=None)
     gain.add_argument("--quiet", action="store_true")
-    gain.add_argument("--estimator", default="s_p95", choices=report.ESTIMATORS)
-    gain.add_argument("--target", type=float, default=-12.0)
-    gain.add_argument("--peak-ceiling", type=float, default=-1.0,
+    gain.add_argument("--estimator", default=None, choices=report.ESTIMATORS)
+    gain.add_argument("--target", type=float, default=None)
+    gain.add_argument("--peak-ceiling", type=float, default=None,
                       help="never let true peak exceed this, in dBTP "
                            "(default: -1.0)")
     gain.add_argument("--out", type=Path, default=None,
@@ -813,6 +931,11 @@ def build_parser() -> argparse.ArgumentParser:
                       help="reverse in-place changes recorded in the database")
     gain.add_argument("--limit", type=int, default=40)
     gain.set_defaults(func=cmd_gain)
+
+    show_profiles = subparsers.add_parser(
+        "profiles", help="list the available settings bundles")
+    show_profiles.add_argument("--profiles", type=Path, default=None)
+    show_profiles.set_defaults(func=cmd_profiles)
 
     check = subparsers.add_parser(
         "doctor", help="check the environment and a library path")

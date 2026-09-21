@@ -281,6 +281,70 @@ class TestComparisonPairs(unittest.TestCase):
     """An unmatched A/B mostly measures which file is louder, and louder wins
     regardless of whether it is better. The pair must be loudness-matched."""
 
+    def test_the_policy_preview_counts_each_outcome(self):
+        """Per-track rows say what happens to a track; this says what happens
+        to a library, which is what makes a policy agreeable in advance."""
+        from loudnesslab import cli
+        from scipy.signal import sosfiltfilt
+        x, _ = programme(seconds=10.0)
+        thin = sosfiltfilt(butter(4, 70.0, btype="high", fs=RATE,
+                                  output="sos"), x, axis=0).astype(np.float32)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "src"
+            (root / "Modern").mkdir(parents=True)
+            (root / "Old").mkdir(parents=True)
+            subbass.write_flac(root / "Modern" / "a.flac", x, RATE)
+            subbass.write_flac(root / "Old" / "b.flac", thin, RATE)
+            buffer = io.StringIO()
+            with contextlib.redirect_stdout(buffer):
+                code = cli.main(["subbass", str(root), "--db",
+                                 str(Path(tmp) / "p.db"), "--profile", "restore",
+                                 "--reference", "Modern", "--dry-run",
+                                 "--summary-only", "--jobs", "1", "--quiet"])
+            output = buffer.getvalue()
+        self.assertEqual(code, 0)
+        self.assertIn("POLICY PREVIEW", output)
+        # --summary-only must suppress the per-track rows.
+        self.assertNotIn("kicks/min", output)
+        modern = [ln for ln in output.splitlines() if ln.strip().startswith("Modern")]
+        old = [ln for ln in output.splitlines() if ln.strip().startswith("Old")]
+        self.assertTrue(modern and old)
+        self.assertIn("1", modern[0])
+        self.assertIn("1", old[0])
+
+    def test_a_profile_supplies_settings_the_flags_omit(self):
+        from loudnesslab import cli
+        x, _ = programme(seconds=6.0)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "src"
+            root.mkdir()
+            subbass.write_flac(root / "a.flac", x, RATE)
+            buffer = io.StringIO()
+            with contextlib.redirect_stdout(buffer):
+                code = cli.main(["subbass", str(root), "--db",
+                                 str(Path(tmp) / "q.db"), "--profile",
+                                 "level-only", "--dry-run", "--jobs", "1",
+                                 "--quiet"])
+            output = buffer.getvalue()
+        self.assertEqual(code, 0)
+        self.assertNotIn("kicks/min", output)
+        # level-only is a gain policy: subbass must decline rather than
+        # decode everything, change nothing and write identical pairs.
+        self.assertIn("no spectral change", output)
+        self.assertIn("gain", output)
+
+    def test_auto_without_a_reference_is_refused(self):
+        from loudnesslab import cli
+        x, _ = programme(seconds=6.0)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "src"
+            root.mkdir()
+            subbass.write_flac(root / "a.flac", x, RATE)
+            code = cli.main(["subbass", str(root), "--db",
+                             str(Path(tmp) / "r.db"), "--profile", "restore",
+                             "--dry-run", "--jobs", "1", "--quiet"])
+        self.assertEqual(code, 2)
+
     def test_only_tracks_under_the_given_path_are_processed(self):
         """The database is shared, because the reference corpus must live in
         it too. Selection previously ranged over everything it held, so a

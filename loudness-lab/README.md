@@ -208,6 +208,61 @@ whose sections stay *inside* the gate -- the fixture with a 6 dB swing shows
 So LRA is a poor proxy for "will the estimator choice matter here". Run the
 report on real records before trusting either number.
 
+## Profiles
+
+A profile is a named bundle of settings, so a policy can be stated once and
+audited rather than retyped:
+
+```sh
+./loudness-lab profiles                       # what exists, and every settable key
+./loudness-lab gain    <path> --profile level-only
+./loudness-lab subbass <path> --profile restore --reference "New Music 2026-09-02"
+```
+
+Two are built in. `level-only` is lossless levelling and nothing else.
+`restore` adds a sub sized per track against a reference corpus. Your own go
+in `profiles.json` as an object of name to settings; anything there adds to
+the built-ins or overrides one by name, and an unknown key is an error rather
+than silently ignored -- a typo that changes nothing is a policy that differs
+from the one written down.
+
+An explicit flag always beats the profile, which beats the default. Flags
+default to nothing rather than to a value, so "not given" can be told from
+"given the same as the default"; otherwise a profile could never change
+anything a flag also controls.
+
+**A profile fixes the policy, not the treatment.** How much each track gets
+still comes from measuring that track, which is why there are no era
+profiles here. Every clean corpus in this project is a compilation carrying a
+reissue date, so a rule reading the year treats a 1981 master as modern. And
+within one era the spread between tracks at 32 Hz is 14-24 dB against roughly
+5 dB between one era's median and the next, so a curve fitted to the era
+moves the median and leaves most tracks further from the target than they
+started. Measuring against a reference delivers era-appropriate treatment
+without needing to know the era: a modern master measures at the reference
+and gets only levelling; an eighties master measures short and gets a sub.
+
+### Seeing the policy before running it
+
+```sh
+./loudness-lab subbass <path> --profile restore --reference "..." \
+    --dry-run --summary-only
+```
+
+```
+POLICY PREVIEW  (what this profile does, folder by folder)
+  folder        n  level only   sub  gated  median    max
+  Modern        3           3     0      0       -      -
+  Old           3           0     3      0    +2.1   +3.3
+```
+
+Per-track rows say what happens to a track; this says what happens to a
+library, which is what makes a policy something to agree to in advance
+rather than audit afterwards. `--summary-only` drops the per-track rows,
+which matters at library scale. A dry run decides from the database before
+decoding wherever it can, so previewing a policy does not cost a full decode
+of everything it is going to decline to touch.
+
 ## Lossless gain
 
 `gain` is the one command that writes to audio files. It rewrites the 8-bit
@@ -430,5 +485,6 @@ loudnesslab/report.py     The reports
 loudnesslab/mp3gain.py    MPEG Layer III frame parsing and global_gain rewriting
 loudnesslab/apply_gain.py Planning, writing and undo for lossless gain
 loudnesslab/subbass.py    Kick detection and sub-bass synthesis (prototype)
+loudnesslab/profiles.py   Named settings bundles and their precedence
 tools/make_fixtures.py    Synthetic library with known properties
 ```

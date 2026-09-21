@@ -1049,6 +1049,13 @@ final class GoldenTests: XCTestCase {
     }
 
     /// The same answer the gain path already relies on, from a real file.
+    ///
+    /// "Real" meaning a real MP3 with real ID3 framing -- not a real Serato
+    /// file. The GEOB payload in the fixture is a byte ramp this project
+    /// wrote. That is enough for what it is used for: proving those bytes
+    /// are never touched, and that a copied tag arrives intact. It is not
+    /// evidence that Serato reads the result, and nothing here claims to
+    /// be.
     func testID3v2LengthAgreesWithTheGainPath() throws {
         for name in ["serato.mp3", "stereo.mp3", "crc.mp3"] {
             let data = try loadMP3(name)

@@ -70,11 +70,26 @@ public enum AudioWriter {
     ///
     /// That is only worth doing because the timing survives. Cue positions
     /// are times, so they land on the right beat only if the new file's
-    /// audio starts where the old one's did. Measured on a real Serato
-    /// file: decode, encode at 320, decode again, and the result is the
-    /// same length with a maximum sample difference of 0.00003 -- the
-    /// codec, and no shift at all. LAME writes the delay into its header
-    /// and the decoder gives it back.
+    /// audio starts where the old one's did. Decode, encode at 320, decode
+    /// again: same length, maximum sample difference 0.00003 -- the codec,
+    /// and no shift at all. LAME writes the delay into its header and the
+    /// decoder gives it back.
+    ///
+    /// What has NOT been shown is that Serato reads the result. The fixture
+    /// those GEOB frames came from is one this project made, carrying a
+    /// byte ramp rather than real markers -- fine for proving ffmpeg drops
+    /// the frames and that a copied tag arrives intact, which is all the
+    /// container cares about, but it is not a Serato file and no Serato has
+    /// opened the output. Copying the tag whole is what makes that a
+    /// reasonable bet: the bytes are not interpreted, so there is nothing
+    /// to misunderstand. It is still a bet until a real library confirms
+    /// it.
+    ///
+    /// This works because MP3 goes to MP3 -- the same container, so the tag
+    /// moves unread. Serato also stores markers in FLAC, as base64 in
+    /// Vorbis comments, and in M4A, as freeform com.serato.dj atoms. Going
+    /// MP3 to either of those would mean translating rather than copying,
+    /// and translation needs a real file to check against.
     public static func write(_ audio: [[Double]], to url: URL,
                              format: Format = .flac,
                              rate: Double = AudioDecoder.targetRate,

@@ -51,8 +51,8 @@ if [ -n "$ICON_SOURCE" ]; then
     # Exactly the sizes iconutil expects -- it refuses a set with anything
     # else in it.
     for size in 16 32 128 256 512; do
-        sips -z "$size" "$size" "$ICON_SOURCE"              --out "$ICONSET/icon_${size}x${size}.png" >/dev/null 2>&1
-        sips -z "$((size * 2))" "$((size * 2))" "$ICON_SOURCE"              --out "$ICONSET/icon_${size}x${size}@2x.png" >/dev/null 2>&1
+        sips -s format png -z "$size" "$size" "$ICON_SOURCE"              --out "$ICONSET/icon_${size}x${size}.png" >/dev/null 2>&1
+        sips -s format png -z "$((size * 2))" "$((size * 2))" "$ICON_SOURCE"              --out "$ICONSET/icon_${size}x${size}@2x.png" >/dev/null 2>&1
     done
     if iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"; then
         ICON_ENTRY='    <key>CFBundleIconFile</key>          <string>AppIcon</string>'

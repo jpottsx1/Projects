@@ -69,7 +69,16 @@ final class Engine: ObservableObject {
             say("  \(counts.found) found, \(counts.analysed) measured, "
                 + "\(counts.skipped) already current, \(counts.errors) failed.")
             progress = nil
-            survey = try Survey.of(library, under: folders, reference: reference)
+            progressNote = "Building the survey…"
+            // Off the main actor: it reads every track and every band row in
+            // the library and folds them together, which on a real library
+            // is long enough to freeze the window if done here. A second
+            // handle rather than passing this one across, because a SQLite
+            // connection belongs to the thread that opened it.
+            survey = await Task.detached(priority: .userInitiated) {
+                guard let reader = try? Library(at: databaseURL) else { return nil }
+                return try? Survey.of(reader, under: folders, reference: reference)
+            }.value
         } catch {
             failure = error.localizedDescription
         }
@@ -216,8 +225,11 @@ final class Engine: ObservableObject {
             try write(built, to: outputDirectory.appendingPathComponent("manifest.json"))
             manifest = built
             say("\(tracks.count) track(s) written to \(outputDirectory.path).")
-            survey = try? Survey.of(library, under: folders,
-                                    reference: profile.reference)
+            let wanted = profile.reference
+            survey = await Task.detached(priority: .userInitiated) {
+                guard let reader = try? Library(at: databaseURL) else { return nil }
+                return try? Survey.of(reader, under: folders, reference: wanted)
+            }.value
         } catch {
             failure = error.localizedDescription
         }

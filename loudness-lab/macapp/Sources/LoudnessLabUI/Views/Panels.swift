@@ -4,27 +4,53 @@ import LoudnessKit
 
 // MARK: - Choosing what to work on
 
+/// The sources, not their contents.
+///
+/// This used to list every URL it was given, which meant that adding files
+/// put a second copy of the track list in the left column -- the same names
+/// the middle pane now shows, in a worse place, pushing the settings down
+/// the window. So folders are listed, because a folder is a thing you
+/// manage here, and files are rolled into one line, because the list of
+/// them belongs in the list.
 struct SourcePanel: View {
     @Binding var folders: [URL]
+
+    private var directories: [URL] { folders.filter(SourcePanel.isFolder) }
+    private var files: [URL] { folders.filter { !SourcePanel.isFolder($0) } }
+    /// Folders, plus one line for however many loose files there are.
+    private var sourceRows: Int { directories.count + (files.isEmpty ? 0 : 1) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Music").font(.headline)
+
             if folders.isEmpty {
                 Text("No folders chosen.").font(.caption).foregroundStyle(.secondary)
             } else {
-                ForEach(folders, id: \.self) { folder in
-                    HStack {
-                        Text(folder.lastPathComponent).lineLimit(1).truncationMode(.head)
-                        Spacer()
-                        Button(action: { folders.removeAll { $0 == folder } }) {
-                            Image(systemName: "minus.circle")
+                // Bounded, so twenty folders cannot push the settings and
+                // the Process button off the bottom of the window.
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 4) {
+                        ForEach(directories, id: \.self) { folder in
+                            row(Image(systemName: "folder"),
+                                folder.lastPathComponent) {
+                                folders.removeAll { $0 == folder }
+                            }
                         }
-                        .buttonStyle(.borderless)
+                        if !files.isEmpty {
+                            row(Image(systemName: "music.note"),
+                                "\(files.count) file\(files.count == 1 ? "" : "s")") {
+                                folders.removeAll { !SourcePanel.isFolder($0) }
+                            }
+                        }
                     }
-                    .font(.callout)
                 }
+                // An explicit height, because a ScrollView takes whatever it
+                // is offered: given a range it would claim the full 108 for
+                // a single folder and leave a gap under it.
+                .frame(height: min(CGFloat(sourceRows) * 24 + 2, 110))
             }
+
             HStack {
                 Button("Add folder…") { pick(folders: true) { folders += $0 } }
                     .help(Help.folders.summary)
@@ -37,6 +63,29 @@ struct SourcePanel: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .help(Help.folders.detail)
         }
+    }
+
+    private func row(_ icon: Image, _ label: String,
+                     remove: @escaping () -> Void) -> some View {
+        HStack(spacing: 6) {
+            icon.foregroundStyle(.secondary).font(.caption)
+            Text(label).lineLimit(1).truncationMode(.head)
+            Spacer()
+            Button(action: remove) { Image(systemName: "minus.circle") }
+                .buttonStyle(.borderless)
+                .help("Remove this from the run")
+        }
+        .font(.callout)
+    }
+
+    /// Asked of the file system rather than the URL. `hasDirectoryPath`
+    /// reads the trailing slash, which is a fact about how the URL was
+    /// spelled and not about what is on disk.
+    private static func isFolder(_ url: URL) -> Bool {
+        var isDirectory: ObjCBool = false
+        let exists = FileManager.default.fileExists(atPath: url.path,
+                                                    isDirectory: &isDirectory)
+        return exists ? isDirectory.boolValue : url.hasDirectoryPath
     }
 
     private func pick(folders wantFolders: Bool, then apply: @escaping ([URL]) -> Void) {

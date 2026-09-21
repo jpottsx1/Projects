@@ -382,6 +382,54 @@ def main() -> int:
             "sample_peak_dbfs": rounded(measured["sample_peak_dbfs"]),
         }
 
+    # --- a database the Python wrote, which the Swift has to be able to read ---
+    # The compatibility claim is only worth making if it is demonstrated, and
+    # it cannot be demonstrated from one side. So the Python writes a real
+    # scan here and the Swift test opens that exact file.
+    from loudnesslab import db as dblib
+    database = OUT / "library.db"
+    for suffix in ("", "-wal", "-shm"):
+        (OUT / f"library.db{suffix}").unlink(missing_ok=True)
+    conn = dblib.connect(database)
+    expected_tracks = []
+    for index, path in enumerate(sorted((OUT / "mp3").glob("*.mp3"))):
+        audio = decode.decode(path)
+        measured = bs1770.measure(audio)
+        measured.pop("_short_term")
+        stat = path.stat()
+        dblib.store(conn, {
+            "track": {"path": str(path), "size_bytes": stat.st_size,
+                      "mtime_ns": stat.st_mtime_ns, "analyzed_at": "2026-01-01T00:00:00",
+                      "tool_version": "0.1.0", "status": "ok", "error": None,
+                      "codec": "mp3", "source_rate": 44100, "source_channels": 2,
+                      "bitrate_kbps": 128.0, "duration_s": 4.5,
+                      "artist": f"Artist {index}", "title": f"Title {index}",
+                      "album": "Fixtures", "genre": "Disco",
+                      "year": 1978 + index, "year_is_original": 1,
+                      "bpm": 120.0 + index, "musical_key": "8A"},
+            "loudness": measured,
+            "bands": spectrum.analyse(audio, RATE),
+        })
+        expected_tracks.append({
+            "path": str(path.name), "artist": f"Artist {index}",
+            "title": f"Title {index}", "year": 1978 + index,
+            "lufs_i": rounded(measured["lufs_i"]),
+            "s_p95": rounded(measured["s_p95"]),
+        })
+    # Checkpointed into the main file, so the fixture is one file and not
+    # three, and does not depend on a journal a fresh checkout would not have.
+    conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    conn.commit()
+    conn.close()
+    for suffix in ("-wal", "-shm"):
+        (OUT / f"library.db{suffix}").unlink(missing_ok=True)
+    golden["library"] = {
+        "schemaVersion": dblib.SCHEMA_VERSION,
+        "tracks": expected_tracks,
+        "lowBands": len([c for c in spectrum.BAND_CENTRES
+                         if c <= spectrum.LOW_BAND_MAX_HZ]),
+    }
+
     write_filter_bank()
 
     path = OUT / "golden.json"

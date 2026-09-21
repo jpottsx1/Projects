@@ -1,11 +1,11 @@
 import SwiftUI
 import AppKit
+import LoudnessKit
 
 // MARK: - Choosing what to work on
 
 struct SourcePanel: View {
     @Binding var folders: [URL]
-    @Binding var toolRoot: URL?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -26,22 +26,13 @@ struct SourcePanel: View {
                 }
             }
             HStack {
-                Button("Add folder…") { pick(folders: true) { folders.append(contentsOf: $0) } }
-                Button("Add files…") { pick(folders: false) { folders.append(contentsOf: $0) } }
+                Button("Add folder…") { pick(folders: true) { folders += $0 } }
+                Button("Add files…") { pick(folders: false) { folders += $0 } }
             }
-
-            Divider().padding(.vertical, 4)
-
-            Text("Tool").font(.headline)
-            HStack {
-                Text(toolRoot?.lastPathComponent ?? "not set")
-                    .font(.callout)
-                    .foregroundStyle(toolRoot == nil ? .secondary : .primary)
-                Spacer()
-                Button("Choose…") { pick(folders: true) { toolRoot = $0.first } }
-            }
-            Text("The loudness-lab folder, the one with the launcher in it.")
+            Text("Measured into ~/Music/LoudnessLab. Nothing is written to "
+                 + "the folders you choose.")
                 .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -57,8 +48,8 @@ struct SourcePanel: View {
 // MARK: - The variables
 
 struct SettingsPanel: View {
-    @Binding var settings: Settings
-    @Binding var profile: String
+    @Binding var profile: Profile
+    @Binding var profileName: String
     @Binding var limit: Int
     @Binding var compare: Bool
     @Binding var dryRun: Bool
@@ -68,11 +59,17 @@ struct SettingsPanel: View {
             VStack(alignment: .leading, spacing: 10) {
                 Text("Settings").font(.headline)
 
-                Picker("Profile", selection: $profile) {
+                Picker("Profile", selection: $profileName) {
                     Text("none").tag("")
                     Text("level-only").tag("level-only")
                     Text("restore").tag("restore")
                     Text("disco-70s").tag("disco-70s")
+                }
+                .onChange(of: profileName) { _, name in
+                    // A profile replaces every setting at once, so that what
+                    // is on screen is the policy being run and not a mixture
+                    // of it and whatever was there before.
+                    if let chosen = Profile.builtIn[name] { profile = chosen }
                 }
                 Text("A profile fixes what is allowed. How much each track "
                      + "gets still comes from measuring that track.")
@@ -80,40 +77,40 @@ struct SettingsPanel: View {
                     .fixedSize(horizontal: false, vertical: true)
 
                 Group {
-                    Toggle("Restore clipped peaks", isOn: $settings.declip)
-                    if settings.declip {
-                        slider("Lift cap", $settings.declipMax, 1...12, "dB")
+                    Toggle("Restore clipped peaks", isOn: $profile.declip)
+                    if profile.declip {
+                        slider("Lift cap", $profile.declipMax, 1...12, "dB")
                     }
                 }
 
                 Divider()
 
-                slider("Sub", $settings.amount, 0...10, "dB")
+                slider("Sub", $profile.amount, 0...10, "dB")
                 Text("31.5–63 Hz, laid under the kicks. Zero turns it off.")
                     .font(.caption).foregroundStyle(.secondary)
-                Toggle("Size it per track against a reference", isOn: $settings.auto)
-                if settings.auto {
+                Toggle("Size it per track against a reference", isOn: $profile.auto)
+                if profile.auto {
                     TextField("reference folder", text: Binding(
-                        get: { settings.reference ?? "" },
-                        set: { settings.reference = $0 }))
-                    slider("Cap", $settings.maxAmount, 1...12, "dB")
+                        get: { profile.reference ?? "" },
+                        set: { profile.reference = $0 }))
+                    slider("Cap", $profile.maxAmount, 1...12, "dB")
                 }
-                slider("Gate", $settings.minActivity, 8...30, "dB")
+                slider("Gate", $profile.minActivity, 8...30, "dB")
 
                 Divider()
 
-                slider("Punch", $settings.punch, 0...10, "dB")
-                if settings.punch > 0 {
-                    slider("Decay", $settings.punchDecay, 2...30, "ms")
+                slider("Punch", $profile.punch, 0...10, "dB")
+                if profile.punch > 0 {
+                    slider("Decay", $profile.punchDecay, 2...30, "ms")
                 }
 
                 Divider()
 
-                slider("Level to", $settings.target, -24...(-8), "LUFS")
-                Picker("On", selection: $settings.estimator) {
-                    ForEach(Settings.estimators, id: \.self) { Text($0).tag($0) }
+                slider("Level to", $profile.target, -24...(-8), "LUFS")
+                Picker("On", selection: $profile.estimator) {
+                    ForEach(Profile.estimators, id: \.self) { Text($0).tag($0) }
                 }
-                slider("Peak ceiling", $settings.peakCeiling, -6...0, "dBTP")
+                slider("Peak ceiling", $profile.peakCeiling, -6...0, "dBTP")
 
                 Divider()
 

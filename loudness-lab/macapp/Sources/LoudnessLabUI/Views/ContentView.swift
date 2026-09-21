@@ -1,26 +1,33 @@
 import SwiftUI
-import UniformTypeIdentifiers
+import LoudnessKit
 
 struct ContentView: View {
-    @StateObject private var runner = CLIRunner()
+    @StateObject private var engine = Engine()
     @StateObject private var player = ABPlayer()
 
     @State private var folders: [URL] = []
-    @State private var settings = Settings()
-    @State private var profile: String = ""
+    @State private var profile = Profile()
+    @State private var profileName = ""
     @State private var limit = 10
     @State private var compare = true
     @State private var dryRun = false
-    @State private var outputDirectory: URL?
     @State private var chosen: Manifest.Track?
     @State private var blind = false
+
+    private var outputDirectory: URL {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Music/LoudnessLab", isDirectory: true)
+    }
+    private var databaseURL: URL {
+        outputDirectory.appendingPathComponent("library.db")
+    }
 
     var body: some View {
         HSplitView {
             VStack(alignment: .leading, spacing: 14) {
-                SourcePanel(folders: $folders, toolRoot: $runner.toolRoot)
+                SourcePanel(folders: $folders)
                 Divider()
-                SettingsPanel(settings: $settings, profile: $profile,
+                SettingsPanel(profile: $profile, profileName: $profileName,
                               limit: $limit, compare: $compare, dryRun: $dryRun)
                 Divider()
                 runControls
@@ -29,12 +36,12 @@ struct ContentView: View {
             .frame(minWidth: 330, maxWidth: 400)
 
             VStack(spacing: 0) {
-                ResultsPanel(manifest: runner.manifest, chosen: $chosen)
+                ResultsPanel(manifest: engine.manifest, chosen: $chosen)
                 Divider()
                 ComparePanel(player: player, track: chosen, blind: $blind,
-                             estimator: settings.estimator)
+                             estimator: profile.estimator)
                 Divider()
-                LogPanel(text: runner.log, failure: runner.failure ?? player.problem)
+                LogPanel(text: engine.log, failure: engine.failure ?? player.problem)
             }
             .frame(minWidth: 560)
         }
@@ -44,12 +51,16 @@ struct ContentView: View {
     private var runControls: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Button(runner.isRunning ? "Running…" : "Process") { start() }
-                    .disabled(runner.isRunning || folders.isEmpty || runner.toolRoot == nil)
+                Button(engine.isRunning ? "Running…" : "Process") { start() }
+                    .disabled(engine.isRunning || folders.isEmpty)
                     .keyboardShortcut(.return, modifiers: .command)
-                if runner.isRunning {
-                    Button("Stop") { runner.cancel() }
-                    ProgressView().controlSize(.small)
+                if engine.isRunning {
+                    Button("Stop") { engine.cancel() }
+                    if let progress = engine.progress {
+                        ProgressView(value: progress).frame(width: 90)
+                    } else {
+                        ProgressView().controlSize(.small)
+                    }
                 }
             }
             Text("Originals are never written to. Every version is rendered "
@@ -62,32 +73,27 @@ struct ContentView: View {
     }
 
     private func start() {
-        let destination = outputDirectory ?? FileManager.default
-            .homeDirectoryForCurrentUser
-            .appendingPathComponent("Music/LoudnessLab", isDirectory: true)
-        outputDirectory = destination
         player.stop()
         chosen = nil
         Task {
-            await runner.run(folders: folders, settings: settings,
-                             profile: profile.isEmpty ? nil : profile,
-                             limit: limit, compare: compare, dryRun: dryRun,
-                             outputDirectory: destination)
-            chosen = runner.manifest?.tracks.first
+            await engine.run(folders: folders, profile: profile, limit: limit,
+                             compare: compare, dryRun: dryRun,
+                             outputDirectory: outputDirectory,
+                             databaseURL: databaseURL)
+            chosen = engine.manifest?.tracks.first
         }
     }
 
     private func loadIntoPlayer(_ track: Manifest.Track?) {
         guard let track else { player.stop(); return }
         let gains = track.matchGains(using: estimatorPath)
-        let sources = track.variants.map {
+        player.loadOrReport(track.variants.map {
             ABPlayer.Source(id: $0.id, label: $0.label, url: $0.url,
                             matchGainDB: gains[$0.id] ?? 0)
-        }
-        player.loadOrReport(sources)
+        })
     }
 
     private var estimatorPath: KeyPath<Manifest.Variant, Double?> {
-        settings.estimator == "lufs_i" ? \.lufsI : \.sP95
+        profile.estimator == "lufs_i" ? \.lufsI : \.sP95
     }
 }

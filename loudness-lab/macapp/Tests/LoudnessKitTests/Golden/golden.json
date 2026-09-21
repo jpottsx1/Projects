@@ -1383,6 +1383,52 @@
    "rms": 0.301972678577
   }
  },
+ "library": {
+  "lowBands": 13,
+  "schemaVersion": 4,
+  "tracks": [
+   {
+    "artist": "Artist 0",
+    "lufs_i": -33.849296093,
+    "path": "crc.mp3",
+    "s_p95": -33.816408789,
+    "title": "Title 0",
+    "year": 1978
+   },
+   {
+    "artist": "Artist 1",
+    "lufs_i": -36.859594405,
+    "path": "mono.mp3",
+    "s_p95": -36.826683266,
+    "title": "Title 1",
+    "year": 1979
+   },
+   {
+    "artist": "Artist 2",
+    "lufs_i": -33.850119956,
+    "path": "mpeg2.mp3",
+    "s_p95": -33.817126096,
+    "title": "Title 2",
+    "year": 1980
+   },
+   {
+    "artist": "Artist 3",
+    "lufs_i": -33.849277128,
+    "path": "serato.mp3",
+    "s_p95": -33.816407704,
+    "title": "Title 3",
+    "year": 1981
+   },
+   {
+    "artist": "Artist 4",
+    "lufs_i": -33.849277128,
+    "path": "stereo.mp3",
+    "s_p95": -33.816407704,
+    "title": "Title 4",
+    "year": 1982
+   }
+  ]
+ },
  "measure": {
   "noise": {
    "clip_runs": 0.0,

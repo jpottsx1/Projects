@@ -1,4 +1,5 @@
 import Foundation
+import LoudnessKit
 
 /// What `loudness-lab subbass` writes beside the audio it renders.
 ///
@@ -11,7 +12,7 @@ struct Manifest: Codable {
     let rate: Int
     let aligned: Bool
     let profile: String?
-    let settings: Settings
+    let settings: Profile
     let tracks: [Track]
 
     struct Track: Codable, Identifiable, Equatable {

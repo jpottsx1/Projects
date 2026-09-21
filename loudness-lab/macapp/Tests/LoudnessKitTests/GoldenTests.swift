@@ -33,6 +33,17 @@ final class GoldenTests: XCTestCase {
         let decode: [String: DecodeCase]
         let yearFromText: [String: Int?]
         let yearFromTags: [YearTagCase]
+        let library: LibraryCase
+    }
+
+    struct LibraryCase: Decodable {
+        let schemaVersion, lowBands: Int
+        let tracks: [LibraryTrack]
+    }
+    struct LibraryTrack: Decodable {
+        let path, artist, title: String
+        let year: Int
+        let lufs_i, s_p95: Double
     }
 
     struct DecodeCase: Decodable {
@@ -704,6 +715,112 @@ final class GoldenTests: XCTestCase {
         let result = FileSurvey.survey(url)
         XCTAssertTrue(result.singleFile)
         XCTAssertEqual(result.audio, [url])
+    }
+
+    // MARK: - The scan database
+
+    /// Opens a database the PYTHON wrote. The compatibility claim -- same
+    /// file, same schema, either side -- is only worth making if it is
+    /// demonstrated, and it cannot be demonstrated from one side alone.
+    /// Re-measuring a real library costs hours; someone who already scanned
+    /// six hundred tracks from the command line should not have to do it
+    /// again to open a window.
+    func testADatabaseWrittenByPythonOpensAndReads() throws {
+        let source = try XCTUnwrap(
+            Bundle.module.url(forResource: "Golden/library", withExtension: "db"))
+        // Copied, because opening it writes a journal and a test should not
+        // modify its own fixtures.
+        let copy = FileManager.default.temporaryDirectory
+            .appendingPathComponent("library-\(UUID().uuidString).db")
+        try FileManager.default.copyItem(at: source, to: copy)
+        defer { try? FileManager.default.removeItem(at: copy) }
+
+        let library = try Library(at: copy)
+        let rows = try library.tracks()
+        XCTAssertEqual(rows.count, golden.library.tracks.count)
+
+        for expected in golden.library.tracks {
+            let row = try XCTUnwrap(rows.first { $0.path.hasSuffix(expected.path) },
+                                    "missing \(expected.path)")
+            XCTAssertEqual(row.artist, expected.artist)
+            XCTAssertEqual(row.title, expected.title)
+            XCTAssertEqual(row.year, expected.year)
+            XCTAssertEqual(try XCTUnwrap(row.lufsI), expected.lufs_i, accuracy: 1e-6)
+            XCTAssertEqual(try XCTUnwrap(row.sP95), expected.s_p95, accuracy: 1e-6)
+        }
+
+        let shape = try library.lowEndShape()
+        XCTAssertEqual(shape.count, golden.library.tracks.count,
+                       "every track should have a low-end figure")
+    }
+
+    func testTheSchemaVersionMatchesThePython() {
+        XCTAssertEqual(Library.schemaVersion, golden.library.schemaVersion,
+                       "the two sides would stop opening each other's files")
+    }
+
+    func testANewerDatabaseIsRefusedRatherThanCorrupted() throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("future-\(UUID().uuidString).db")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let library = try Library(at: url)
+        try library.db.run("UPDATE meta SET value = '99' WHERE key = 'schema_version'")
+        XCTAssertThrowsError(try Library(at: url),
+                             "a database from a newer build must not be written to")
+    }
+
+    func testStoringAndReadingBackARoundTrip() throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("round-\(UUID().uuidString).db")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let library = try Library(at: url)
+        let audio = Fixtures.make(.programme)
+        var tags = Tags()
+        tags.artist = "Chic"; tags.title = "Le Freak"; tags.year = 1978
+        tags.yearIsOriginal = true
+
+        let track = URL(fileURLWithPath: "/tmp/le-freak.mp3")
+        try library.store(Library.Analysis(
+            url: track, sizeBytes: 1234, mtimeNanoseconds: 5678, status: "ok",
+            tags: tags, codec: "mp3", loudness: BS1770.measure(audio),
+            bands: Spectrum.analyse(audio, rate: Fixtures.rate)))
+
+        let rows = try library.tracks()
+        XCTAssertEqual(rows.count, 1)
+        XCTAssertEqual(rows[0].artist, "Chic")
+        XCTAssertEqual(rows[0].year, 1978)
+
+        // Storing twice must replace, not accumulate: a re-scan of a library
+        // that already had rows would otherwise double every band.
+        try library.store(Library.Analysis(
+            url: track, sizeBytes: 1234, mtimeNanoseconds: 5678, status: "ok",
+            tags: tags, codec: "mp3", loudness: BS1770.measure(audio),
+            bands: Spectrum.analyse(audio, rate: Fixtures.rate)))
+        XCTAssertEqual(try library.tracks().count, 1, "a re-store duplicated the track")
+        XCTAssertEqual(try library.lowEndShape().count, 1)
+
+        XCTAssertFalse(try library.needsAnalysis(track, size: 1234,
+                                                 mtimeNanoseconds: 5678),
+                       "an unchanged file should not be measured again")
+        XCTAssertTrue(try library.needsAnalysis(track, size: 9999,
+                                                mtimeNanoseconds: 5678),
+                      "a changed file must be measured again")
+    }
+
+    /// A silent track measures -inf, which has no SQLite representation. It
+    /// has to arrive as "unknown" rather than as a number that reports would
+    /// average in.
+    func testANonFiniteMeasurementIsStoredAsUnknown() throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("silent-\(UUID().uuidString).db")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let library = try Library(at: url)
+        let silence = [[Double]](repeating: [Double](repeating: 0, count: 48000 * 4), count: 2)
+        try library.store(Library.Analysis(
+            url: URL(fileURLWithPath: "/tmp/silent.mp3"), sizeBytes: 1,
+            mtimeNanoseconds: 1, status: "ok", loudness: BS1770.measure(silence)))
+        let row = try XCTUnwrap(try library.tracks().first)
+        XCTAssertNil(row.lufsI, "-inf was stored as a number")
     }
 
     // MARK: - Helpers

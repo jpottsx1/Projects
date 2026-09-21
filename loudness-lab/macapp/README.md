@@ -2,10 +2,10 @@
 
 A native app being grown out of the Python in the folder above.
 
-    open macapp/Package.swift      # then ⌘B to build, ⌘U to test, ⌘R to run
+    swift test --package-path macapp     # the golden vectors
+    open macapp/Package.swift            # ⌘R to run
 
-Needs macOS 14. Do not sandbox it: it reads folders you point it at, and
-while the port is unfinished it also runs the Python as a subprocess.
+Needs macOS 14. Do not sandbox it: it reads the folders you point it at.
 
 ## How the port is kept honest
 
@@ -54,11 +54,19 @@ After changing anything the Swift depends on:
 | `SubBass` — kick detection, sub, attack shaping | ✅ golden-tested |
 | `MP3Gain` — lossless `global_gain`, Serato GEOB safety | ✅ golden-tested |
 | `AudioDecoder`, `FileSurvey`, `Tags` | ✅ tested (see below) |
-| Library database, reports | ⬜ not yet |
-| UI wiring to `LoudnessKit` instead of the CLI | ⬜ not yet |
+| `Library` — same schema, same file | ✅ tested |
+| `Analyzer`, `AudioWriter`, `Profile` | ✅ tested |
+| UI wired to `LoudnessKit` | ✅ done |
 
-Until the last row is done the app still shells out to `./loudness-lab`, so
-the Python has to be present and working.
+**The app no longer needs Python, ffmpeg, or the command line.** Everything
+it measures and everything it writes now comes from `LoudnessKit`, which is
+held to the Python's numbers by the golden vectors.
+
+The scan database is the same file with the same schema and the same version
+number, so a `scans/*.db` written from the command line opens in the app and
+the other way round. That is not tidiness: re-measuring a real library costs
+hours, and nobody who has already scanned six hundred tracks should have to
+do it again to open a window.
 
 Decoding is the one piece with no reference to be held to: the Python shells
 out to ffmpeg, and the app uses Apple's decoder. They do not agree sample for

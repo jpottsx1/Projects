@@ -2,6 +2,7 @@ import SwiftUI
 import LoudnessKit
 
 struct ContentView: View {
+    @Environment(\.openWindow) private var openWindow
     @StateObject private var engine = Engine()
     @StateObject private var player = ABPlayer()
 
@@ -46,6 +47,9 @@ struct ContentView: View {
             .frame(minWidth: 560)
         }
         .onChange(of: chosen) { _, track in loadIntoPlayer(track) }
+        .onReceive(NotificationCenter.default.publisher(for: .showHelp)) { _ in
+            openWindow(id: "help")
+        }
     }
 
     private var runControls: some View {
@@ -54,6 +58,8 @@ struct ContentView: View {
                 Button(engine.isRunning ? "Running…" : "Process") { start() }
                     .disabled(engine.isRunning || folders.isEmpty)
                     .keyboardShortcut(.return, modifiers: .command)
+                    .help("Measure, then process the chosen folders (⌘↩). "
+                          + "Originals are never written to.")
                 if engine.isRunning {
                     Button("Stop") { engine.cancel() }
                     if let progress = engine.progress {
@@ -68,6 +74,7 @@ struct ContentView: View {
                  + "between mid-bar.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+                .help(Help.folders.detail)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }

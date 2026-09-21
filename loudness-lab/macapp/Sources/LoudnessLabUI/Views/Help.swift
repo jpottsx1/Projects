@@ -1,0 +1,430 @@
+import SwiftUI
+
+/// What every control does, in one place.
+///
+/// Written here rather than beside each control for two reasons. The
+/// summaries are hover tooltips and the details fill the Help window, so
+/// the same sentence would otherwise be written twice and drift. And the
+/// answers are not obvious: most of these numbers were chosen by measuring
+/// something, and a setting whose reasoning is lost is a setting nobody can
+/// judge. Where a figure was measured, it is quoted.
+struct HelpEntry: Identifiable {
+    let title: String
+    /// One line. Appears on hover, so it has to be useful at a glance.
+    let summary: String
+    /// The fuller answer, including what it costs to get it wrong.
+    let detail: String
+
+    var id: String { title }
+}
+
+enum Help {
+
+    // MARK: - Choosing music
+
+    static let folders = HelpEntry(
+        title: "Music",
+        summary: "Folders or files to work on. Nothing is ever written back to them.",
+        detail: """
+        Originals are never opened for writing. Everything produced goes to \
+        ~/Music/LoudnessLab, and the measurements are cached in a database \
+        there, keyed on each file's size and modification time -- so running \
+        again re-measures only what actually changed.
+
+        A folder is walked for audio; anything that is not audio is counted \
+        and reported rather than silently skipped, so a library that comes \
+        back smaller than you expected can be explained.
+        """)
+
+    // MARK: - Profile
+
+    static let profile = HelpEntry(
+        title: "Profile",
+        summary: "A named policy. Fixes what is allowed, not what each track gets.",
+        detail: """
+        A profile fixes what the tool is ALLOWED to do. It does not fix what \
+        each track gets -- that still comes from measuring the track, and \
+        that distinction is the whole design.
+
+        level-only: lossless levelling and nothing else. No decode, no \
+        re-encode, reversible.
+        restore: levelling, plus sub sized per track against a reference \
+        corpus. Needs a reference. Lossy.
+        disco-70s: the same, with the cap raised to 8 dB and the gate lowered \
+        to 18. Three independent 1970s disco corpora -- 108 tracks over two \
+        compilations and a 2003 reissue -- agree within about 3 dB from 32 to \
+        63 Hz, sitting 6 to 9 dB under a current reference. There is nothing \
+        usable below 32 Hz: the 20 Hz band reads as empty on all three.
+
+        There are deliberately no era profiles. Era-keyed curves were the \
+        obvious idea and the measurements ruled them out twice: every clean \
+        corpus here is a compilation carrying a reissue date, so a rule \
+        reading the year treats old masters as modern; and within a single \
+        era the spread between tracks at 32 Hz is 14-24 dB against roughly \
+        5 dB between one era's median and the next, so a curve fitted to the \
+        era moves the median and leaves most tracks further from the target \
+        than they started.
+        """)
+
+    // MARK: - De-clipping
+
+    static let declip = HelpEntry(
+        title: "Restore clipped peaks",
+        summary: "Puts back peaks that were flattened before the file reached you.",
+        detail: """
+        About a third of the 1970s disco measured for this project carries \
+        runs of consecutive samples pinned at full scale. That is not \
+        loudness, it is a flat top where a peak used to be, and the flat top \
+        IS the distortion -- a clipped waveform is the original plus a family \
+        of odd harmonics, which is why heavily clipped material sounds hard \
+        and small rather than loud.
+
+        Nothing can recover what was thrown away. What this does is draw the \
+        arc the signal was already on when it ran out of headroom, taking the \
+        value and slope of the audio on both shoulders. The method is chosen \
+        for being self-limiting rather than clever: on a genuinely clipped \
+        peak it arcs to within 0.1 dB of the true peak, and on a peak that \
+        merely touched full scale without clipping the shoulders are already \
+        turning over, so it changes the audio by thousandths of a decibel. A \
+        false detection therefore costs almost nothing, which is the only \
+        basis on which this is safe to run across a library.
+
+        Two honest limits. On clean audio deliberately clipped and restored, \
+        reconstruction improves by 3.3 to 3.9 dB -- but through MP3 the real \
+        figure is much smaller: about 2.0 dB at light clipping, falling to \
+        0.4 dB at heavy. And a limiter is not a clipper: where a master was \
+        squashed rather than clipped the shoulders are squashed too, no flat \
+        run appears, and there is nothing here to find.
+
+        It runs first, before anything else, because it puts peaks BACK and \
+        everything after has to fit underneath them.
+        """)
+
+    static let declipMax = HelpEntry(
+        title: "Lift cap",
+        summary: "The most any single peak may be lifted. Default 6 dB.",
+        detail: """
+        A hard ceiling on the reconstruction, so an unusual run cannot \
+        produce an implausible peak. Separately, any run longer than 10 ms is \
+        refused outright -- longer than a clipped peak can plausibly be, so a \
+        long flat span is more likely to be something else.
+        """)
+
+    // MARK: - Sub
+
+    static let amount = HelpEntry(
+        title: "Sub",
+        summary: "dB added in the 31.5-63 Hz octave, under the kicks. Zero is off.",
+        detail: """
+        Energy laid into the sub octave, synchronised to the kicks the \
+        detector found, rather than an equaliser lifting the whole band for \
+        the length of the track. Zero turns the stage off.
+
+        With per-track sizing on, this figure is ignored and each track gets \
+        its own measured shortfall instead.
+        """)
+
+    static let auto = HelpEntry(
+        title: "Size it per track against a reference",
+        summary: "Each track gets its own measured shortfall, not one figure for all.",
+        detail: """
+        The difference between a policy and a preset. With this off, every \
+        track gets the same number of decibels whether it needs them or not. \
+        With it on, each track is measured against the reference folder's low \
+        end and given what it is actually short of.
+
+        This needs a reference to measure against. Without one the setting \
+        cannot be honoured, and the run stops rather than quietly applying \
+        the fixed amount instead -- which would be the app doing something \
+        other than the policy on screen.
+        """)
+
+    static let reference = HelpEntry(
+        title: "Reference folder",
+        summary: "The folder whose low end is the target. Name one you have measured.",
+        detail: """
+        Enough of the folder's name to identify it. If the text matches more \
+        than one folder it resolves to nothing and the run stops with a \
+        message, rather than picking one and leaving you to wonder which.
+        """)
+
+    static let maxAmount = HelpEntry(
+        title: "Cap",
+        summary: "Ceiling on the per-track amount when sizing automatically.",
+        detail: """
+        A track measured as 12 dB short is more likely to be unusual than to \
+        need 12 dB. The cap bounds what any single track can be given. \
+        disco-70s raises it to 8 because the deficit on that material was \
+        measured at 6 to 9 dB.
+        """)
+
+    static let minActivity = HelpEntry(
+        title: "Gate",
+        summary: "Skip tracks whose sub octave barely moves. Rumble ~11 dB, a groove ~44.",
+        detail: """
+        How much the sub octave has to swing over the track before the stage \
+        will touch it. The point is to tell a bassline from a static floor: \
+        tape rumble, air conditioning, or a room tone measures about 11 dB of \
+        movement, a real groove about 44. Values in between are a judgement \
+        call, which is why this is a control and not a constant.
+
+        Adding sub to a track whose low end never moves does not give it a \
+        bassline, it raises its noise floor. disco-70s lowers the gate to 18 \
+        because that material is the most groove-locked in the project and \
+        sits nearest the threshold, where a marginal track is better reviewed \
+        than silently dropped.
+        """)
+
+    // MARK: - Punch
+
+    static let punch = HelpEntry(
+        title: "Punch",
+        summary: "Attack emphasis on each kick, in 2-6 kHz. Adds no energy.",
+        detail: """
+        Emphasis on the beater click -- the snap of the kick, not its body, \
+        which is why it works at 2-6 kHz and not in the bass.
+
+        This is a transient shaper, not an expander, and the difference is \
+        the point: the band is renormalised afterwards, so it comes out \
+        holding exactly the energy it went in with. Nothing is added; the \
+        distribution in time is changed. That means it cannot make a track \
+        brighter overall, only sharper at the front of each kick.
+
+        Off by default, and disco-70s leaves it off: live drummers, and on \
+        that material 2-6 kHz is full of hi-hat and tambourine rather than \
+        beater click.
+        """)
+
+    static let punchDecay = HelpEntry(
+        title: "Decay",
+        summary: "How long the attack emphasis takes to fall away. Default 8 ms.",
+        detail: """
+        Short values sharpen the very front of the kick; longer ones let the \
+        emphasis run into the body of it, which starts to sound like a lift \
+        rather than an attack.
+        """)
+
+    // MARK: - Levelling
+
+    static let target = HelpEntry(
+        title: "Level to",
+        summary: "The level each written file is brought to, measured on the estimator.",
+        detail: """
+        Levelling happens last, because everything before it moves loudness: \
+        restoring a peak, laying in sub and reshaping attacks all change what \
+        the track measures. Whatever happens last has to be the levelling, or \
+        the number on screen is not the number in the file.
+        """)
+
+    static let estimator = HelpEntry(
+        title: "On",
+        summary: "Which loudness statistic to level on. s_p95 describes the loud part.",
+        detail: """
+        lufs_i is integrated loudness: one number for the whole track, \
+        quiet intro and all. s_p95 is the 95th percentile of the rolling \
+        3-second loudness -- it describes the loud part of the track rather \
+        than its average, which is what actually matters when tracks are \
+        mixed one into another. s_p50 is the median, s_max the loudest \
+        moment.
+
+        The choice only matters as much as the two disagree, and they \
+        disagree more as a track's loudness range grows. Measured on this \
+        library, the median gap between s_p95 and lufs_i by loudness-range \
+        band was 1.16, 1.70, 2.16, 2.47 and 2.76 dB. On a track with a quiet \
+        intro and a loud body, levelling on integrated loudness makes the \
+        body too loud.
+        """)
+
+    static let peakCeiling = HelpEntry(
+        title: "Peak ceiling",
+        summary: "True peak no gain may exceed. -1.0 dBTP, not -0.1, on purpose.",
+        detail: """
+        Levelling stops here even if that means falling short of the target. \
+        The default is -1.0 rather than the -0.1 you often see because the \
+        measurement itself is not that precise: 4x oversampled true-peak \
+        detection is only good to about 0.5 dB, and an MP3 re-encode moves \
+        peaks around on top of that. A ceiling tighter than the error bar is \
+        a ceiling that gets crossed.
+        """)
+
+    // MARK: - The run
+
+    static let limit = HelpEntry(
+        title: "Tracks",
+        summary: "How many to process, thinnest low end first.",
+        detail: """
+        Selection is by measured low end, not by folder order, so a small \
+        number gives you the tracks that stand to gain most rather than \
+        whatever sorted first.
+        """)
+
+    static let compare = HelpEntry(
+        title: "Write A/B pairs",
+        summary: "Writes the original alongside the processed version, level matched.",
+        detail: """
+        Both versions are written from the same decode, so they are the same \
+        length to the sample and can be switched between mid-bar.
+
+        They are also level matched, both brought DOWN to whichever is \
+        quieter so neither clips. This is not politeness: louder wins every \
+        blind comparison regardless of merit, so without matching you would \
+        be testing which is louder rather than which is better.
+        """)
+
+    static let dryRun = HelpEntry(
+        title: "Dry run",
+        summary: "Measure and report what would happen. Writes nothing.",
+        detail: """
+        Every measurement, every decision and every per-track figure, with no \
+        files produced. The fastest way to see what a profile would actually \
+        do to a folder before committing a lossy generation to it.
+        """)
+
+    // MARK: - Comparing
+
+    static let switching = HelpEntry(
+        title: "Switch version (Shift-Space)",
+        summary: "Swaps versions at the same instant, with no gap or restart.",
+        detail: """
+        Every version is playing already, in step, with all but one silent. \
+        Switching changes which one you hear; it does not start anything, so \
+        there is no gap, no restart and no drift.
+
+        They stay in step because they are scheduled together on one clock at \
+        a shared start time. If you hear a tick or a flam on the switch, that \
+        is a bug worth reporting rather than something to work around.
+        """)
+
+    static let matchLoudness = HelpEntry(
+        title: "Match loudness",
+        summary: "Plays every version at the same loudness, so the louder one cannot win.",
+        detail: """
+        Applies the per-version gain needed to bring them all to the same \
+        measured level during playback, on top of the matching already done \
+        when the files were written.
+
+        Turn it off only to hear what the processed file will actually sound \
+        like at its own level. For deciding whether the processing helped, \
+        leave it on: louder is reliably judged better, whatever else is true \
+        of it.
+        """)
+
+    static let blind = HelpEntry(
+        title: "Blind",
+        summary: "Hides which version is which until you turn it off.",
+        detail: """
+        Knowing which is the processed one biases you toward hearing what you \
+        expected. Better still, have someone else shuffle them, or at least \
+        listen to each version first on half the tracks.
+        """)
+
+    // MARK: - Results
+
+    static let results = HelpEntry(
+        title: "Results columns",
+        summary: "Sub and Punch are what was applied. Clips and Lift are the de-clipper.",
+        detail: """
+        Sub and Punch are what was actually applied to that track, which with \
+        per-track sizing on is not the same as what was asked for.
+
+        Clips is the number of clipped runs restored. Lift is the median \
+        amount one restored peak gained -- deliberately not the change in the \
+        file's peak, because on an MP3 of a clipped master the file peak is \
+        set by codec overshoot and barely moves however many runs are \
+        restored. One track here decoded at +2.27 dBFS and read +0.00 dB of \
+        change while 402 runs had been lifted by a median of 0.29 dB.
+        """)
+
+    /// A named struct rather than a tuple, because `ForEach` over an array
+    /// of tuples needs the element destructured in the closure, which is
+    /// the sort of thing that compiles in one position and not the next.
+    static let sections: [HelpSection] = [
+        HelpSection("Choosing music", [folders]),
+        HelpSection("Policy", [profile]),
+        HelpSection("Clipped peaks", [declip, declipMax]),
+        HelpSection("Sub bass", [amount, auto, reference, maxAmount, minActivity]),
+        HelpSection("Attack", [punch, punchDecay]),
+        HelpSection("Level", [target, estimator, peakCeiling]),
+        HelpSection("The run", [limit, compare, dryRun]),
+        HelpSection("Listening", [switching, matchLoudness, blind]),
+        HelpSection("Results", [results]),
+    ]
+}
+
+struct HelpSection: Identifiable {
+    let name: String
+    let entries: [HelpEntry]
+
+    init(_ name: String, _ entries: [HelpEntry]) {
+        self.name = name
+        self.entries = entries
+    }
+
+    var id: String { name }
+}
+
+// MARK: - The window
+
+struct HelpView: View {
+    @State private var query = ""
+
+    private var matches: [HelpSection] {
+        let needle = query.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !needle.isEmpty else { return Help.sections }
+        return Help.sections.compactMap { section in
+            let kept = section.entries.filter {
+                $0.title.lowercased().contains(needle)
+                    || $0.summary.lowercased().contains(needle)
+                    || $0.detail.lowercased().contains(needle)
+            }
+            return kept.isEmpty ? nil : HelpSection(section.name, kept)
+        }
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                TextField("Search", text: $query).textFieldStyle(.plain)
+                if !query.isEmpty {
+                    Button(action: { query = "" }) { Image(systemName: "xmark.circle.fill") }
+                        .buttonStyle(.borderless).foregroundStyle(.secondary)
+                }
+            }
+            .padding(10)
+            Divider()
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 22) {
+                    if matches.isEmpty {
+                        Text("Nothing matches \"\(query)\".")
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .center)
+                            .padding(.top, 40)
+                    }
+                    ForEach(matches) { section in
+                        VStack(alignment: .leading, spacing: 14) {
+                            Text(section.name.uppercased())
+                                .font(.caption).bold()
+                                .foregroundStyle(.secondary)
+                            ForEach(section.entries) { entry in
+                                VStack(alignment: .leading, spacing: 5) {
+                                    Text(entry.title).font(.headline)
+                                    Text(entry.summary)
+                                        .font(.callout).foregroundStyle(.secondary)
+                                    Text(entry.detail)
+                                        .font(.callout)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                        .textSelection(.enabled)
+                                }
+                            }
+                        }
+                    }
+                }
+                .padding(20)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .frame(minWidth: 480, idealWidth: 560, minHeight: 420, idealHeight: 680)
+    }
+}

@@ -41,10 +41,29 @@ struct LoudnessLabUIApp: App {
                 }
                 .keyboardShortcut(.space, modifiers: [.shift])
             }
+            // Routed through a notification rather than opening the window
+            // from here. `openWindow` is read from the environment, which a
+            // view has and a menu builder does not reliably; ContentView
+            // already receives the switch command this way, so the path is
+            // one that is known to work.
+            CommandGroup(replacing: .help) {
+                Button("Loudness Lab Help") {
+                    NotificationCenter.default.post(name: .showHelp, object: nil)
+                }
+                .keyboardShortcut("?", modifiers: [.command])
+            }
         }
+
+        // A window rather than a sheet: the whole point is to read it WHILE
+        // setting something, which a modal would prevent.
+        Window("Loudness Lab Help", id: "help") {
+            HelpView()
+        }
+        .defaultSize(width: 560, height: 680)
     }
 }
 
 extension Notification.Name {
     static let switchVersion = Notification.Name("loudnesslab.switchVersion")
+    static let showHelp = Notification.Name("loudnesslab.showHelp")
 }

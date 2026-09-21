@@ -53,8 +53,10 @@ struct ComparePanel: View {
             Spacer()
             Toggle("Match loudness", isOn: $player.matchLoudness)
                 .toggleStyle(.switch)
+                .help(Help.matchLoudness.summary)
             Toggle("Blind", isOn: $blind)
                 .toggleStyle(.switch)
+                .help(Help.blind.summary)
                 .onChange(of: blind) { _, _ in reshuffle() }
         }
     }
@@ -99,6 +101,7 @@ struct ComparePanel: View {
                 .buttonStyle(.borderedProminent)
                 .tint(player.selected == variant.id ? .accentColor : .gray.opacity(0.35))
                 .keyboardShortcut(shortcut(for: index), modifiers: [])
+                .help(Help.switching.summary)
             }
         }
     }
@@ -107,6 +110,7 @@ struct ComparePanel: View {
         VStack(spacing: 2) {
             Text("Shift-Space switches. Nothing seeks: every version is "
                  + "playing already, so the switch lands mid-bar.")
+                .help(Help.switching.detail)
             if blind {
                 HStack(spacing: 8) {
                     Text("Order is shuffled per track.")

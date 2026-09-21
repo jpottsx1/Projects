@@ -299,9 +299,21 @@ public final class Library {
 
     /// Mean `shape_db` across the low bands, per track -- what the sub stage
     /// selects on.
+    /// A comma-separated list for an SQL `IN` clause.
+    ///
+    /// Written the long way deliberately. `values.map(String.init).joined(...)`
+    /// reads better and does not compile: with the element type left to be
+    /// inferred, Swift cannot choose between `Sequence.joined(separator:)`
+    /// returning a sequence and the one returning a String, and gives up.
+    /// Naming the intermediate type settles it.
+    static func sqlList(_ values: [Double]) -> String {
+        let texts: [String] = values.map { String($0) }
+        return texts.joined(separator: ", ")
+    }
+
     public func lowEndShape(under roots: [URL] = []) throws -> [String: Double] {
         let bands = Spectrum.bandCentres.filter { $0 <= Spectrum.lowBandMaxHz }
-        let list = bands.map(String.init).joined(separator: ", ")
+        let list = Library.sqlList(bands)
         var sql = """
         SELECT t.path, AVG(b.shape_db) AS low FROM tracks t
         JOIN bands b ON b.track_id = t.id
@@ -334,7 +346,7 @@ public final class Library {
     /// Median low-band shape per folder -- the curve a track is measured
     /// against when the sub is sized per track rather than set by hand.
     public func referenceCurves() throws -> [String: [Double: Double]] {
-        let list = Library.lowShapeBands.map(String.init).joined(separator: ", ")
+        let list = Library.sqlList(Library.lowShapeBands)
         let rows = try db.run("""
             SELECT t.path, b.band_hz, b.shape_db FROM tracks t
             JOIN bands b ON b.track_id = t.id
@@ -368,7 +380,7 @@ public final class Library {
     /// reason when there is nothing to do.
     public func shortfall(of path: String, against curve: [Double: Double],
                           cap: Double) throws -> (amount: Double, reason: String?) {
-        let list = Library.lowShapeBands.map(String.init).joined(separator: ", ")
+        let list = Library.sqlList(Library.lowShapeBands)
         let rows = try db.run("""
             SELECT b.band_hz, b.shape_db FROM bands b
             JOIN tracks t ON t.id = b.track_id
@@ -393,6 +405,8 @@ public final class Library {
 
     public func recordGain(path: String, outputPath: String, steps: Int,
                            appliedDB: Double, inPlace: Bool, crossed: [Int]) throws {
+        let bits: [String] = crossed.map { String($0) }
+        let crossedBits = bits.joined(separator: ",")
         try db.run("""
             INSERT INTO gain_log (path, output_path, steps, applied_db, in_place,
                                   applied_at, crossed_bits)
@@ -401,6 +415,6 @@ public final class Library {
             [.text(path), .text(outputPath), .int(Int64(steps)), .double(appliedDB),
              .int(inPlace ? 1 : 0),
              .text(ISO8601DateFormatter().string(from: Date())),
-             .text(crossed.map(String.init).joined(separator: ","))])
+             .text(crossedBits)])
     }
 }

@@ -12,12 +12,27 @@ import LoudnessKit
 struct SurveyPanel: View {
     let survey: Survey?
     let isMeasuring: Bool
+    let progress: Double?
+    let progressNote: String?
     @Binding var reference: String
     let onMeasure: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
+            if isMeasuring {
+                VStack(alignment: .leading, spacing: 3) {
+                    if let progress {
+                        ProgressView(value: progress)
+                    } else {
+                        ProgressView().controlSize(.small)
+                    }
+                    Text(progressNote ?? "Walking the folders…")
+                        .font(.caption2).foregroundStyle(.secondary)
+                        .lineLimit(1).truncationMode(.middle)
+                }
+                .padding(.horizontal, 12).padding(.bottom, 8)
+            }
             Divider()
             if let survey, survey.measured > 0 {
                 ScrollView {
@@ -58,7 +73,7 @@ struct SurveyPanel: View {
 
     private var empty: some View {
         VStack(spacing: 6) {
-            Text(isMeasuring ? "Measuring…" : "Nothing measured yet.")
+            Text(isMeasuring ? "" : "Nothing measured yet.")
                 .foregroundStyle(.secondary)
             Text("Measuring reads the files and writes nothing. "
                  + "It is how a folder's clipping and low end are found.")

@@ -17,9 +17,22 @@ final class Engine: ObservableObject {
     @Published private(set) var failure: String?
     @Published private(set) var progress: Double?
 
-    private var cancelled = false
+    @Published private(set) var progressNote: String?
 
-    func cancel() { cancelled = true }
+    /// Cancellation has to be readable from worker tasks that are not on the
+    /// main actor, and a `@Published` Bool is not -- reading it from another
+    /// thread is exactly the race the compiler exists to stop.
+    final class CancelFlag: @unchecked Sendable {
+        private let lock = NSLock()
+        private var value = false
+        func cancel() { lock.lock(); value = true; lock.unlock() }
+        func reset() { lock.lock(); value = false; lock.unlock() }
+        var isCancelled: Bool { lock.lock(); defer { lock.unlock() }; return value }
+    }
+    private let flag = CancelFlag()
+    private var cancelled: Bool { flag.isCancelled }
+
+    func cancel() { flag.cancel() }
 
     func say(_ line: String) { log += line + "\n" }
 
@@ -34,9 +47,9 @@ final class Engine: ObservableObject {
     /// to come from, and until now they only existed in the command line.
     func measure(folders: [URL], databaseURL: URL, reference: String?) async {
         guard !isRunning, !folders.isEmpty else { return }
-        isRunning = true; cancelled = false; failure = nil
+        isRunning = true; flag.reset(); failure = nil
         log = ""; progress = nil
-        defer { isRunning = false; progress = nil }
+        defer { isRunning = false; progress = nil; progressNote = nil }
 
         do {
             let library = try Library(at: databaseURL)
@@ -45,6 +58,7 @@ final class Engine: ObservableObject {
                 Task { @MainActor in
                     self?.progress = step.total > 0
                         ? Double(step.done) / Double(step.total) : nil
+                    self?.progressNote = "\(step.done) of \(step.total) — \(step.name)"
                     if step.failed { self?.say("  failed: \(step.name)") }
                 }
             }
@@ -73,9 +87,9 @@ final class Engine: ObservableObject {
              dryRun: Bool, outputDirectory: URL, databaseURL: URL,
              only: Set<String>? = nil) async {
         guard !isRunning, !folders.isEmpty else { return }
-        isRunning = true; cancelled = false; failure = nil; manifest = nil
+        isRunning = true; flag.reset(); failure = nil; manifest = nil
         log = ""; progress = nil
-        defer { isRunning = false; progress = nil }
+        defer { isRunning = false; progress = nil; progressNote = nil }
 
         do {
             let library = try Library(at: databaseURL)
@@ -85,6 +99,7 @@ final class Engine: ObservableObject {
                 Task { @MainActor in
                     self?.progress = step.total > 0
                         ? Double(step.done) / Double(step.total) : nil
+                    self?.progressNote = "\(step.done) of \(step.total) — \(step.name)"
                     if step.failed { self?.say("  failed: \(step.name)") }
                 }
             }
@@ -128,10 +143,10 @@ final class Engine: ObservableObject {
                 say("Reference: \(name)")
             }
 
-            var tracks: [Manifest.Track] = []
-            for (index, row) in rows.enumerated() {
-                if cancelled { say("Stopped."); break }
-                progress = Double(index) / Double(rows.count)
+            // Sizing first, because it is a database read: quick, and it
+            // decides which tracks are worth decoding at all.
+            var jobs: [Processor.Job] = []
+            for row in rows {
                 var amount = profile.amount
                 var gate: String?
                 if profile.auto {
@@ -142,11 +157,48 @@ final class Engine: ObservableObject {
                     say("  \(row.name): \(gate)")
                     continue
                 }
-                if let track = try await process(row, profile: profile, amount: amount,
-                                                 compare: compare, dryRun: dryRun,
-                                                 outputDirectory: outputDirectory) {
-                    tracks.append(track)
-                }
+                jobs.append(Processor.Job(path: row.path, name: row.name,
+                                          amountDB: amount))
+            }
+            guard !jobs.isEmpty else {
+                failure = "Every selected track was gated out. "
+                    + "Lower the gate, or turn per-track sizing off."
+                return
+            }
+
+            // The work itself, off this actor and several at a time. It used
+            // to run here, on the main thread, one track after another --
+            // which is why the window froze and the Stop button could not be
+            // clicked for the length of a run.
+            progress = 0
+            say("Processing \(jobs.count) track(s), "
+                + "\(Processor.defaultJobs()) at a time…")
+            let outcomes = await Processor.run(
+                jobs, profile: profile, compare: compare, dryRun: dryRun,
+                outputDirectory: outputDirectory,
+                isCancelled: { [flag] in flag.isCancelled },
+                progress: { [weak self] step in
+                    Task { @MainActor in
+                        self?.progress = Double(step.done) / Double(step.total)
+                        self?.progressNote =
+                            "\(step.done) of \(step.total) — \(step.name)"
+                    }
+                })
+            if cancelled { say("Stopped.") }
+
+            var tracks: [Manifest.Track] = []
+            for outcome in outcomes {
+                say(outcome.line)
+                guard !outcome.wroteNothing else { continue }
+                tracks.append(Manifest.Track(
+                    source: outcome.source, name: outcome.name, folder: outcome.folder,
+                    subDB: outcome.subDB, punchDB: outcome.punchDB,
+                    clipsRestored: outcome.clipsRestored, clipLiftDB: outcome.clipLiftDB,
+                    variants: outcome.variants.map {
+                        Manifest.Variant(kind: $0.kind, label: $0.label, path: $0.path,
+                                         seconds: $0.seconds, lufsI: $0.lufsI,
+                                         sP95: $0.sP95, truePeakDBTP: $0.truePeakDBTP)
+                    }))
             }
 
             guard !dryRun else { say("Dry run -- nothing written."); return }
@@ -161,130 +213,6 @@ final class Engine: ObservableObject {
         } catch {
             failure = error.localizedDescription
         }
-    }
-
-    /// One track through the chain, in the order the measurements settled on:
-    /// de-clip first, on the file as it arrived, because it puts peaks BACK
-    /// and everything after has to fit under them; then the sub and the
-    /// attack shaping; then levelling, last, because everything before it
-    /// moves loudness.
-    private func process(_ row: Library.TrackRow, profile: Profile, amount requested: Double,
-                         compare: Bool, dryRun: Bool,
-                         outputDirectory: URL) async throws -> Manifest.Track? {
-        let source = URL(fileURLWithPath: row.path)
-        let (original, _) = try AudioDecoder.decode(source)
-        var audio = original
-        var clipReport = Declip.Report()
-
-        if profile.declip {
-            (audio, clipReport) = Declip.restore(audio, rate: AudioDecoder.targetRate,
-                                                 maxRestoreDB: profile.declipMax)
-        }
-
-        var amount = requested
-        var note: String?
-        if amount > 0 {
-            let activity = SubBass.lowBandActivity(audio, rate: AudioDecoder.targetRate)
-            if activity.isFinite, activity < profile.minActivity {
-                note = String(format: "sub octave barely moves (%.0f dB) -- "
-                              + "a static floor rather than a bassline", activity)
-                amount = 0
-            }
-        }
-        if amount <= 0, profile.punch <= 0, clipReport.restored == 0 {
-            say("  \(row.name): \(note ?? "nothing to do")")
-            return nil
-        }
-
-        let (processed, report) = SubBass.enhance(audio, rate: AudioDecoder.targetRate,
-                                                  amountDB: amount,
-                                                  punchDB: profile.punch,
-                                                  punchDecayMS: profile.punchDecay)
-        let measured = BS1770.measure(processed)
-        say(String(format: "  %@: sub %+.2f dB, punch %+.1f dB, %d clip run(s) "
-                   + "restored%@", row.name, report.appliedDB, report.punchDB,
-                   clipReport.restored, note.map { ", \($0)" } ?? ""))
-        guard !dryRun else { return nil }
-
-        let stem = source.deletingPathExtension().lastPathComponent
-        var variants: [Manifest.Variant] = []
-
-        if compare {
-            // Level-matched, or the comparison only measures which is louder,
-            // and louder wins every blind test regardless of merit. Both are
-            // brought DOWN to whichever is quieter, so neither can clip.
-            let originalLoudness = BS1770.measure(original).lufsI
-            let target = min(originalLoudness, measured.lufsI)
-            var a = scale(original, by: target - originalLoudness)
-            var b = scale(processed, by: target - measured.lufsI)
-            // A restored peak stands above full scale by design, and the
-            // writer clips what it is given -- which would put back exactly
-            // the flat tops the de-clipper just took out. Trim BOTH equally
-            // so the level match survives the headroom.
-            let room = max(peak(a), peak(b))
-            if room > 0.99 {
-                a = scale(a, byFactor: 0.99 / room); b = scale(b, byFactor: 0.99 / room)
-            }
-            let aURL = outputDirectory.appendingPathComponent("\(stem) -- A original.flac")
-            let bURL = outputDirectory.appendingPathComponent("\(stem) -- B \(label(profile, amount)).flac")
-            try AudioWriter.writeFLAC(a, to: aURL)
-            try AudioWriter.writeFLAC(b, to: bURL)
-            variants = [variant("original", aURL, "original", a),
-                        variant("processed", bURL, label(profile, amount), b)]
-        } else {
-            let levelled = levelToTarget(processed, profile: profile, measured: measured)
-            let url = outputDirectory.appendingPathComponent("\(stem).flac")
-            try AudioWriter.writeFLAC(levelled, to: url)
-            variants = [variant("processed", url, label(profile, amount), levelled)]
-        }
-
-        return Manifest.Track(source: row.path, name: row.name,
-                              folder: source.deletingLastPathComponent().lastPathComponent,
-                              subDB: report.appliedDB, punchDB: report.punchDB,
-                              clipsRestored: clipReport.restored,
-                              clipLiftDB: clipReport.liftDB, variants: variants)
-    }
-
-    /// Levelling happens here because the lossless gain path cannot do it:
-    /// global_gain exists only in an MP3 bitstream, and what comes out of the
-    /// sub stage is FLAC. Without this the pipeline ends un-levelled, which
-    /// is the one state worse than not having started.
-    private func levelToTarget(_ audio: [[Double]], profile: Profile,
-                               measured: BS1770.Result) -> [[Double]] {
-        let value = profile.estimator == "lufs_i" ? measured.lufsI : (measured.sP95 ?? measured.lufsI)
-        guard value.isFinite else { return audio }
-        var wanted = profile.target - value
-        if measured.truePeakDBTP.isFinite,
-           measured.truePeakDBTP + wanted > profile.peakCeiling {
-            wanted = profile.peakCeiling - measured.truePeakDBTP
-        }
-        return scale(audio, by: wanted)
-    }
-
-    private func variant(_ kind: String, _ url: URL, _ label: String,
-                         _ audio: [[Double]]) -> Manifest.Variant {
-        let m = BS1770.measure(audio)
-        return Manifest.Variant(kind: kind, label: label, path: url.path,
-                                seconds: Double(audio[0].count) / AudioDecoder.targetRate,
-                                lufsI: m.lufsI, sP95: m.sP95, truePeakDBTP: m.truePeakDBTP)
-    }
-
-    private func label(_ profile: Profile, _ amount: Double) -> String {
-        var parts: [String] = []
-        if profile.declip { parts.append("declipped") }
-        if amount > 0 { parts.append(String(format: "sub%+.1fdB", amount)) }
-        if profile.punch > 0 { parts.append(String(format: "punch%+.0fdB", profile.punch)) }
-        return parts.isEmpty ? "unchanged" : parts.joined(separator: " ")
-    }
-
-    private func scale(_ audio: [[Double]], by db: Double) -> [[Double]] {
-        scale(audio, byFactor: pow(10, db / 20))
-    }
-    private func scale(_ audio: [[Double]], byFactor factor: Double) -> [[Double]] {
-        audio.map { $0.map { $0 * factor } }
-    }
-    private func peak(_ audio: [[Double]]) -> Double {
-        audio.flatMap { $0 }.map(abs).max() ?? 0
     }
 
     private func write(_ manifest: Manifest, to url: URL) throws {

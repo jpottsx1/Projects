@@ -64,6 +64,8 @@ struct ContentView: View {
                     SurveyPanel(
                         survey: engine.survey,
                         isMeasuring: engine.isRunning,
+                        progress: engine.progress,
+                        progressNote: engine.progressNote,
                         reference: Binding(get: { profile.reference ?? "" },
                                            set: { profile.reference = $0 }),
                         onMeasure: measure)
@@ -104,11 +106,20 @@ struct ContentView: View {
                           + "Originals are never written to.")
                 if engine.isRunning {
                     Button("Stop") { engine.cancel() }
+                }
+            }
+            if engine.isRunning {
+                // A bar with a number on it. "Running…" for four minutes
+                // with nothing moving is indistinguishable from hung.
+                VStack(alignment: .leading, spacing: 3) {
                     if let progress = engine.progress {
-                        ProgressView(value: progress).frame(width: 90)
+                        ProgressView(value: progress)
                     } else {
                         ProgressView().controlSize(.small)
                     }
+                    Text(engine.progressNote ?? "Starting…")
+                        .font(.caption2).foregroundStyle(.secondary)
+                        .lineLimit(1).truncationMode(.middle)
                 }
             }
             Text("Originals are never written to. Every version is rendered "

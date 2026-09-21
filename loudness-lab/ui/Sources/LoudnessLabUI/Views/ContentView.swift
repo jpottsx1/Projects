@@ -18,8 +18,7 @@ struct ContentView: View {
     var body: some View {
         HSplitView {
             VStack(alignment: .leading, spacing: 14) {
-                SourcePanel(folders: $folders, toolRoot: Binding(
-                    get: { runner.toolRoot }, set: { runner.toolRoot = $0 }))
+                SourcePanel(folders: $folders, toolRoot: $runner.toolRoot)
                 Divider()
                 SettingsPanel(settings: $settings, profile: $profile,
                               limit: $limit, compare: $compare, dryRun: $dryRun)
@@ -85,9 +84,7 @@ struct ContentView: View {
             ABPlayer.Source(id: $0.id, label: $0.label, url: $0.url,
                             matchGainDB: gains[$0.id] ?? 0)
         }
-        do { try player.load(sources) } catch {
-            player.stop()
-        }
+        player.loadOrReport(sources)
     }
 
     private var estimatorPath: KeyPath<Manifest.Variant, Double?> {

@@ -7,7 +7,7 @@ struct LoudnessLabUIApp: App {
             ContentView()
                 .frame(minWidth: 940, minHeight: 620)
         }
-        .windowResizability(.contentSize)
+        .windowResizability(.contentMinSize)
         .commands {
             CommandMenu("Compare") {
                 Button("Switch version") {

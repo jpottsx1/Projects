@@ -1,4 +1,5 @@
 import AVFoundation
+import Darwin   // mach_absolute_time
 import Foundation
 
 /// Plays every version of a track at once and lets you listen to one of them.
@@ -46,11 +47,21 @@ final class ABPlayer: ObservableObject {
     private var gains: [String: AVAudioMixerNode] = [:]
     private var buffers: [String: AVAudioPCMBuffer] = [:]
     private var sources: [String: Source] = [:]
-    private var startSampleTime: AVAudioFramePosition?
+    private var startOffset: TimeInterval = 0
     private var ticker: Timer?
     private var ramps: [ObjectIdentifier: Timer] = [:]
 
     // MARK: - Loading
+
+    /// Loads, and says so on screen if it cannot. A dead transport with no
+    /// stated reason is the worst of the available outcomes.
+    func loadOrReport(_ incoming: [Source]) {
+        do { try load(incoming) } catch {
+            stop()
+            teardown()
+            problem = error.localizedDescription
+        }
+    }
 
     /// Decodes every version and wires it up. Throws rather than half-loading:
     /// a comparison missing one side is worse than no comparison.
@@ -130,12 +141,20 @@ final class ABPlayer: ObservableObject {
         let format = engine.mainMixerNode.outputFormat(forBus: 0)
         let startFrame = AVAudioFramePosition(max(0, offset) * format.sampleRate)
 
-        // One start time for everything. Far enough ahead that every node has
-        // been scheduled before the clock reaches it, or the first to be
-        // scheduled would begin a render cycle early and the rest would chase.
-        let lead = AVAudioFramePosition(0.2 * format.sampleRate)
-        let now = engine.outputNode.lastRenderTime?.sampleTime ?? 0
-        let when = AVAudioTime(sampleTime: now + lead, atRate: format.sampleRate)
+        // One start time for everything, expressed as HOST time.
+        //
+        // This is the load-bearing line of the whole app and it is easy to get
+        // wrong: a sample time read from the output node is on the output
+        // node's timeline, and handing it to a player node's play(at:) asks
+        // that player to start at a moment on a clock it does not keep. Host
+        // time is the one clock every node shares, so it is the only reference
+        // that makes "start all of these together" mean anything.
+        //
+        // The lead has to outlast scheduling every node, or the first to be
+        // scheduled begins while the last is still being set up and they chase
+        // each other instead of running in step.
+        let lead = AVAudioTime.hostTime(forSeconds: 0.25)
+        let when = AVAudioTime(hostTime: mach_absolute_time() + lead)
 
         for source in loaded {
             guard let player = players[source.id],
@@ -148,7 +167,7 @@ final class ABPlayer: ObservableObject {
         applyGains(ramp: 0)
         for source in loaded { players[source.id]?.play(at: when) }
 
-        startSampleTime = when.sampleTime - startFrame
+        startOffset = offset
         isPlaying = true
         startTicking()
     }
@@ -167,7 +186,7 @@ final class ABPlayer: ObservableObject {
         isPlaying = false
         stopTicking()
         position = 0
-        startSampleTime = nil
+        startOffset = 0
     }
 
     func seek(to offset: TimeInterval) {
@@ -220,18 +239,13 @@ final class ABPlayer: ObservableObject {
                             over span: TimeInterval) {
         let start = node.outputVolume
         guard abs(target - start) > 0.0001 else { node.outputVolume = target; return }
-        let steps = 24
-        var step = 0
-        let timer = Timer.scheduledTimer(withTimeInterval: span / Double(steps),
+        let began = Date()
+        let timer = Timer.scheduledTimer(withTimeInterval: span / 24,
                                          repeats: true) { timer in
             Task { @MainActor in
-                step += 1
-                let progress = Float(step) / Float(steps)
-                node.outputVolume = start + (target - start) * progress
-                if step >= steps {
-                    node.outputVolume = target
-                    timer.invalidate()
-                }
+                let progress = min(1, Date().timeIntervalSince(began) / span)
+                node.outputVolume = start + (target - start) * Float(progress)
+                if progress >= 1 { timer.invalidate() }
             }
         }
         ramps[ObjectIdentifier(node)]?.invalidate()
@@ -252,12 +266,21 @@ final class ABPlayer: ObservableObject {
         ticker = nil
     }
 
+    /// Where we are, asked of a player node rather than of the engine.
+    ///
+    /// playerTime counts from the start of what that node was told to play,
+    /// which after a seek is the slice and not the file -- hence adding the
+    /// offset back. It reads negative until the scheduled start arrives.
+    /// Any of the nodes would do, since they are in step; asking the one
+    /// being listened to means the number on screen belongs to the audio in
+    /// the room.
     private func tick() {
-        guard isPlaying, let origin = startSampleTime,
-              let rendered = engine.outputNode.lastRenderTime?.sampleTime else { return }
-        let rate = engine.mainMixerNode.outputFormat(forBus: 0).sampleRate
-        position = max(0, Double(rendered - origin) / rate)
-        if position >= duration { stop() }
+        guard isPlaying,
+              let id = selected, let player = players[id],
+              let nodeTime = player.lastRenderTime,
+              let playerTime = player.playerTime(forNodeTime: nodeTime) else { return }
+        position = max(0, startOffset + Double(playerTime.sampleTime) / playerTime.sampleRate)
+        if duration > 0, position >= duration { stop() }
     }
 
     private func teardown() {

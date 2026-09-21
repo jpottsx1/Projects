@@ -98,7 +98,7 @@ struct ComparePanel: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(player.selected == variant.id ? .accentColor : .gray.opacity(0.35))
-                .keyboardShortcut(KeyEquivalent(Character("\(index + 1)")), modifiers: [])
+                .keyboardShortcut(shortcut(for: index), modifiers: [])
             }
         }
     }
@@ -117,6 +117,12 @@ struct ComparePanel: View {
         }
         .font(.caption)
         .foregroundStyle(.secondary)
+    }
+
+    /// Number keys for the first nine versions; beyond that, none, rather
+    /// than a Character built from two digits, which traps.
+    private func shortcut(for index: Int) -> KeyEquivalent {
+        index < 9 ? KeyEquivalent(Character("\(index + 1)")) : .clear
     }
 
     private func caption(for variant: Manifest.Variant, at index: Int) -> String {

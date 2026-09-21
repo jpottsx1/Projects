@@ -17,7 +17,7 @@ final class CLIRunner: ObservableObject {
     @Published private(set) var failure: String?
 
     /// The repository root, holding the `loudness-lab` launcher.
-    var toolRoot: URL?
+    @Published var toolRoot: URL?
 
     private var process: Process?
 

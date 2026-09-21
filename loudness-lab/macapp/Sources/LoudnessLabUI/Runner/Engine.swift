@@ -57,12 +57,44 @@ final class Engine: ObservableObject {
             }
             say("\(rows.count) of \(counts.found) track(s) selected.")
 
+            // Sizing per track needs a corpus to measure against. Without
+            // one the setting cannot be honoured, and applying the fixed
+            // amount instead would be the app quietly doing something other
+            // than the policy on screen.
+            var curve: [Double: Double] = [:]
+            if profile.auto {
+                let curves = try library.referenceCurves()
+                guard let wanted = profile.reference, !wanted.isEmpty,
+                      let name = Library.resolveReference(curves, wanted),
+                      let found = curves[name] else {
+                    failure = profile.reference?.isEmpty == false
+                        ? "No single folder matches \(profile.reference!). "
+                          + "Name one of the folders you have measured."
+                        : "Sizing the sub per track needs a reference folder. "
+                          + "Name one, or turn it off and set an amount."
+                    return
+                }
+                curve = found
+                say("Reference: \(name)")
+            }
+
             var tracks: [Manifest.Track] = []
             for (index, row) in rows.enumerated() {
                 if cancelled { say("Stopped."); break }
                 progress = Double(index) / Double(rows.count)
-                if let track = try await process(row, profile: profile, compare: compare,
-                                                 dryRun: dryRun, outputDirectory: outputDirectory) {
+                var amount = profile.amount
+                var gate: String?
+                if profile.auto {
+                    (amount, gate) = try library.shortfall(of: row.path, against: curve,
+                                                           cap: profile.maxAmount)
+                }
+                if let gate, amount <= 0, profile.punch <= 0, !profile.declip {
+                    say("  \(row.name): \(gate)")
+                    continue
+                }
+                if let track = try await process(row, profile: profile, amount: amount,
+                                                 compare: compare, dryRun: dryRun,
+                                                 outputDirectory: outputDirectory) {
                     tracks.append(track)
                 }
             }
@@ -84,8 +116,9 @@ final class Engine: ObservableObject {
     /// and everything after has to fit under them; then the sub and the
     /// attack shaping; then levelling, last, because everything before it
     /// moves loudness.
-    private func process(_ row: Library.TrackRow, profile: Profile, compare: Bool,
-                         dryRun: Bool, outputDirectory: URL) async throws -> Manifest.Track? {
+    private func process(_ row: Library.TrackRow, profile: Profile, amount requested: Double,
+                         compare: Bool, dryRun: Bool,
+                         outputDirectory: URL) async throws -> Manifest.Track? {
         let source = URL(fileURLWithPath: row.path)
         let (original, _) = try AudioDecoder.decode(source)
         var audio = original
@@ -96,7 +129,7 @@ final class Engine: ObservableObject {
                                                  maxRestoreDB: profile.declipMax)
         }
 
-        var amount = profile.amount
+        var amount = requested
         var note: String?
         if amount > 0 {
             let activity = SubBass.lowBandActivity(audio, rate: AudioDecoder.targetRate)

@@ -1384,8 +1384,43 @@
   }
  },
  "library": {
+  "curve": {
+   "31.5": -95.889,
+   "40.0": -94.589,
+   "50.0": -92.198,
+   "63.0": -89.096
+  },
   "lowBands": 13,
+  "lowShapeBands": [
+   31.5,
+   40.0,
+   50.0,
+   63.0
+  ],
+  "referenceFolder": "mp3",
   "schemaVersion": 4,
+  "shortfalls": [
+   {
+    "meanDeficitDB": 0.13725,
+    "path": "crc.mp3"
+   },
+   {
+    "meanDeficitDB": -5.50675,
+    "path": "mono.mp3"
+   },
+   {
+    "meanDeficitDB": -6.6015,
+    "path": "mpeg2.mp3"
+   },
+   {
+    "meanDeficitDB": 0.06825,
+    "path": "serato.mp3"
+   },
+   {
+    "meanDeficitDB": 0.06825,
+    "path": "stereo.mp3"
+   }
+  ],
   "tracks": [
    {
     "artist": "Artist 0",

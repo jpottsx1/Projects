@@ -423,11 +423,35 @@ def main() -> int:
     conn.close()
     for suffix in ("-wal", "-shm"):
         (OUT / f"library.db{suffix}").unlink(missing_ok=True)
+    # The per-track sizing, which decides how much every track actually gets.
+    conn = dblib.connect(database)
+    from loudnesslab import report as reportlib
+    bands, shape = reportlib._band_matrix(conn, "shape_db", group_by="folder")
+    folder = sorted(shape)[0]
+    curve = {b: float(np.median(shape[folder][b]))
+             for b in reportlib.LOW_SHAPE_BANDS if shape[folder].get(b)}
+    shortfalls = []
+    for path in sorted((OUT / "mp3").glob("*.mp3")):
+        rows = conn.execute(
+            "SELECT b.band_hz, b.shape_db FROM bands b JOIN tracks t "
+            "ON t.id = b.track_id WHERE t.path = ? AND b.band_hz IN "
+            f"({', '.join(str(b) for b in reportlib.LOW_SHAPE_BANDS)})",
+            (str(path),)).fetchall()
+        deficits = [curve[r["band_hz"]] - r["shape_db"] for r in rows
+                    if curve.get(r["band_hz"]) is not None and r["shape_db"] is not None]
+        mean = float(np.mean(deficits)) if deficits else None
+        shortfalls.append({"path": path.name, "meanDeficitDB": rounded(mean)})
+    conn.close()
+
     golden["library"] = {
         "schemaVersion": dblib.SCHEMA_VERSION,
         "tracks": expected_tracks,
         "lowBands": len([c for c in spectrum.BAND_CENTRES
                          if c <= spectrum.LOW_BAND_MAX_HZ]),
+        "lowShapeBands": [float(b) for b in reportlib.LOW_SHAPE_BANDS],
+        "referenceFolder": folder,
+        "curve": {str(k): rounded(v) for k, v in sorted(curve.items())},
+        "shortfalls": shortfalls,
     }
 
     write_filter_bank()

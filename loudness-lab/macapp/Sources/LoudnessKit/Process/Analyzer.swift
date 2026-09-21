@@ -45,14 +45,19 @@ public enum Analyzer {
         var index = 0
         let width = max(1, min(jobs, 8))
 
+        // Bounded rather than unbounded: one task per track would decode a
+        // whole library at once and run the machine out of memory long
+        // before it ran out of patience. A new one starts as each finishes.
+        //
+        // Written inline because a nested function cannot capture `group` --
+        // the closure holds it as an inout parameter, which Swift will not
+        // let an inner function close over.
         await withTaskGroup(of: Library.Analysis.self) { group in
-            func submit() {
-                guard index < pending.count else { return }
+            while index < pending.count, index < width {
                 let url = pending[index]
                 index += 1
                 group.addTask { await analyse(url) }
             }
-            for _ in 0..<width { submit() }
 
             for await result in group {
                 done += 1
@@ -61,7 +66,11 @@ public enum Analyzer {
                 progress?(Progress(done: done, total: total,
                                    name: result.url.lastPathComponent,
                                    failed: result.status != "ok"))
-                submit()
+                if index < pending.count {
+                    let url = pending[index]
+                    index += 1
+                    group.addTask { await analyse(url) }
+                }
             }
         }
         return counts

@@ -39,7 +39,12 @@ final class GoldenTests: XCTestCase {
     struct LibraryCase: Decodable {
         let schemaVersion, lowBands: Int
         let tracks: [LibraryTrack]
+        let lowShapeBands: [Double]
+        let referenceFolder: String
+        let curve: [String: Double]
+        let shortfalls: [ShortfallCase]
     }
+    struct ShortfallCase: Decodable { let path: String; let meanDeficitDB: Double? }
     struct LibraryTrack: Decodable {
         let path, artist, title: String
         let year: Int
@@ -725,17 +730,21 @@ final class GoldenTests: XCTestCase {
     /// Re-measuring a real library costs hours; someone who already scanned
     /// six hundred tracks from the command line should not have to do it
     /// again to open a window.
-    func testADatabaseWrittenByPythonOpensAndReads() throws {
+    /// Copied before opening, because opening writes a journal and a test
+    /// should not modify its own fixtures.
+    func openGoldenLibrary() throws -> Library {
         let source = try XCTUnwrap(
             Bundle.module.url(forResource: "Golden/library", withExtension: "db"))
-        // Copied, because opening it writes a journal and a test should not
-        // modify its own fixtures.
         let copy = FileManager.default.temporaryDirectory
             .appendingPathComponent("library-\(UUID().uuidString).db")
+        try? FileManager.default.removeItem(at: copy)
         try FileManager.default.copyItem(at: source, to: copy)
-        defer { try? FileManager.default.removeItem(at: copy) }
+        addTeardownBlock { try? FileManager.default.removeItem(at: copy) }
+        return try Library(at: copy)
+    }
 
-        let library = try Library(at: copy)
+    func testADatabaseWrittenByPythonOpensAndReads() throws {
+        let library = try openGoldenLibrary()
         let rows = try library.tracks()
         XCTAssertEqual(rows.count, golden.library.tracks.count)
 
@@ -752,6 +761,54 @@ final class GoldenTests: XCTestCase {
         let shape = try library.lowEndShape()
         XCTAssertEqual(shape.count, golden.library.tracks.count,
                        "every track should have a low-end figure")
+    }
+
+    /// How much each track gets when the sub is sized per track rather than
+    /// set by hand. This is the number that decides what actually happens to
+    /// a library under the `restore` and `disco-70s` profiles, so it is
+    /// checked against the Python's own arithmetic rather than assumed.
+    func testPerTrackSizingMatchesThePython() throws {
+        let library = try openGoldenLibrary()
+        XCTAssertEqual(Library.lowShapeBands, golden.library.lowShapeBands,
+                       "the bands the sub reasons about moved")
+
+        let curves = try library.referenceCurves()
+        let name = try XCTUnwrap(
+            Library.resolveReference(curves, golden.library.referenceFolder))
+        let curve = try XCTUnwrap(curves[name])
+        for (band, expected) in golden.library.curve {
+            let got = try XCTUnwrap(curve[Double(band) ?? 0], "no curve at \(band) Hz")
+            XCTAssertEqual(got, expected, accuracy: 1e-6, "curve at \(band) Hz")
+        }
+
+        for expected in golden.library.shortfalls {
+            let path = try XCTUnwrap(
+                try library.tracks().first { $0.path.hasSuffix(expected.path) })
+            let (amount, reason) = try library.shortfall(of: path.path, against: curve,
+                                                         cap: 8)
+            guard let mean = expected.meanDeficitDB else { continue }
+            if mean <= 0.5 {
+                // Half a decibel is below what anyone hears on a dancefloor
+                // and inside the spread between pressings of one record.
+                XCTAssertEqual(amount, 0, "\(expected.path) should be left alone")
+                XCTAssertNotNil(reason, "\(expected.path) declined without saying why")
+            } else {
+                XCTAssertEqual(amount, min(mean, 8), accuracy: 1e-6, expected.path)
+                XCTAssertNil(reason, expected.path)
+            }
+        }
+    }
+
+    /// An ambiguous reference names no folder rather than guessing at one.
+    /// Sizing every track in a library against the wrong corpus is not a
+    /// mistake worth making quietly.
+    func testAnAmbiguousReferenceResolvesToNothing() {
+        let curves: [String: [Double: Double]] = ["Disco Gold": [:], "Disco Delight": [:],
+                                                  "Yearbook 99": [:]]
+        XCTAssertEqual(Library.resolveReference(curves, "Disco Gold"), "Disco Gold")
+        XCTAssertEqual(Library.resolveReference(curves, "yearbook"), "Yearbook 99")
+        XCTAssertNil(Library.resolveReference(curves, "disco"), "two folders match")
+        XCTAssertNil(Library.resolveReference(curves, "nothing"))
     }
 
     func testTheSchemaVersionMatchesThePython() {

@@ -57,27 +57,6 @@ public final class SQLite {
         public init(_ value: Bool?) { self = value.map { .int($0 ? 1 : 0) } ?? .null }
     }
 
-    public struct Row {
-        let columns: [String: Int32]
-        let statement: OpaquePointer
-
-        public func int(_ name: String) -> Int? {
-            guard let index = columns[name],
-                  sqlite3_column_type(statement, index) != SQLITE_NULL else { return nil }
-            return Int(sqlite3_column_int64(statement, index))
-        }
-        public func double(_ name: String) -> Double? {
-            guard let index = columns[name],
-                  sqlite3_column_type(statement, index) != SQLITE_NULL else { return nil }
-            return sqlite3_column_double(statement, index)
-        }
-        public func text(_ name: String) -> String? {
-            guard let index = columns[name],
-                  let pointer = sqlite3_column_text(statement, index) else { return nil }
-            return String(cString: pointer)
-        }
-    }
-
     @discardableResult
     public func run(_ sql: String, _ values: [Value] = []) throws -> [[String: Any]] {
         var statement: OpaquePointer?

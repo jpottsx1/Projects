@@ -250,10 +250,12 @@ public final class Library {
         public let truePeakDBTP: Double?, crestDB: Double?
         public let clipRuns: Int?
 
+        /// Artist and title where the file has them, its own name where it
+        /// does not -- an untagged track should still be identifiable.
         public var name: String {
-            [artist, title].compactMap { $0 }.joined(separator: " - ")
-                .isEmpty ? (path as NSString).lastPathComponent
-                         : [artist, title].compactMap { $0 }.joined(separator: " - ")
+            let tagged = [artist, title].compactMap { $0 }
+                .filter { !$0.isEmpty }.joined(separator: " - ")
+            return tagged.isEmpty ? (path as NSString).lastPathComponent : tagged
         }
     }
 
@@ -322,6 +324,71 @@ public final class Library {
             }
         }
         return out
+    }
+
+    /// The bands the sub stage reasons about: 31.5 to 63 Hz. Above 80 Hz
+    /// every era in this project's corpora agrees within about a decibel, so
+    /// there is nothing there to correct.
+    public static let lowShapeBands = Spectrum.bandCentres.filter { (31.0...63.0).contains($0) }
+
+    /// Median low-band shape per folder -- the curve a track is measured
+    /// against when the sub is sized per track rather than set by hand.
+    public func referenceCurves() throws -> [String: [Double: Double]] {
+        let list = Library.lowShapeBands.map(String.init).joined(separator: ", ")
+        let rows = try db.run("""
+            SELECT t.path, b.band_hz, b.shape_db FROM tracks t
+            JOIN bands b ON b.track_id = t.id
+            WHERE t.status = 'ok' AND b.band_hz IN (\(list)) AND b.shape_db IS NOT NULL
+            """)
+        var gathered: [String: [Double: [Double]]] = [:]
+        for row in rows {
+            guard let path = row["path"] as? String,
+                  let band = row["band_hz"] as? Double,
+                  let shape = row["shape_db"] as? Double else { continue }
+            let folder = (path as NSString).deletingLastPathComponent
+            let name = (folder as NSString).lastPathComponent
+            gathered[name, default: [:]][band, default: []].append(shape)
+        }
+        return gathered.mapValues { bands in
+            bands.compactMapValues { BS1770.percentile($0, 50) }
+        }
+    }
+
+    /// An exact folder name, else a unique case-insensitive substring of one.
+    /// Ambiguity returns nothing rather than a guess: sizing every track in a
+    /// library against the wrong corpus is not a mistake worth making quietly.
+    public static func resolveReference(_ curves: [String: [Double: Double]],
+                                        _ wanted: String) -> String? {
+        if curves[wanted] != nil { return wanted }
+        let matches = curves.keys.filter { $0.lowercased().contains(wanted.lowercased()) }
+        return matches.count == 1 ? matches.first : nil
+    }
+
+    /// Mean shortfall of one track against a reference curve, in dB, and the
+    /// reason when there is nothing to do.
+    public func shortfall(of path: String, against curve: [Double: Double],
+                          cap: Double) throws -> (amount: Double, reason: String?) {
+        let list = Library.lowShapeBands.map(String.init).joined(separator: ", ")
+        let rows = try db.run("""
+            SELECT b.band_hz, b.shape_db FROM bands b
+            JOIN tracks t ON t.id = b.track_id
+            WHERE t.path = ? AND b.band_hz IN (\(list))
+            """, [.text(path)])
+        var deficits: [Double] = []
+        for row in rows {
+            guard let band = row["band_hz"] as? Double,
+                  let target = curve[band],
+                  let shape = row["shape_db"] as? Double else { continue }
+            deficits.append(target - shape)
+        }
+        guard !deficits.isEmpty else { return (0, "no band data") }
+        let mean = deficits.reduce(0, +) / Double(deficits.count)
+        // Half a decibel is below what anyone can hear on a dancefloor and
+        // well inside the spread between pressings of the same record.
+        guard mean > 0.5 else {
+            return (0, String(format: "already within %.1f dB of the reference", mean))
+        }
+        return (min(mean, cap), nil)
     }
 
     public func recordGain(path: String, outputPath: String, steps: Int,

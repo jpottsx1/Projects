@@ -42,6 +42,40 @@ public struct Profile: Codable, Equatable, Sendable {
         case declipMax = "declip_max"
     }
 
+    /// Tolerant of a key that is not there, which the synthesised decoder
+    /// is not: a property's default value does NOT make its key optional.
+    ///
+    /// The manifest the command line writes leaves `description` out
+    /// entirely -- it is a property of the named profile, not of the run --
+    /// and one missing key fails the whole document. That would have shown
+    /// up as the app processing a folder correctly and then showing no
+    /// results at all, which is a long way from the cause.
+    ///
+    /// It also means a profile written by a newer version, or an older one,
+    /// still loads with the fields it does have.
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        let fallback = Profile()
+        func number(_ key: CodingKeys, _ default_: Double) throws -> Double {
+            try values.decodeIfPresent(Double.self, forKey: key) ?? default_
+        }
+        description = try values.decodeIfPresent(String.self, forKey: .description)
+            ?? fallback.description
+        target = try number(.target, fallback.target)
+        estimator = try values.decodeIfPresent(String.self, forKey: .estimator)
+            ?? fallback.estimator
+        peakCeiling = try number(.peakCeiling, fallback.peakCeiling)
+        auto = try values.decodeIfPresent(Bool.self, forKey: .auto) ?? fallback.auto
+        reference = try values.decodeIfPresent(String.self, forKey: .reference)
+        amount = try number(.amount, fallback.amount)
+        maxAmount = try number(.maxAmount, fallback.maxAmount)
+        minActivity = try number(.minActivity, fallback.minActivity)
+        punch = try number(.punch, fallback.punch)
+        punchDecay = try number(.punchDecay, fallback.punchDecay)
+        declip = try values.decodeIfPresent(Bool.self, forKey: .declip) ?? fallback.declip
+        declipMax = try number(.declipMax, fallback.declipMax)
+    }
+
     public static let estimators = ["lufs_i", "s_p50", "s_p90", "s_p95", "s_max"]
 
     public static let builtIn: [String: Profile] = {

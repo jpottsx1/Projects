@@ -102,10 +102,20 @@ enum Help {
         new file. ffmpeg will not do that on its own: it carries the text \
         and drops Serato's frames, measured as two in and none out.
 
-        The cues land on the right beat because the timing survives. \
-        Measured on a real Serato file: decode, encode at 320, decode \
-        again, and the result is the same length with a maximum sample \
-        difference of 0.00003 — the codec, and no shift at all.
+        The cues land on the right beat because the timing survives: \
+        decode, encode at 320, decode again, and the result is the same \
+        length with a maximum sample difference of 0.00003 — the codec, \
+        and no shift at all. LAME writes its delay and padding into the \
+        header and the decoder gives them back.
+
+        That was measured on a file this project made, whose marker frame \
+        carries a byte ramp rather than real cues. It shows that ffmpeg \
+        drops the frames and that a copied tag arrives intact, which is \
+        what the container cares about. What it does not show is Serato \
+        reading the result — no Serato has opened one. Copying the tag \
+        whole is what makes that a reasonable bet: the bytes are never \
+        interpreted, so there is nothing to misunderstand. It is still a \
+        bet until a real library confirms it.
 
         FLAC and AAC carry artist, title, album and artwork — for now. Serato \
         does store markers in both (base64 in FLAC's Vorbis comments, \

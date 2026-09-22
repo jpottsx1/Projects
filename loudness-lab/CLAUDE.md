@@ -36,10 +36,12 @@ which pulls, builds and launches.
 ## Running things
 
 ```sh
-python3 -m unittest discover -s tests -t .   # ~205 tests, ~2 min
+python3 -m unittest discover -s tests -t .   # ~250 tests, ~3 min
 swift test --package-path macapp             # 42 golden tests, ~2 min
 python3 tools/check_golden.py                # vectors vs the Swift structs
+python3 tools/check_manifest.py              # manifest vs the Swift structs
 python3 tools/check_help.py                  # every setting has help text
+find macapp -name '*.swift' | xargs python3 tools/check_braces.py
 ```
 
 Needs `ffmpeg` and `ffprobe` on PATH, plus numpy/scipy for the Python.
@@ -56,9 +58,9 @@ levelling to each target would cost, and how far each folder's low end
 sits under a named reference. That last number is where a profile's cap
 comes from. Measure reads the files and writes nothing.
 
-`Processor` runs the chain off the main actor, two or three tracks at a
-time. It is bounded on purpose -- a six-minute stereo track is about
-250 MB as doubles and the chain holds several copies at once.
+Both buttons run the command line tool and drive the bar from the JSON it
+writes. Nothing heavy happens on the main actor, which is what keeps the
+window alive and Stop clickable.
 
 ## The golden vectors
 
@@ -71,12 +73,24 @@ Python measurement, and commit the result.
 It is deterministic: regenerating without a behaviour change should produce
 no diff. A diff you did not expect is a finding.
 
-Two checks run without a Swift toolchain, so they work anywhere:
+Four checks run without a Swift toolchain, so they work anywhere. Each one
+exists because the mistake it catches cost a round trip to a Mac:
 
 ```sh
-python3 tools/check_golden.py   # will golden.json decode into the Swift structs?
-python3 tools/check_help.py     # does every setting have help text?
+python3 tools/check_golden.py    # will golden.json decode into the Swift structs?
+python3 tools/check_manifest.py  # will the manifest the Python writes?
+python3 tools/check_help.py      # does every setting have help text?
+python3 tools/check_braces.py macapp/Sources/**/*.swift   # do the braces balance?
 ```
+
+`check_manifest.py` runs the real command over a real file and walks the
+result against the struct declarations in `Manifest.swift` and
+`Profile.swift`. It was written, run, and found to pass everything --
+`Manifest` had been handed its nested `Track`'s CodingKeys and so had no
+fields to check. A checker that cannot fail is worse than none, so it is
+now kept honest against five real breakages: a missing required key, a
+wrong type, a null in a non-optional, and `Profile` with and without its
+hand-written decoder.
 
 `make_golden.py` runs `check_golden.py` itself and warns if it wrote a
 fixture that `.gitignore` would swallow -- `library.db` was invisible to
@@ -99,7 +113,17 @@ every machine but the one that made it for a while.
   `.rounded(.toNearestOrEven)` to match.
 - **Anything heavy on `@MainActor` freezes the window.** The whole chain
   ran on the main thread once, so the progress bar could not move and Stop
-  could not be clicked. DSP belongs in the kit, not in an ObservableObject.
+  could not be clicked. It is a separate process now, which settles it.
+- **A property's default does NOT make its Codable key optional.** The
+  synthesised `init(from:)` requires every key. `Profile` has a
+  hand-written one, because the manifest the command writes leaves
+  `description` out -- and one missing key fails the whole document, so
+  the symptom would have been a run that processed a folder correctly and
+  then showed no results at all.
+- **Two tracks can have the same file name.** Everything lands in one
+  output folder and a library of compilations is full of "01 Track.mp3".
+  Writing both to one path lost one and reported both as written;
+  `_unique_stem` adds the folder, then a counter.
 - **Folder grouping uses `Library.folderLabels`,** not the parent's name:
   two compilations each with a CD1 otherwise merge into one corpus, and a
   corpus silently averaged with another is a wrong number that looks
@@ -109,9 +133,9 @@ every machine but the one that made it for a while.
 
 ```
 loudnesslab/     the Python: bs1770, spectrum, subbass, declip, mp3gain,
-                 decode, db, report, cli
+                 decode, db, report, render, write, cli
 tests/           its tests
-tools/           make_golden.py and the two checkers
+tools/           make_golden.py and the four checkers
 macapp/
   Sources/LoudnessKit/    the port: DSP, Loudness, Process, IO, Library
   Sources/LoudnessLabUI/  the app: Engine, ABPlayer, Views
@@ -151,21 +175,32 @@ they are the fallback if bundling Python ever becomes the better answer.
   progress bar from that. Tested in `TestPorcelainProgress`.
 - Then read the database as now -- `Survey.of` and `Library` are unchanged
   and already work.
-- **Measuring is wired.** `Engine.measurePass` runs the CLI and drives the
-  bar from its JSON; `CLI.swift` finds the tool by walking up from the app,
-  reassembles lines from the pipe, and terminates the process on Stop.
-  Both Measure and Process go through it.
-- **Processing is not.** `Engine.run` still uses the Swift `Processor`.
-  `./loudness-lab subbass ...` writes the FLACs and a `manifest.json` that
-  `Manifest.swift` already decodes; it needs a `--porcelain` like
-  `analyze`, with a test, and then `Engine.run` can drive that instead.
+- **Both halves are wired.** `Engine.measurePass` runs `analyze`;
+  `Engine.run` runs `subbass` and reads back the `manifest.json` it wrote.
+  `CLI.swift` finds the tool by walking up from the app, reassembles lines
+  from the pipe, and terminates the process on Stop.
+- `subbass --porcelain` emits a `phase` on every progress line, because a
+  processing run measures first and then processes: two halves, one bar.
+  It finishes with a `done` naming the manifest it wrote, so the app opens
+  the file this run produced rather than guessing at a path and showing the
+  previous run's results.
+- Every setting is passed to the command explicitly rather than by naming
+  a profile. A `--profile` would be read from the repository's
+  `profiles.json`, which the app does not edit -- so a slider moved in the
+  window would have changed nothing, silently.
+- The ticked list goes in a file (`--select`), not on the command line: a
+  batch is hundreds of paths and argv has a limit.
 - Finding the CLI: it lives at the repository root next to `macapp/`, and
   re-executes itself into `.venv`, so there is nothing to activate. The
   app needs a path to it and a clear message when it is missing, pointing
   at `setup.sh`.
 
 Speed to expect: five short fixtures measured in 1.7 seconds through the
-Python.
+Python. Processing runs several tracks at a time through a spawn pool --
+measured on four cores over four two-and-a-half minute tracks, 62.5 s at
+one worker against 36.1 s at four. On six ten-second fixtures it goes the
+other way (6.1 s against 7.7 s): spawning a worker re-imports numpy and
+scipy, and on a short enough track that is the whole job.
 
 ## Where this got to
 
@@ -194,22 +229,18 @@ nothing to add up there. Levelling to -16 needs no track turned up.
 
 ## Open
 
-1. **Processing still goes through the Swift `Processor`,** not the CLI.
-   Measuring was moved and is fast; this is the other half. `subbass`
-   needs a `--porcelain` like `analyze`, with a test, and then
-   `Engine.run` can drive it.
-2. **The A/B switch has still never been confirmed.** Versions are
+1. **The A/B switch has still never been confirmed.** Versions are
    scheduled together on one host clock so a switch lands on the same
    sample. A tick or a flam on Shift-Space is the bug.
-3. **A rolling expander**, to pull apart over-compressed records and give
+2. **A rolling expander**, to pull apart over-compressed records and give
    the drops back their impact. LRA is the measurement and it is now
    reported per folder. Note the catch: modern masters are the MOST
    compressed, so unlike the sub stage there is no reference folder to
    aim at -- it needs an absolute target.
-4. **Serato markers only travel MP3 to MP3.** FLAC and M4A carry them
+3. **Serato markers only travel MP3 to MP3.** FLAC and M4A carry them
    too, in Vorbis comments and com.serato.dj atoms, but going between
    containers is translation rather than copying and needs a real Serato
    file of each to check against.
-5. **Nobody but Jeff has run this.** No licence file, no signing
+4. **Nobody but Jeff has run this.** No licence file, no signing
    identity, and ffmpeg's licensing needs a real answer before anything
    is sold. `libmp3lame` is GPL.

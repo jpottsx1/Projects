@@ -11,16 +11,34 @@ enum CLI {
 
     /// One line of `--porcelain` output.
     ///
-    /// Every field is optional because two different events share the
-    /// shape: `progress` carries done/total/name, `done` carries the
-    /// counts. Decoding them into one type keeps the reader a switch
-    /// rather than two parsers.
+    /// Every field is optional because several different events share the
+    /// shape: `progress` carries done/total/name, `measured` and `done`
+    /// carry counts, `error` carries a message. Decoding them into one type
+    /// keeps the reader a switch rather than five parsers, and an event
+    /// this app does not know about decodes rather than failing the line.
     struct Event: Decodable {
         let event: String
+        /// Which half of a processing run: "measure" or "process". Absent
+        /// on a plain `analyze`, where there is only one.
+        var phase: String?
         var done: Int?, total: Int?
         var name: String?, path: String?, status: String?, error: String?
+        var reason: String?
         var found: Int?, analysed: Int?, skipped: Int?, errors: Int?
         var seconds: Double?
+        // `selected`, `done` and `error`.
+        var selected: Int?, duplicates: Int?, written: Int?
+        var reference: String?, format: String?, out: String?
+        var manifest: String?, message: String?
+        var dryRun: Bool?
+
+        enum CodingKeys: String, CodingKey {
+            case event, phase, done, total, name, path, status, error, reason
+            case found, analysed, skipped, errors, seconds
+            case selected, duplicates, written, reference, format, out
+            case manifest, message
+            case dryRun = "dry_run"
+        }
 
         init?(_ line: String) {
             guard let data = line.data(using: .utf8),

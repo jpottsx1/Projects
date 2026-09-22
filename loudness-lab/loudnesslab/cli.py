@@ -16,7 +16,7 @@ import time
 from pathlib import Path
 
 from . import (__version__, analyze, apply_gain, bs1770, db, declip, decode,
-               mp3gain, profiles, report, spectrum, subbass)
+               mp3gain, profiles, render, report, subbass, write)
 
 
 def _progress_printer(start: float):
@@ -36,7 +36,7 @@ def _progress_printer(start: float):
     return show
 
 
-def _progress_json():
+def _progress_json(phase: str = "measure"):
     """One JSON object per line on stdout, for a caller that is not a person.
 
     The human printer writes to stderr with carriage returns, which is right
@@ -48,6 +48,7 @@ def _progress_json():
         track = result["track"]
         sys.stdout.write(json.dumps({
             "event": "progress",
+            "phase": phase,
             "done": done,
             "total": total,
             "name": Path(track["path"]).name,
@@ -255,36 +256,124 @@ def cmd_profiles(args: argparse.Namespace) -> int:
     return 0
 
 
+def _emit(payload: dict) -> None:
+    """One JSON object on stdout, flushed, for a caller that is not a person."""
+    sys.stdout.write(json.dumps(payload, default=str) + "\n")
+    sys.stdout.flush()
+
+
+def _identity(artist: str | None, title: str | None, path: str) -> str:
+    """What makes two rows the same record.
+
+    Artist and title, with case, punctuation and spacing thrown away,
+    because "Earth, Wind & Fire - Let's Groove" and "Earth Wind and Fire -
+    Lets Groove" are the same song off two compilations. An untagged file
+    falls back to its own path, which is unique -- so a track with no tags
+    is never mistaken for another track with no tags.
+    """
+    if not (artist or title):
+        return path
+    joined = f"{artist or ''}\x1f{title or ''}".lower()
+    return "".join(c for c in joined if c.isalnum() or c == "\x1f")
+
+
+def _unique_stem(stem: str, folder: str, taken: set[str]) -> str:
+    """A name no other track in this batch will write to.
+
+    Everything lands in one output folder, and a library of compilations is
+    full of files called "01 Track". Two of those would have written to the
+    same path, one over the other, and the run would have reported both as
+    written -- a silent loss of exactly the kind this project exists to
+    avoid. The folder they came from is the natural way to tell them apart,
+    and a counter after that, because two folders can share a label too.
+    """
+    candidate = stem
+    if candidate.lower() in taken and folder:
+        candidate = f"{stem} ({Path(folder).name or folder})"
+    suffix = 2
+    while candidate.lower() in taken:
+        candidate = f"{stem} ({suffix})"
+        suffix += 1
+    taken.add(candidate.lower())
+    return candidate
+
+
 def cmd_subbass(args: argparse.Namespace) -> int:
     """PROTOTYPE: kick-synchronised sub-bass, for listening to.
 
-    Lossy and irreversible, unlike everything else here, so it only ever
-    writes FLAC into a separate folder and picks the tracks that measure
-    thinnest rather than processing everything.
+    Lossy and irreversible, unlike everything else here, so it writes into
+    a separate folder and picks the tracks that measure thinnest rather
+    than processing everything.
     """
+    porcelain = getattr(args, "porcelain", False)
+
+    def out(line: str = "") -> None:
+        """Human output, silenced under --porcelain.
+
+        Nothing but JSON may reach stdout there: one unparseable line and
+        the caller driving the progress bar is finished.
+        """
+        if not porcelain:
+            print(line)
+
+    def fail(message: str, code: int = 2) -> int:
+        if porcelain:
+            _emit({"event": "error", "message": message})
+        else:
+            print(message)
+        return code
+
     if _settings(args) is None:
         return 2
     if not args.auto and args.amount <= 0 and args.punch <= 0 and not args.declip:
         # level-only is a gain policy. Running this command under it would
         # decode every track, change nothing, and write pairs of identical
         # files -- worse than useless, because it looks like work happened.
-        print("This profile asks for no spectral change (sub, punch and "
-              "declip are all off).")
-        print("Nothing for subbass to do -- levelling is the gain command:")
-        print(f"  ./loudness-lab gain <path> --profile {args.profile or 'level-only'}")
-        return 0
+        return fail(
+            "This profile asks for no spectral change (sub, punch and declip "
+            "are all off).\nNothing for subbass to do -- levelling is the "
+            "gain command:\n  ./loudness-lab gain <path> --profile "
+            f"{args.profile or 'level-only'}", 0)
     if args.auto and not args.reference:
-        sys.stderr.write("error: --auto needs a reference corpus. Give "
-                         "--reference, or set it in the profile.\n")
-        return 2
+        return fail("error: --auto needs a reference corpus. Give --reference, "
+                    "or set it in the profile.")
+    if args.format not in write.FORMATS:
+        # argparse already restricts this. The guard is for a caller that
+        # built the namespace itself: without it the first worker raises,
+        # and the run reports a per-track failure on every track instead of
+        # one sentence about the setting.
+        return fail(f"error: unknown format {args.format!r}; one of "
+                    f"{', '.join(write.FORMATS)}")
     database = args.db or (Path("scans") / f"{_slug(args.path[0])}.db")
     database.parent.mkdir(parents=True, exist_ok=True)
     out_dir = args.out or Path("subbass-preview")
 
+    # The app's ticked list: paths, one per line. A file rather than a flag
+    # per track because a batch is hundreds of them, and a file is also
+    # what a caller already has.
+    selected: list[str] | None = None
+    if args.select:
+        try:
+            selected = [line for line in args.select.read_text().splitlines()
+                        if line.strip()]
+        except OSError as exc:
+            return fail(f"error: could not read --select {args.select}: {exc}")
+        if not selected:
+            return fail(f"error: --select {args.select} lists no tracks.")
+
     start = time.monotonic()
-    analyze.run(roots=args.path, db_path=database, jobs=args.jobs,
-                progress=None if args.quiet else _progress_printer(start))
-    if not args.quiet:
+    if porcelain:
+        reporter = _progress_json("measure")
+    elif args.quiet:
+        reporter = None
+    else:
+        reporter = _progress_printer(start)
+    counts = analyze.run(roots=args.path, db_path=database, jobs=args.jobs,
+                         progress=reporter)
+    if porcelain:
+        _emit({"event": "measured",
+               "seconds": round(time.monotonic() - start, 3), **counts})
+    elif not args.quiet:
         sys.stderr.write("\n")
 
     conn = db.connect(database)
@@ -309,6 +398,14 @@ def cmd_subbass(args: argparse.Namespace) -> int:
                              "OR LOWER(t.path) LIKE ?)")
                 params += [like, like, like]
             clause += " AND (" + " OR ".join(tests) + ")"
+        if selected is not None:
+            # A temporary table rather than an IN list: a batch can be
+            # thousands of tracks and SQLite has a cap on bound variables
+            # that a long enough list walks straight into.
+            conn.execute("CREATE TEMP TABLE chosen (path TEXT PRIMARY KEY)")
+            conn.executemany("INSERT OR IGNORE INTO chosen VALUES (?)",
+                             [(p,) for p in selected])
+            clause += " AND t.path IN (SELECT path FROM chosen)"
         rows = conn.execute(
             f"SELECT t.path, t.artist, t.title, AVG(b.shape_db) AS low "
             f"FROM tracks t JOIN bands b ON b.track_id = t.id "
@@ -317,7 +414,7 @@ def cmd_subbass(args: argparse.Namespace) -> int:
             f"GROUP BY t.id ORDER BY low ASC LIMIT ?", (*params, args.limit)
         ).fetchall()
         in_scope = conn.execute(
-            f"SELECT COUNT(*) FROM tracks t WHERE t.status = 'ok'"
+            "SELECT COUNT(*) FROM tracks t WHERE t.status = 'ok'"
             + (" AND (" + " OR ".join(scope) + ")" if scope else ""),
             [v for root in args.path
              for v in (str(root).rstrip(os.sep),
@@ -327,11 +424,10 @@ def cmd_subbass(args: argparse.Namespace) -> int:
         if args.auto:
             reference_name, curve = _reference_curve(conn, args.reference or "")
             if reference_name is None:
-                print(f"--auto needs a reference folder; {args.reference!r} "
-                      f"matched none (or matched several).")
-                print("Name one of the folders that report lowend --by folder "
-                      "lists.")
-                return 2
+                return fail(
+                    f"--auto needs a reference folder; {args.reference!r} "
+                    f"matched none (or matched several).\nName one of the "
+                    f"folders that report lowend --by folder lists.")
         amounts = {}
         if args.auto:
             for row in rows:
@@ -341,243 +437,190 @@ def cmd_subbass(args: argparse.Namespace) -> int:
         conn.close()
     if not rows:
         if args.match:
-            print(f"no track matched {', '.join(repr(m) for m in args.match)} "
-                  f"among {analysed} analysed.")
-            print("Matching is a case-insensitive substring of the artist, "
-                  "title or path.")
-        else:
-            print("nothing analysed to work from")
-        return 1
-    print(f"{len(rows)} of {analysed} track(s) under the given path(s) selected"
-          + (" by --match" if args.match else ""))
-    if args.auto:
-        print(f"reference: {reference_name}")
+            return fail(
+                f"no track matched {', '.join(repr(m) for m in args.match)} "
+                f"among {analysed} analysed.\nMatching is a case-insensitive "
+                f"substring of the artist, title or path.", 1)
+        return fail("nothing analysed to work from", 1)
 
+    labels = report._folder_labels([r["path"] for r in rows])
+    jobs, duplicates = [], 0
+    seen: set[str] = set()
+    taken: set[str] = set()
+    for row in rows:
+        # The same record twice in one batch is one decode, one encode and
+        # one lossy generation wasted -- and two files in the output that
+        # differ only by which compilation they came off. A library of
+        # disco compilations is mostly the same forty songs, so this is the
+        # normal case rather than an odd one.
+        if args.skip_duplicates:
+            key = _identity(row["artist"], row["title"], row["path"])
+            if key in seen:
+                duplicates += 1
+                continue
+            seen.add(key)
+        amount, skip = amounts.get(row["path"], (args.amount, None))
+        name = " - ".join(p for p in (row["artist"], row["title"]) if p) \
+            or Path(row["path"]).stem
+        jobs.append({
+            "path": row["path"], "name": name,
+            "stem": _unique_stem(Path(row["path"]).stem,
+                                 labels.get(row["path"], ""), taken),
+            "folder": labels.get(row["path"], "(root)"),
+            "amount": amount, "skip": skip, "label": _label(args, amount),
+            "freq": args.freq, "decay": args.decay,
+            "punch": args.punch, "punch_decay": args.punch_decay,
+            "declip": bool(args.declip), "declip_max": args.declip_max,
+            "min_activity": args.min_activity,
+            "target": args.target, "estimator": args.estimator,
+            "peak_ceiling": args.peak_ceiling,
+            "compare": not args.no_compare, "dry_run": bool(args.dry_run),
+            "out_dir": str(out_dir), "fmt": args.format,
+        })
+    if not jobs:
+        return fail("every selected track was a duplicate of another in the "
+                    "same batch", 1)
+
+    if porcelain:
+        _emit({"event": "selected", "total": len(jobs), "analysed": analysed,
+               "duplicates": duplicates, "reference": reference_name,
+               "format": write.label(args.format), "out": str(out_dir)})
+    out(f"{len(rows)} of {analysed} track(s) under the given path(s) selected"
+        + (" by --match" if args.match else ""))
+    if duplicates:
+        out(f"  {duplicates} duplicate(s) skipped -- same artist and title "
+            f"already in this batch.")
+    if args.auto:
+        out(f"reference: {reference_name}")
     if not args.dry_run:
         out_dir.mkdir(parents=True, exist_ok=True)
     if args.profile:
-        print(f"profile: {args.profile}")
+        out(f"profile: {args.profile}")
     heading = ("sub=auto (per track)" if args.auto
                else f"sub={args.amount:+.1f} dB")
-    print(f"KICK PROTOTYPE  {heading} in "
-          f"{subbass.SUB_LOW_HZ:.0f}-{subbass.SUB_HIGH_HZ:.0f} Hz  "
-          f"punch={args.punch:+.1f} dB in "
-          f"{subbass.PUNCH_LOW_HZ / 1000:.0f}-{subbass.PUNCH_HIGH_HZ / 1000:.0f} kHz"
-          + (f"  declip<={args.declip_max:.0f} dB" if args.declip else ""))
-    print("=" * 104)
-    print("  Lossy and irreversible, unlike the gain pass. Originals are never")
-    print("  touched; these are new FLAC files to listen to and compare.")
-    print()
+    out(f"KICK PROTOTYPE  {heading} in "
+        f"{subbass.SUB_LOW_HZ:.0f}-{subbass.SUB_HIGH_HZ:.0f} Hz  "
+        f"punch={args.punch:+.1f} dB in "
+        f"{subbass.PUNCH_LOW_HZ / 1000:.0f}-{subbass.PUNCH_HIGH_HZ / 1000:.0f} kHz"
+        + (f"  declip<={args.declip_max:.0f} dB" if args.declip else ""))
+    out("=" * 104)
+    out("  Lossy and irreversible, unlike the gain pass. Originals are never")
+    out(f"  touched; these are new {write.label(args.format)} files to "
+        f"listen to and compare.")
+    out()
     if not args.summary_only:
-        print("  'shape' is the mean 1/3-octave level relative to the track's own")
-        print("  broadband, in the same units as report lowend, so it can be read")
-        print("  against the correction curve. 'added' is the energy put into the")
-        print("  octave; the two differ because one is a mean of decibels and the")
-        print("  other a sum of energies.")
+        out("  'shape' is the mean 1/3-octave level relative to the track's own")
+        out("  broadband, in the same units as report lowend, so it can be read")
+        out("  against the correction curve. 'added' is the energy put into the")
+        out("  octave; the two differ because one is a mean of decibels and the")
+        out("  other a sum of energies.")
     if not args.summary_only and args.declip:
-        print()
-        print("  'clips' is how many runs of clipped samples were arced back over,")
-        print("  and 'lift' the median height those restored peaks gained -- over the")
-        print("  runs, not over the file's own peak, which on an MP3 of a clipped")
-        print("  master is set by codec overshoot and hardly moves. The lift is not a")
-        print("  volume increase: it is headroom the levelling takes straight back")
-        print("  out. De-clipping runs FIRST, on the file as it arrived.")
+        out()
+        out("  'clips' is how many runs of clipped samples were arced back over,")
+        out("  and 'lift' the median height those restored peaks gained -- over the")
+        out("  runs, not over the file's own peak, which on an MP3 of a clipped")
+        out("  master is set by codec overshoot and hardly moves. The lift is not a")
+        out("  volume increase: it is headroom the levelling takes straight back")
+        out("  out. De-clipping runs FIRST, on the file as it arrived.")
+    workers = args.jobs or render.default_jobs()
+    if workers > 1:
+        # Before the table, not after: this used to go to stderr as the
+        # work started, which on a terminal put it between the column
+        # headings and the first row.
+        out(f"  {workers} tracks at a time.")
     if not args.summary_only:
-        print()
-        print(f"  {'artist / title':<40s}{'kicks/min':>10s}{'shape was':>11s}"
-              f"{'now':>8s}{'added':>8s}{'trim':>7s}{'dBTP':>7s}"
-              f"{'match':>8s}{'snap':>7s}"
-              + (f"{'clips':>7s}{'lift':>7s}" if args.declip else ""))
+        out()
+        out(f"  {'artist / title':<40s}{'kicks/min':>10s}{'shape was':>11s}"
+            f"{'now':>8s}{'added':>8s}{'trim':>7s}{'dBTP':>7s}"
+            f"{'match':>8s}{'snap':>7s}"
+            + (f"{'clips':>7s}{'lift':>7s}" if args.declip else ""))
 
-    written = 0
-    labels = report._folder_labels([r["path"] for r in rows])
-    outcomes = []          # (folder, amount or None, reason when skipped)
-    clips = []             # one declip report per track decoded
-    manifest = []          # what the UI reads: paths, levels, what was done
-    for row in rows:
-        note_skip = None
-        variants = []
-        source = Path(row["path"])
-        folder = labels.get(row["path"], "(root)")
-        name = " - ".join(p for p in (row["artist"], row["title"]) if p) \
-            or source.stem
-        try:
-            amount, skip = amounts.get(str(source), (args.amount, None))
-            # Decide before decoding where the database already settles it.
-            # A policy preview over a whole library should not spend minutes
-            # decoding tracks it has already determined need nothing.
-            if skip is not None:
-                outcomes.append((folder, None, skip))
-                if not args.summary_only:
-                    print(f"  {name[:39]:<40s}{'':>10}{'':>11}{'':>8}{'':>8}"
-                          f"{'':>7}{'':>7}{'':>8}{'':>7}"
-                          + (f"{'':>7}{'':>7}" if args.declip else "")
-                          + f"  {skip}")
-                continue
+    blank = (f"{'':>10}{'':>11}{'':>8}{'':>8}{'':>7}{'':>7}{'':>8}{'':>7}"
+             + (f"{'':>7}{'':>7}" if args.declip else ""))
 
-            audio = original = decode.decode(source)
-            # First, on the file as it arrived. De-clipping puts peaks BACK,
-            # so it needs the audio before anything has attenuated it, and
-            # everything after it has to fit under the peak it restores.
-            clip = None
-            if args.declip:
-                audio, clip = declip.restore(audio, decode.TARGET_RATE,
-                                             max_restore_db=args.declip_max)
-                clips.append(clip)
-            # The content check needs the audio, not the per-frame band
-            # statistics, so it happens here rather than in the query.
-            if skip is None and amount > 0:
-                activity = subbass.low_band_activity(audio, decode.TARGET_RATE)
-                if np.isfinite(activity) and activity < args.min_activity:
-                    skip = (f"sub octave barely moves ({activity:.0f} dB) -- "
-                            f"a static floor rather than a bassline")
-            if skip is not None:
-                # A track can want de-clipping and not want a sub. Where one
-                # was done there is a new file worth writing, so only the
-                # sub is dropped; where nothing was done, say so and move on.
-                amount = 0.0
-                if clip is None or not clip["restored"]:
-                    outcomes.append((folder, None, skip))
-                    if not args.summary_only:
-                        print(f"  {name[:39]:<40s}{'':>10}{'':>11}{'':>8}{'':>8}"
-                              f"{'':>7}{'':>7}{'':>8}{'':>7}"
-                              + (f"{'':>7}{'':>7}" if args.declip else "")
-                              + f"  {skip}")
-                    continue
-                note_skip = skip
-            after, info = subbass.enhance(audio, decode.TARGET_RATE,
-                                          amount_db=amount,
-                                          freq=args.freq, decay_s=args.decay,
-                                          punch_db=args.punch,
-                                          punch_decay_ms=args.punch_decay)
-            kicks, _ = subbass.detect_kicks(audio, decode.TARGET_RATE)
-            # Against the ORIGINAL, not against the de-clipped intermediate:
-            # the columns say "was", and what the track was is what arrived.
-            # Restored transients belong in the snap figure, not hidden in a
-            # baseline that already has them.
-            snap_before = subbass.attack_contrast(original, decode.TARGET_RATE,
-                                                  kicks)
-            snap_after = subbass.attack_contrast(after, decode.TARGET_RATE, kicks)
-            before_bands = {b["band_hz"]: b["shape_db"]
-                            for b in spectrum.analyse(original, decode.TARGET_RATE)}
-            after_bands = {b["band_hz"]: b["shape_db"]
-                           for b in spectrum.analyse(after, decode.TARGET_RATE)}
-            processed = bs1770.measure(after)
-            peak = processed["true_peak_dbtp"]
+    def report_one(done: int, total: int, result: dict) -> None:
+        if porcelain:
+            _emit({"event": "progress", "phase": "process",
+                   "done": done, "total": total,
+                   "name": result["name"], "path": result["path"],
+                   "status": result["status"],
+                   "reason": result.get("reason"),
+                   "sub_db": result.get("applied_db"),
+                   "clips_restored": (result.get("clip") or {}).get("restored")})
+            return
+        if result["status"] == "error":
+            print(f"  {result['name'][:39]:<40s}  FAILED: {result['reason']}")
+        elif result["status"] == "skipped":
+            print(f"  {result['name'][:39]:<40s}{blank}  {result['reason']}")
+        elif not args.summary_only:
+            note = "" if result["reason"] is None else f"  {result['reason']}"
+            clip = result.get("clip") or {"restored": 0, "lift_db": 0.0}
+            print(f"  {result['name'][:39]:<40s}"
+                  f"{result['kicks_per_minute']:>10.0f}"
+                  f"{result['shape_before']:>11.1f}{result['shape_after']:>8.1f}"
+                  f"{result['applied_db']:>+8.2f}{result['safety_trim_db']:>+7.2f}"
+                  f"{result['peak_dbtp']:>+7.2f}{result['match_db']:>+8.2f}"
+                  f"{result['snap_db']:>+7.2f}"
+                  + (f"{clip['restored']:>7d}{clip['lift_db']:>+7.2f}"
+                     if args.declip else "")
+                  + note)
 
-            if args.dry_run:
-                match_db = 0.0
-            elif args.no_compare:
-                # Level here, as the final operation. The gain command cannot
-                # do it: global_gain only exists in an MP3 bitstream, and
-                # what comes out of here is FLAC. Without this the pipeline
-                # simply ends un-levelled, which is the one state worse than
-                # not having started -- part of the library at the target and
-                # part several dB hot.
-                after, match_db, final = _level_to_target(after, args, processed)
-                peak = final
-                written_path = out_dir / (source.stem + ".flac")
-                subbass.write_flac(written_path, after, decode.TARGET_RATE,
-                                   source)
-                variants = [_variant("processed", written_path,
-                                     _label(args, amount), after)]
-            else:
-                # Level-match the pair, or the comparison just measures which
-                # is louder: adding sub raises loudness, and louder wins every
-                # blind test regardless of whether it is better. Both are
-                # brought DOWN to whichever is quieter, so neither can clip.
-                original_lufs = bs1770.measure(original)["lufs_i"]
-                target = min(original_lufs, processed["lufs_i"])
-                a = original * (10 ** ((target - original_lufs) / 20))
-                b = after * (10 ** ((target - processed["lufs_i"]) / 20))
-                match_db = target - original_lufs
-                # A restored peak stands above full scale by design, and
-                # write_flac clips what it is given -- which would put back
-                # exactly the flat tops this pass just took out. Trim BOTH by
-                # the same amount so the level match survives the headroom.
-                room = max(float(np.abs(a).max()), float(np.abs(b).max()))
-                if room > 0.99:
-                    a, b = a * (0.99 / room), b * (0.99 / room)
-                    match_db += 20 * np.log10(0.99 / room)
-                # Both written as FLAC from the same decode, so no codec
-                # difference can creep into the comparison.
-                a_path = out_dir / f"{source.stem} -- A original.flac"
-                b_path = out_dir / f"{source.stem} -- B {_label(args, amount)}.flac"
-                subbass.write_flac(a_path, a, decode.TARGET_RATE, source)
-                subbass.write_flac(b_path, b, decode.TARGET_RATE, source)
-                peak = bs1770.measure(b)["true_peak_dbtp"]
-                variants = [_variant("original", a_path, "original", a),
-                            _variant("processed", b_path,
-                                     _label(args, amount), b)]
-        except Exception as exc:
-            outcomes.append((folder, None, f"failed: {type(exc).__name__}"))
-            print(f"  {source.name[:39]:<40s}  FAILED: {type(exc).__name__}: {exc}")
-            continue
-        outcomes.append((folder, amount, None))
-        if variants:
-            manifest.append({
-                "source": str(source), "name": name, "folder": folder,
-                "sub_db": round(float(info["applied_db"]), 3),
-                "punch_db": round(float(info["punch_db"]), 3),
-                "clips_restored": (clip or {}).get("restored", 0),
-                "clip_lift_db": round(float((clip or {}).get("lift_db", 0.0)), 3),
-                "variants": variants,
-            })
+    results = render.run(jobs, workers=workers, progress=report_one)
 
-        def mean_low(table):
-            values = [table[b] for b in report.LOW_SHAPE_BANDS
-                      if table.get(b) is not None]
-            return sum(values) / len(values) if values else float("nan")
+    written = sum(1 for r in results if r["status"] == "ok")
+    outcomes = [(r["folder"], r["amount"], r.get("reason") if r["status"] != "ok"
+                 else None) for r in results]
+    clips = [r["clip"] for r in results
+             if r["status"] == "ok" and r.get("clip") is not None]
+    manifest = [r["manifest"] for r in results if r.get("manifest")]
 
-        # "no spectral change asked for" contradicts the header on a
-        # de-clipping run, where de-clipping IS the change that was asked for.
-        reason = note_skip or info["note"]
-        if args.declip and reason == "no spectral change asked for":
-            reason = None
-        note = "" if reason is None else f"  {reason}"
-        if args.summary_only:
-            written += 1
-            continue
-        print(f"  {name[:39]:<40s}{info['kicks_per_minute']:>10.0f}"
-              f"{mean_low(before_bands):>11.1f}{mean_low(after_bands):>8.1f}"
-              f"{info['applied_db']:>+8.2f}{info['safety_trim_db']:>+7.2f}"
-              f"{peak:>+7.2f}{match_db:>+8.2f}{snap_after - snap_before:>+7.2f}"
-              + (f"{clip['restored']:>7d}{clip['lift_db']:>+7.2f}"
-                 if args.declip else "")
-              + f"{note}")
-        written += 1
-
-    print()
+    out()
     if args.declip:
-        print(declip.summarise(clips))
-        print()
-    print(_policy_preview(outcomes))
-    print()
+        out(declip.summarise(clips))
+        out()
+    out(_policy_preview(outcomes))
+    out()
+    manifest_path = None
     if args.dry_run:
-        print(f"  DRY RUN -- nothing written. {written} track(s) would be "
-              f"processed.")
+        out(f"  DRY RUN -- nothing written. {written} track(s) would be "
+            f"processed.")
+        if porcelain:
+            _emit({"event": "done", "dry_run": True, "written": 0,
+                   "selected": len(jobs), "out": str(out_dir),
+                   "errors": sum(1 for r in results if r["status"] == "error"),
+                   "seconds": round(time.monotonic() - start, 3)})
         return 0
     if manifest:
-        _write_manifest(out_dir / "manifest.json", args, manifest)
+        manifest_path = out_dir / "manifest.json"
+        _write_manifest(manifest_path, args, manifest)
+    if porcelain:
+        _emit({"event": "done", "written": written, "selected": len(jobs),
+               "skipped": sum(1 for r in results if r["status"] == "skipped"),
+               "errors": sum(1 for r in results if r["status"] == "error"),
+               "manifest": str(manifest_path) if manifest_path else None,
+               "out": str(out_dir),
+               "seconds": round(time.monotonic() - start, 3)})
+        return 0
+    kind = write.label(args.format)
     if args.no_compare:
-        print(f"  {written} file(s) written to {out_dir}/ as FLAC, levelled to "
-              f"{args.target:+.1f} on {args.estimator}.")
-        print("  That levelling happens here because the gain command cannot "
-              "do it:")
-        print("  global_gain exists only in an MP3 bitstream, and these are "
-              "FLAC.")
+        out(f"  {written} file(s) written to {out_dir}/ as {kind}, levelled to "
+            f"{args.target:+.1f} on {args.estimator}.")
+        out("  That levelling happens here because the gain command cannot "
+            "do it:")
+        out("  global_gain exists only in an MP3 bitstream.")
     else:
-        print(f"  {written} pair(s) written to {out_dir}/ as FLAC: 'A original'")
-        print("  and 'B sub', LEVEL-MATCHED so the comparison is about the bass")
-        print("  and not about which is louder. 'match' is the dB both were")
-        print("  brought down by to meet; neither was boosted, so neither clips.")
-        print()
-        print("  Knowing which is which biases you. Have someone else shuffle")
-        print("  the names, or at least listen to B first on half of them.")
-    print("  Listen against the originals before deciding this is worth a")
-    print("  generation. Re-run the level pass afterwards: adding energy moves")
-    print("  loudness, so whatever happens last has to be the levelling.")
+        out(f"  {written} pair(s) written to {out_dir}/ as {kind}: 'A original'")
+        out("  and 'B sub', LEVEL-MATCHED so the comparison is about the bass")
+        out("  and not about which is louder. 'match' is the dB both were")
+        out("  brought down by to meet; neither was boosted, so neither clips.")
+        out()
+        out("  Knowing which is which biases you. Have someone else shuffle")
+        out("  the names, or at least listen to B first on half of them.")
+    out("  Listen against the originals before deciding this is worth a")
+    out("  generation. Re-run the level pass afterwards: adding energy moves")
+    out("  loudness, so whatever happens last has to be the levelling.")
     return 0
+
 
 
 def cmd_gain(args: argparse.Namespace) -> int:
@@ -1104,8 +1147,31 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_argument("--no-compare", action="store_true",
                      help="write only the processed file, not a level-matched "
                           "A/B pair")
-    sub.add_argument("--jobs", type=int, default=None)
+    sub.add_argument("--format", default=write.DEFAULT_FORMAT,
+                     choices=sorted(write.FORMATS),
+                     help="what to write: flac (lossless, the default), "
+                          "mp3 (320 kbps, and the only one Serato's cue "
+                          "points travel through) or aac (256 kbps in an "
+                          "m4a). A and B of a pair always match, so the "
+                          "comparison is never about the codec")
+    sub.add_argument("--select", type=Path, default=None, metavar="FILE",
+                     help="restrict to the paths listed in FILE, one per "
+                          "line -- what the Mac app's ticked list sends. "
+                          "Applied BEFORE --limit, so unticking a track "
+                          "promotes the next one into range")
+    sub.add_argument("--skip-duplicates", action="store_true",
+                     help="do a record only once per batch, matching on "
+                          "artist and title with case and punctuation "
+                          "ignored. A library of compilations is mostly the "
+                          "same songs twice")
+    sub.add_argument("--jobs", type=int, default=None,
+                     help=f"tracks at a time (default: {render.default_jobs()} "
+                          "here). Each one holds several decoded copies in "
+                          "memory, so this is bounded by RAM, not cores")
     sub.add_argument("--quiet", action="store_true")
+    sub.add_argument("--porcelain", action="store_true",
+                     help="one JSON object per line on stdout, for the Mac "
+                          "app rather than for reading")
     sub.set_defaults(func=cmd_subbass)
 
     gain = subparsers.add_parser(

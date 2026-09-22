@@ -34,7 +34,7 @@ public struct Profile: Codable, Equatable, Sendable {
     public var targetLRA: Double = 0.0       // loudness range to widen to
     public var maxAttenuation: Double = 6.0  // how far the quiet parts may drop
     public var transient: Double = 0.0       // dB of emphasis at an onset
-    public var minCrest: Double = 12.0       // above this, nothing flattened it
+    public var minCrest: Double = 11.0       // above this, nothing flattened it
 
     public init() {}
 
@@ -210,9 +210,7 @@ public struct Profile: Codable, Equatable, Sendable {
         // The modern reference corpus sits at crest 10.21 and LRA 5.45 --
         // the same band as this 1999 material, and below every pre-1990
         // folder measured -- so there is no reference to aim at for
-        // dynamics and these targets stay absolute. And the 12 dB crest
-        // gate lands in a real gap: unlimited-era material reads 11.87 to
-        // 12.11 here, 1999 pop 9.88 to 10.73, nothing in between. The top end needs nothing: these discs run 3.6 to
+        // dynamics and these targets stay absolute. The top end needs nothing: these discs run 3.6 to
         // 6.4 dB ABOVE the reference at 8-16 kHz.
         var nineties = Profile()
         nineties.description = "Late 1990s pop. Low end nearly there "
@@ -242,7 +240,18 @@ public struct Profile: Codable, Equatable, Sendable {
         // (9.88 to 10.73) pass the gate and the spread is only 0.85 dB, so
         // unlike the sub, one figure genuinely suits the whole corpus.
         nineties.transient = 3
-        nineties.minCrest = 12
+        // Eleven, not twelve. The threshold started at 12 from the
+        // published range and on eleven folders looked vindicated, with
+        // unlimited-era material at 11.87 to 12.11 and 1999 pop at 9.88 to
+        // 10.73. Five more folders filled the gap in. Sixteen now read
+        //
+        //   9.63 9.88 9.95 10.21 10.47 10.73 | 11.78 11.82 11.87 11.91
+        //   11.95 12.10 12.11 12.15 12.23 12.92
+        //
+        // and the largest gap is 10.73 to 11.78, midpoint 11.25. A gate at
+        // 12 cuts the upper cluster in half. It changes nothing for this
+        // corpus, which passes either gate; it changes everything else.
+        nineties.minCrest = 11
 
         return ["level-only": levelOnly, "restore": restore,
                 "disco-70s": disco, "eighties": eighties,

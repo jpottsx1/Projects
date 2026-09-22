@@ -319,6 +319,8 @@ public struct Survey: Sendable {
                     "  Crest is punch over MILLISECONDS: peak minus loudness. Low",
                     "  means the 'Attack' setting has something to do, and it is the",
                     "  one that makes a record hit harder without making it duck.",
+                    "  Measured on this library, limited masters read 9.6 to 10.7",
+                    "  and the rest 11.8 to 12.9, so the line sits at 11.",
                     "",
                     "  'range' needs BOTH to be low, not LRA alone. A seven-minute",
                     "  disco groove runs at one level because that is the record, not",
@@ -334,10 +336,13 @@ public struct Survey: Sendable {
                 // columns, and "wants" rather than "needs" because these are
                 // thresholds, not a diagnosis.
                 //
-                // The crest figure of 12 was taken from the published range
-                // and then measured here: across this library, material from
-                // before the loudness war reads 11.87 to 12.11 and 1999 pop
-                // reads 9.88 to 10.73. The threshold sits in the gap.
+                // The crest figure of 11 is where this library's own
+                // distribution breaks. Sixteen folders read 9.63 to 10.73
+                // and then 11.78 to 12.92, with a 1.05 dB gap between --
+                // wider than any other gap in the set. It was 12, from the
+                // published range, until five more folders landed between
+                // 11.78 and 12.15 and showed 12 cutting that upper cluster
+                // in half.
                 //
                 // `range` deliberately requires a low crest as well. Asking
                 // LRA alone marked every disco compilation in the library as
@@ -346,7 +351,7 @@ public struct Survey: Sendable {
                 // is the arrangement, and expanding it invents dynamics the
                 // record never had.
                 var wants: [String] = []
-                let flattened = (row.crest ?? 99) < 12.0
+                let flattened = (row.crest ?? 99) < 11.0
                 if row.clippedShare > 0.20 { wants.append("declip") }
                 if let lra = row.lra, lra < 6.0, flattened { wants.append("range") }
                 if flattened, row.crest != nil { wants.append("attack") }
@@ -378,8 +383,15 @@ public struct Survey: Sendable {
                     + "invention,",
                     "  not restoration, which is why nothing here does it.",
                     "",
+                    "  A '!' marks a drop of 20 dB or more: a wall rather than a "
+                    + "roll-off, and",
+                    "  a sign the files themselves are low-bitrate. That is a "
+                    + "re-rip, not a",
+                    "  setting -- no stage here can put back what the encoder "
+                    + "threw away.",
+                    "",
                     "   mean    vs ref      8k    10k   12.5k     16k     20k"
-                    + "   cliff   folder"]
+                    + "   cliff      folder"]
             for row in folders {
                 let versus = row.topDeficitVsReference.map { String(format: "%+7.2f", $0) }
                     ?? "      -"
@@ -392,9 +404,18 @@ public struct Survey: Sendable {
                 // reading could not see it.
                 let cliff: String
                 if let a = row.topCurve[16000.0], let b = row.topCurve[20000.0] {
-                    cliff = String(format: "%6.1f", a - b)
+                    // Twenty dB is a wall, not a roll-off. Chosen from what
+                    // the two things look like rather than from this
+                    // library: music falls a few dB across a third of an
+                    // octave, a codec's stop-band is thirty down inside a
+                    // fraction of one. It is bounded either side here --
+                    // fifteen folders measure 6.7 to 12.9 and one measures
+                    // 27.0, and that one is 51 files of low-bitrate MP3.
+                    let drop = a - b
+                    cliff = String(format: "%6.1f", drop)
+                        + (drop >= 20.0 ? " !" : "  ")
                 } else {
-                    cliff = "     -"
+                    cliff = "     -  "
                 }
                 out.append(String(format: "  %+6.2f  %@  %@  %@   %@",
                                   row.topMean.isFinite ? row.topMean : 0,

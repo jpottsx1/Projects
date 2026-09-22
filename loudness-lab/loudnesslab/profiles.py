@@ -44,7 +44,7 @@ FIELDS = {
     "target_lra": 0.0,      # loudness range to widen to; 0 is off
     "max_attenuation": 6.0, # dB the quiet passages may be pulled down by
     "transient": 0.0,       # dB of attack emphasis at an onset; 0 is off
-    "min_crest": 12.0,      # above this a track was never flattened
+    "min_crest": 11.0,      # above this a track was never flattened
 }
 
 BUILT_IN = {
@@ -180,13 +180,10 @@ BUILT_IN = {
     # relationship holds at r = -0.85, so this is the library speaking and
     # not four points of noise.
     #
-    # Two figures from that larger measurement bear on this profile. The
-    # modern reference corpus sits at crest 10.21 and LRA 5.45 -- in the
-    # same band as this 1999 material and below every pre-1990 folder
-    # measured, so there is no reference to aim at for dynamics and these
-    # targets have to stay absolute. And the 12 dB crest gate lands in a
-    # real gap: unlimited-era material reads 11.87 to 12.11 here, 1999 pop
-    # 9.88 to 10.73, and nothing at all in between.
+    # The modern reference corpus sits at crest 10.21 and LRA 5.45 -- in
+    # the same band as this 1999 material and below every pre-1990 folder
+    # measured -- so there is no reference to aim at for dynamics and these
+    # targets have to stay absolute.
     #
     # The top end needs nothing: these discs run 3.6 to 6.4 dB ABOVE the
     # reference at 8-16 kHz, and CD2 is the brightest folder measured
@@ -227,7 +224,21 @@ BUILT_IN = {
         # is only 0.85 dB -- so unlike the sub, one figure genuinely does
         # suit the whole corpus here.
         "transient": 3.0,
-        "min_crest": 12.0,
+    # Eleven, not twelve. The threshold started at 12 from the published
+    # range, and on eleven folders it looked vindicated: unlimited-era
+    # material read 11.87 to 12.11, 1999 pop 9.88 to 10.73, nothing in
+    # between. Five more folders filled that in. Sixteen folders now read
+    #
+    #   9.63 9.88 9.95 10.21 10.47 10.73 | 11.78 11.82 11.87 11.91 11.95
+    #   12.10 12.11 12.15 12.23 12.92
+    #
+    # and the largest gap is 10.73 to 11.78, midpoint 11.25. A gate at 12
+    # cuts the upper cluster in half, five folders either side of a line
+    # with nothing behind it.
+    #
+    # It changes nothing for this corpus, which sits at 9.63 to 10.73 and
+    # passes either gate. It changes what happens to everything else.
+        "min_crest": 11.0,
     },
 }
 

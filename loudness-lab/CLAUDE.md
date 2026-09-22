@@ -316,9 +316,10 @@ Exciter generates harmonics from a high-passed copy rather than boosting
 the band -- can put content where there is none, and that is invention
 rather than restoration, which is why nothing here does it.
 
-Top end runs ABOVE the reference everywhere -- +1.47 to +4.84 on the older
-corpora, +3.59 to +6.38 on the 99 discs -- so there is nothing to add up
-there. Levelling to -16 needs no track turned up.
+Top end runs above the reference in fifteen of sixteen folders, +1.47 to
++7.48, so there is nothing to add up there. The exception is `Disco
+Music` at -1.13, and that is the cliff rather than the mastering.
+Levelling to -16 needs no track turned up.
 
 **The 1999 corpus is the one the dynamics stages were built for**, and it
 is the first here whose problem is not a missing low end. By 1999 the
@@ -365,23 +366,28 @@ anything from a library average applies just as well to a library of four.
 
 ## What the whole library says about dynamics
 
-Eleven folders, 216 tracks, measured together:
+Sixteen folders, measured together. `cliff` is the 16k-to-20k drop:
 
-| folder | LRA | crest | clipped |
-|---|---|---|---|
-| DISCOinferno GOLD, Disc 01 | 4.10 | 12.92 | 53% |
-| DISCOinferno GOLD, Disc 02 | 3.91 | 12.23 | 76% |
-| 1977 - Dance Music | 4.23 | 12.11 | 0% |
-| 1980 - Dance Music | 4.26 | 12.10 | 0% |
-| 1983 - Dance Music | 4.18 | 11.91 | 0% |
-| 1974 - Dance Music | 5.06 | 11.87 | 0% |
-| Now Yearbook 99, CD1 | 4.44 | 10.73 | 50% |
-| Now Yearbook 99, CD4 | 5.66 | 10.47 | 60% |
-| **Gathered/New Music 2026-08-14** | **5.45** | **10.21** | 0% |
-| Now Yearbook 99, CD3 | 5.45 | 9.95 | 38% |
-| Now Yearbook 99, CD2 | 6.49 | 9.88 | 29% |
+| folder | LRA | crest | clipped | cliff |
+|---|---|---|---|---|
+| DISCOinferno GOLD, Disc 01 | 4.10 | 12.92 | 53% | 10.7 |
+| DISCOinferno GOLD, Disc 02 | 3.91 | 12.23 | 76% | 10.6 |
+| 1988 - Dance Music | 3.35 | 12.15 | 0% | 11.8 |
+| 1977 - Dance Music | 4.23 | 12.11 | 7% | 7.7 |
+| 1980 - Dance Music | 4.26 | 12.10 | 0% | 8.9 |
+| Acid House & Rave Peak-Time | 5.93 | 11.95 | 0% | 10.3 |
+| 1983 - Dance Music | 4.18 | 11.91 | 0% | 9.3 |
+| 1974 - Dance Music | 5.06 | 11.87 | 0% | 9.6 |
+| 1986 - Dance Music | 4.15 | 11.82 | 0% | 10.4 |
+| 1990 - Dance Music | 4.38 | 11.78 | 0% | 12.9 |
+| Now Yearbook 99, CD1 | 4.44 | 10.73 | 50% | 6.9 |
+| Now Yearbook 99, CD4 | 5.66 | 10.47 | 60% | 6.7 |
+| **Gathered/New Music 2026-08-14** | **5.45** | **10.21** | 0% | 12.2 |
+| Now Yearbook 99, CD3 | 5.45 | 9.95 | 38% | 10.0 |
+| Now Yearbook 99, CD2 | 6.49 | 9.88 | 29% | 8.8 |
+| **Disco Music** | 2.97 | 9.63 | 0% | **27.0** |
 
-Three things follow.
+Four things follow.
 
 **The reference corpus is itself compressed.** It sits at crest 10.21 and
 LRA 5.45, in the same band as the 1999 pop and below every pre-1990 folder
@@ -390,14 +396,39 @@ is nothing here to aim at, which the sub stage's design note predicted and
 this measures. `target_lra` and `min_crest` are absolute figures for that
 reason, and have to stay absolute.
 
-**The `min_crest` default of 12 lands in a real gap.** It was taken from
-the published range. Measured here, unlimited-era material (the four
-0%-clipped Dance Music folders) reads 11.87 to 12.11 and 1999 pop reads
-9.88 to 10.73. Nothing sits between 11.13 and 11.87. The threshold was
-lucky, and is now evidence.
+**The `min_crest` gate is 11, and the 12 it started at was wrong.** On
+eleven folders 12 looked vindicated: unlimited-era material read 11.87 to
+12.11, 1999 pop 9.88 to 10.73, nothing in between, and that was written
+down here as "the threshold was lucky, and is now evidence". Five more
+folders filled the gap in. Sixteen read
+
+    9.63 9.88 9.95 10.21 10.47 10.73 | 11.78 11.82 11.87 11.91 11.95
+    12.10 12.11 12.15 12.23 12.92
+
+and the largest gap is 10.73 to 11.78, midpoint 11.25 -- wider than any
+other gap in the set, and nowhere near 12, which cuts the upper cluster
+five and five. The gate is now 11. It changes nothing for the 1999
+material, which passes either; it changes what happens to everything
+else.
+
+That is twice now that a clean-looking result on this library has
+dissolved when more of the library arrived. Both times the tell was the
+same: a claim resting on there being nothing in a gap.
+
+**Sixteen folders, and one of them is not a mastering problem at all.**
+`Disco Music`, 51 tracks, measures a 16k-to-20k cliff of **27.0 dB**
+against 6.7 to 12.9 for every other folder in the library -- a wall, not a
+roll-off, and the signature of a low-bitrate encode. It is also the only
+folder whose top end sits BELOW the reference (-1.13), and entirely
+because of that cliff: its 8k, 10k and 12.5k bands are ordinary.
+
+So the one folder that looks like it needs air is the one where air
+cannot help, because the content is not missing from the mastering, it
+was thrown away by an encoder. No stage here can put that back. It wants
+re-ripping, and the table now marks it with a `!`.
 
 **LRA and crest run opposite, r = -0.85 over eleven folders.** The
-anti-correlation first seen on four discs holds on a larger sample. The
+anti-correlation first seen on four discs held on a larger sample. The
 old material has the punch and none of the range; the new material has
 what range there is and no punch. No single "how squashed is it" number
 orders this library correctly, which is the whole case for two stages.
@@ -437,17 +468,21 @@ now read `declip`, which is what is actually wrong with them.
 
 ## Open
 
-1. **The `nineties` profile has never been listened to.** Its settings
+1. **`Disco Music` is 51 files that want re-ripping, not processing.** A
+   27 dB cliff at 16k means a low-bitrate encode, and nothing here can
+   put back what the encoder discarded. Worth doing before any of it goes
+   through a lossy stage and gets a second generation on top.
+2. **The `nineties` profile has never been listened to.** Its settings
    come from one measured corpus, which is how every other profile here
    was set, but nothing has been processed with it and no ear has been on
    the result. The two figures to check afterwards are crest (predicted
-   10.3 -> about 11.8) and LRA (5.4 -> 7.0); if either misses, the
+   10.0 -> about 11.5) and LRA (5.4 -> 7.0); if either misses, the
    exchange rate measured on a synthetic fixture does not hold on real
    music, which is a finding worth having.
-2. **Serato markers only travel MP3 to MP3.** FLAC and M4A carry them
+3. **Serato markers only travel MP3 to MP3.** FLAC and M4A carry them
    too, in Vorbis comments and com.serato.dj atoms, but going between
    containers is translation rather than copying and needs a real Serato
    file of each to check against.
-3. **Nobody but Jeff has run this.** No licence file, no signing
+4. **Nobody but Jeff has run this.** No licence file, no signing
    identity, and ffmpeg's licensing needs a real answer before anything
    is sold. `libmp3lame` is GPL.

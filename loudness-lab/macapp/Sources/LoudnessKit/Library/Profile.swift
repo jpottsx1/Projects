@@ -35,6 +35,10 @@ public struct Profile: Codable, Equatable, Sendable {
     public var maxAttenuation: Double = 6.0  // how far the quiet parts may drop
     public var transient: Double = 0.0       // dB of emphasis at an onset
     public var minCrest: Double = 11.0       // above this, nothing flattened it
+    // Air. The one stage that invents rather than restores, so off by
+    // default and a taste control rather than a repair.
+    public var air: Double = 0.0             // dB of generated harmonics
+    public var airTune: Double = 3500.0      // Hz they are generated from
 
     public init() {}
 
@@ -51,6 +55,8 @@ public struct Profile: Codable, Equatable, Sendable {
         case targetLRA = "target_lra"
         case maxAttenuation = "max_attenuation"
         case minCrest = "min_crest"
+        case air
+        case airTune = "air_tune"
     }
 
     /// Tolerant of a key that is not there, which the synthesised decoder
@@ -89,6 +95,8 @@ public struct Profile: Codable, Equatable, Sendable {
         maxAttenuation = try number(.maxAttenuation, fallback.maxAttenuation)
         transient = try number(.transient, fallback.transient)
         minCrest = try number(.minCrest, fallback.minCrest)
+        air = try number(.air, fallback.air)
+        airTune = try number(.airTune, fallback.airTune)
     }
 
     public static let estimators = ["lufs_i", "s_p50", "s_p90", "s_p95", "s_max"]

@@ -147,7 +147,7 @@ every machine but the one that made it for a while.
 
 ```
 loudnesslab/     the Python: bs1770, spectrum, subbass, declip, expand,
-                 mp3gain, decode, db, report, render, write, cli
+                 air, mp3gain, decode, db, report, render, write, cli
 tests/           its tests
 tools/           make_golden.py and the five checkers
 macapp/
@@ -262,9 +262,10 @@ harder" actually wants is mostly the transient stage plus a modest range
 target -- so both are off by default, and the survey's "wants" column is
 there to be read before either is turned on.
 
-Chain order: declip, range, transient, sub, level. Each stage wants the
-signal the one before it produced, and the sub goes last because it is the
-only one adding something that was never there.
+Chain order: declip, range, transient, sub, air, level. Each stage wants
+the signal the one before it produced. The sub is late because it adds
+something that was never there; air is later still because it generates
+from what is there, and by then what is there is finished.
 
 ## Where this got to
 
@@ -311,10 +312,55 @@ spectrum runs to 20k -- and simply was not shown. It is now, with the
 
 That is the number that answers whether air is an option, because a shelf
 can only lift what is there. Recorded music rolls off a few dB across that
-step; a codec falls off a wall. Only a harmonic exciter -- an Aphex Aural
-Exciter generates harmonics from a high-passed copy rather than boosting
-the band -- can put content where there is none, and that is invention
-rather than restoration, which is why nothing here does it.
+step; a codec falls off a wall.
+
+### The exciter
+
+Built, because a shelf is the wrong tool and asking for one on this
+material would have done nothing. `air.py` high-passes the track, runs
+the result through an asymmetric soft-clip, and mixes the harmonics back:
+5 kHz of material becomes 10 and 15 and 20 kHz of new content. On a
+fixture with everything above 16 kHz removed, a 3 dB shelf moved the
+16-22 kHz band by 3 dB -- which is 3 dB more of nothing -- and 3 dB of
+air moved it by 16.
+
+**It invents, and that is stated rather than implied.** Every other stage
+restores something a measurement says was taken away. These harmonics
+were never in the recording. So it is off by default, and the report says
+what the band actually did rather than what was asked for.
+
+Four things it has to get right, each measured:
+
+- **Aliasing.** A non-linearity makes harmonics without end and every one
+  above Nyquist folds back down as an inharmonic product -- grit, landing
+  in the region being polished. On a 7 kHz tone the 4th and 5th fold to
+  20 kHz and 13 kHz at -29.6 and -38.8 dB. Run the curve at 4x and filter
+  on the way back: -91.1 and -97.7. Sixty decibels, for one resampling
+  either side.
+- **The linear term.** `tanh` is very nearly linear near the origin, so
+  the harmonic path carries a scaled copy of the source, adds coherently
+  and overshoots -- +1 dB asked for came back as +3.13. Subtracting the
+  curve's small-signal gain leaves only what is non-linear. Without it
+  the stage is a high shelf with grit on it and the whole argument for it
+  is false.
+- **The cross term.** The second harmonic of 4-8 kHz lands at 8-16 kHz,
+  where the source already is, so dry and wet are correlated. Assuming
+  they were not undershot by 18% at drive 3. The gain is solved as a
+  quadratic instead and the amount is then exact to 0.02 dB.
+- **What it costs.** Loudness barely moves (+0.04 dB at 2 dB of air),
+  which is the famous property. Peak moves a great deal, because the
+  harmonics land on the source's own peaks -- and it is real sample peak,
+  not intersample overshoot. The levelling takes it back out, which is
+  why this is a small control.
+
+`drive` is 0.5 and was measured, not chosen. Because the band energy is
+normalised, drive does not change how much air comes out; it changes what
+it costs in peak, and that cost is a U:
+
+    drive   0.25   0.50   0.75   1.00   1.50   2.00   3.00
+    peak +  2.50   2.11   2.47   2.79   3.34   3.77   4.33
+
+with the 16-22 kHz content flat throughout. Half is the floor.
 
 Top end runs above the reference in fifteen of sixteen folders, +1.47 to
 +7.48, so there is nothing to add up there. The exception is `Disco

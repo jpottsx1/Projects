@@ -217,6 +217,54 @@ enum Help {
         material that never needed it.
         """)
 
+    static let air = HelpEntry(
+        title: "Air",
+        summary: "Generate a top end where a shelf has nothing to lift. Off at zero.",
+        detail: """
+        The one control here that INVENTS. Everything else restores something \
+        a measurement says was taken away; this makes harmonics that were \
+        never in the recording and mixes them in.
+
+        That is the point of it. A high shelf multiplies what is in the band, \
+        so where the band is empty — a lossy codec cut it, a tape rolled off — \
+        a shelf raises the noise under it and nothing else. A harmonic \
+        generator takes the octave below and folds its overtones upward, so 5 \
+        kHz of material becomes 10 and 15 and 20 kHz of new content. Musically \
+        related to the source, which is why it reads as detail rather than as \
+        hiss.
+
+        Measured on a track with everything above 16 kHz removed: a 3 dB shelf \
+        moved the 16–22 kHz band by 3 dB, which is 3 dB more of nothing. 3 dB \
+        of air moved it by 16.
+
+        The number is what the 8–20 kHz band actually rises by, not a mix \
+        level — the harmonics are scaled to hit it and the run reports what it \
+        got. Loudness barely moves, which is the famous thing about an \
+        exciter; peak moves a great deal, because the harmonics land on the \
+        source's own peaks. The levelling that ends the chain takes that back \
+        out, but it is why this is a small control.
+
+        Check the survey's cliff column first. A folder with a gentle roll-off \
+        already has a top end and this is taste; one with a wall has had it \
+        thrown away by an encoder, and the honest fix there is a better rip.
+        """)
+
+    static let airTune = HelpEntry(
+        title: "Air from",
+        summary: "Where the harmonics are generated from, upward.",
+        detail: """
+        The exciter high-passes the track at this frequency and makes \
+        harmonics of what it finds, so the new content lands an octave above \
+        and up. 3.5 kHz feeds 7 kHz and above — presence and air.
+
+        Lower is fuller and cheaper. Higher is more sizzle and costs a great \
+        deal more headroom: asking for 3 dB of air on the same fixture cost \
+        2.2 dB of peak tuned at 2 kHz, 4.3 dB at 3.5 kHz and 7.3 dB at 5 kHz.
+
+        It does not change how much air comes out — that is set by the amount, \
+        and normalised — only what it is made of and what it costs.
+        """)
+
     static let output = HelpEntry(
         title: "To",
         summary: "Where processed files go. Originals are never written to.",
@@ -549,6 +597,7 @@ enum Help {
         HelpSection("Sub bass", [amount, auto, reference, maxAmount, minActivity]),
         HelpSection("Attack", [punch, punchDecay]),
         HelpSection("Dynamics", [targetLRA, maxAttenuation, transient, minCrest]),
+        HelpSection("Air", [air, airTune]),
         HelpSection("Level", [target, estimator, peakCeiling]),
         HelpSection("The run", [limit, format, output, compare, dryRun]),
         HelpSection("Listening", [switching, matchLoudness, blind]),

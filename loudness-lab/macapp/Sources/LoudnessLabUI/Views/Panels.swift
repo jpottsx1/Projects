@@ -255,6 +255,29 @@ struct SettingsPanel: View {
 
                 Divider()
 
+                slider(Help.air, $profile.air, 0...6, "dB",
+                       // Off is the default. Past about 3 the peak cost
+                       // starts eating the headroom the levelling needs.
+                       sweet: 0...3)
+                Text("Makes a top end out of harmonics rather than lifting "
+                     + "one that is not there. Zero turns it off.")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .help(Help.air.detail)
+                if profile.air > 0 {
+                    // In kHz, because the shared slider steps by 0.5 and
+                    // half a hertz across a six-kilohertz range is a
+                    // control nobody can place.
+                    slider(Help.airTune, Binding(
+                        get: { profile.airTune / 1000 },
+                        set: { profile.airTune = $0 * 1000 }),
+                        1.5...8.0, "kHz",
+                        // Measured: 3 dB of air cost 2.2 dB of peak tuned
+                        // at 2 kHz, 4.3 at 3.5 and 7.3 at 5.
+                        sweet: 2.0...4.0)
+                }
+
+                Divider()
+
                 slider(Help.target, $profile.target, -24...(-8), "LUFS",
                        // Measured on this library: at -16 nothing needs
                        // a boost, at -14 almost nothing does.

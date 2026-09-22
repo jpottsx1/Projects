@@ -305,6 +305,8 @@ final class Engine: ObservableObject {
                 "--max-attenuation", String(profile.maxAttenuation),
                 "--transient", String(profile.transient),
                 "--min-crest", String(profile.minCrest),
+                "--air", String(profile.air),
+                "--air-tune", String(profile.airTune),
             ]
             if profile.auto { arguments += ["--auto"] }
             if let reference = profile.reference, !reference.isEmpty {

@@ -19,7 +19,8 @@ from pathlib import Path
 
 import numpy as np
 
-from . import bs1770, declip, decode, expand, spectrum, subbass, write
+from . import (air, bs1770, declip, decode, expand, spectrum, subbass,
+               write)
 
 
 def default_jobs() -> int:
@@ -97,7 +98,8 @@ def one(job: dict) -> dict:
     if skip is not None:
         return {**base, "status": "skipped", "reason": skip, "amount": None,
                 "range": expand._blank_range("not reached"),
-                "transient": expand._blank_transient("not reached")}
+                "transient": expand._blank_transient("not reached"),
+                "air": air._blank("not reached")}
 
     amount = float(job["amount"])
     note_skip = None
@@ -147,8 +149,8 @@ def one(job: dict) -> dict:
             if not (ranged["applied"] or shaped["applied"]
                     or (clip is not None and clip["restored"])):
                 return {**base, "status": "skipped", "reason": skip,
-                        "amount": None, "clip": clip,
-                        "range": ranged, "transient": shaped}
+                        "amount": None, "clip": clip, "range": ranged,
+                        "transient": shaped, "air": air._blank("not reached")}
             note_skip = skip
 
         after, info = subbass.enhance(audio, decode.TARGET_RATE,
@@ -156,6 +158,17 @@ def one(job: dict) -> dict:
                                       freq=job["freq"], decay_s=job["decay"],
                                       punch_db=job["punch"],
                                       punch_decay_ms=job["punch_decay"])
+        # Air last of the spectral stages, because it generates from what
+        # is there and by this point what is there is finished. It is also
+        # the only one that can push the file above full scale on its own,
+        # so the levelling that follows is what takes that back out.
+        aired = air._blank("not asked for")
+        if job.get("air", 0.0) > 0:
+            after, aired = air.excite(after, decode.TARGET_RATE,
+                                      amount_db=job["air"],
+                                      tune_hz=job.get("air_tune",
+                                                      air.DEFAULT_TUNE_HZ))
+
         kicks, _ = subbass.detect_kicks(audio, decode.TARGET_RATE)
         # Against the ORIGINAL, not against the de-clipped intermediate: the
         # columns say "was", and what the track was is what arrived.
@@ -218,13 +231,15 @@ def one(job: dict) -> dict:
         return {**base, "status": "error",
                 "reason": f"{type(exc).__name__}: {exc}"[:500], "amount": None,
                 "range": expand._blank_range("failed"),
-                "transient": expand._blank_transient("failed")}
+                "transient": expand._blank_transient("failed"),
+                "air": air._blank("failed")}
 
     # "no spectral change asked for" contradicts the header on a de-clipping
     # run, where de-clipping IS the change that was asked for.
     reason = note_skip or info["note"]
     if reason == "no spectral change asked for" and (
-            job["declip"] or ranged["applied"] or shaped["applied"]):
+            job["declip"] or ranged["applied"] or shaped["applied"]
+            or aired["applied"]):
         # The note is about the SUB, and on a run whose point was
         # de-clipping, range or attack it reads as a complaint that nothing
         # happened -- on a row that shows what happened.
@@ -243,7 +258,7 @@ def one(job: dict) -> dict:
     return {
         **base, "status": "ok", "amount": amount, "reason": reason,
         "clip": clip, "manifest": manifest,
-        "range": ranged, "transient": shaped,
+        "range": ranged, "transient": shaped, "air": aired,
         "kicks_per_minute": float(info["kicks_per_minute"]),
         "shape_before": float(_mean_low(before_bands)),
         "shape_after": float(_mean_low(after_bands)),

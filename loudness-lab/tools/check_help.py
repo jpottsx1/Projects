@@ -44,6 +44,8 @@ DOCUMENTED_BY = {
     "maxAttenuation": "maxAttenuation",
     "transient": "transient",
     "minCrest": "minCrest",
+    "air": "air",
+    "airTune": "airTune",
 }
 
 

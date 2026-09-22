@@ -45,6 +45,10 @@ FIELDS = {
     "max_attenuation": 6.0, # dB the quiet passages may be pulled down by
     "transient": 0.0,       # dB of attack emphasis at an onset; 0 is off
     "min_crest": 11.0,      # above this a track was never flattened
+    # Air. The one stage that invents rather than restores, so off by
+    # default and a taste control rather than a repair.
+    "air": 0.0,             # dB added to 8-20 kHz as generated harmonics
+    "air_tune": 3500.0,     # Hz the harmonics are generated from, upward
 }
 
 BUILT_IN = {

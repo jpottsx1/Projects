@@ -16,7 +16,7 @@ import time
 from pathlib import Path
 
 from . import (__version__, analyze, apply_gain, bs1770, db, declip, decode,
-               expand, mp3gain, profiles, render, report, subbass,
+               air, expand, mp3gain, profiles, render, report, subbass,
                write)
 
 
@@ -214,8 +214,9 @@ def _policy_preview(outcomes: list) -> str:
                      f"{len(subs):>6}{bucket['gated']:>7}{median:>8}{largest:>7}")
     lines += ["",
               "  'level only' is a track already at the reference, so it needs no",
-              "  sub -- it may still have had range or attack work, which is the",
-              "  table above. 'gated' is one whose sub octave holds a floor rather",
+              "  sub -- it may still have had range, attack or air work, which",
+              "  is the table above. 'gated' is one whose sub octave holds a floor",
+              "  rather",
               "  than a bassline. Neither is a failure; both are the policy",
               "  declining to act, which is most of what a good policy does."]
     return "\n".join(lines)
@@ -343,13 +344,13 @@ def cmd_subbass(args: argparse.Namespace) -> int:
         return 2
     if (not args.auto and args.amount <= 0 and args.punch <= 0
             and not args.declip and args.target_lra <= 0
-            and args.transient <= 0):
+            and args.transient <= 0 and args.air <= 0):
         # level-only is a gain policy. Running this command under it would
         # decode every track, change nothing, and write pairs of identical
         # files -- worse than useless, because it looks like work happened.
         return fail(
-            "This profile changes nothing (sub, punch, declip, range and "
-            "attack are all off).\nNothing to do -- levelling is the "
+            "This profile changes nothing (sub, punch, declip, range, "
+            "attack and air are all off).\nNothing to do -- levelling is the "
             "gain command:\n  ./loudness-lab gain <path> --profile "
             f"{args.profile or 'level-only'}", 0)
     if args.auto and not args.reference:
@@ -493,6 +494,7 @@ def cmd_subbass(args: argparse.Namespace) -> int:
             "target_lra": args.target_lra,
             "max_attenuation": args.max_attenuation,
             "transient": args.transient, "min_crest": args.min_crest,
+            "air": args.air, "air_tune": args.air_tune,
             "target": args.target, "estimator": args.estimator,
             "peak_ceiling": args.peak_ceiling,
             "compare": not args.no_compare, "dry_run": bool(args.dry_run),
@@ -525,7 +527,9 @@ def cmd_subbass(args: argparse.Namespace) -> int:
         f"{subbass.PUNCH_LOW_HZ / 1000:.0f}-{subbass.PUNCH_HIGH_HZ / 1000:.0f} kHz"
         + (f"  declip<={args.declip_max:.0f} dB" if args.declip else "")
         + (f"  range->{args.target_lra:.0f} LU" if args.target_lra > 0 else "")
-        + (f"  attack+{args.transient:.0f} dB" if args.transient > 0 else ""))
+        + (f"  attack+{args.transient:.0f} dB" if args.transient > 0 else "")
+        + (f"  air+{args.air:.0f} dB from {args.air_tune / 1000:.1f}k"
+           if args.air > 0 else ""))
     out("=" * 104)
     out("  Lossy and irreversible, unlike the gain pass. Originals are never")
     out(f"  touched; these are new {write.label(args.format)} files to "
@@ -558,12 +562,14 @@ def cmd_subbass(args: argparse.Namespace) -> int:
             f"{'match':>8s}{'snap':>7s}"
             + (f"{'clips':>7s}{'lift':>7s}" if args.declip else "")
             + (f"{'LRA':>10s}" if args.target_lra > 0 else "")
-            + (f"{'crest':>10s}" if args.transient > 0 else ""))
+            + (f"{'crest':>10s}" if args.transient > 0 else "")
+            + (f"{'air':>7s}" if args.air > 0 else ""))
 
     blank = (f"{'':>10}{'':>11}{'':>8}{'':>8}{'':>7}{'':>7}{'':>8}{'':>7}"
              + (f"{'':>7}{'':>7}" if args.declip else "")
              + (f"{'':>10}" if args.target_lra > 0 else "")
-             + (f"{'':>10}" if args.transient > 0 else ""))
+             + (f"{'':>10}" if args.transient > 0 else "")
+             + (f"{'':>7}" if args.air > 0 else ""))
 
     def report_one(done: int, total: int, result: dict) -> None:
         if porcelain:
@@ -577,7 +583,8 @@ def cmd_subbass(args: argparse.Namespace) -> int:
                    "lra_before": (result.get("range") or {}).get("lra_before"),
                    "lra_after": (result.get("range") or {}).get("lra_after"),
                    "crest_before": (result.get("transient") or {}).get("crest_before"),
-                   "crest_after": (result.get("transient") or {}).get("crest_after")})
+                   "crest_after": (result.get("transient") or {}).get("crest_after"),
+                   "air_db": (result.get("air") or {}).get("measured_db")})
             return
         if result["status"] == "error":
             print(f"  {result['name'][:39]:<40s}  FAILED: {result['reason']}")
@@ -600,6 +607,8 @@ def cmd_subbass(args: argparse.Namespace) -> int:
                      if args.target_lra > 0 else "")
                   + (f"{_pair(shaped.get('crest_before'), shaped.get('crest_after')):>10s}"
                      if args.transient > 0 else "")
+                  + (f"{(result.get('air') or {}).get('measured_db', 0.0):>+7.2f}"
+                     if args.air > 0 else "")
                   + note)
 
     results = render.run(jobs, workers=workers, progress=report_one)
@@ -613,6 +622,8 @@ def cmd_subbass(args: argparse.Namespace) -> int:
               if r.get("range") and r["status"] != "error"]
     shapes = [r["transient"] for r in results
               if r.get("transient") and r["status"] != "error"]
+    airs = [r["air"] for r in results
+            if r.get("air") and r["status"] != "error"]
     manifest = [r["manifest"] for r in results if r.get("manifest")]
 
     out()
@@ -622,6 +633,9 @@ def cmd_subbass(args: argparse.Namespace) -> int:
     if args.target_lra > 0 or args.transient > 0:
         out(expand.summarise(ranges if args.target_lra > 0 else [],
                              shapes if args.transient > 0 else []))
+        out()
+    if args.air > 0:
+        out(air.summarise(airs))
         out()
     out(_policy_preview(outcomes))
     out()
@@ -1200,6 +1214,17 @@ def build_parser() -> argparse.ArgumentParser:
                           "ratio already reaches this, because nothing "
                           f"flattened it (default "
                           f"{profiles.FIELDS['min_crest']:.0f} dB)")
+    sub.add_argument("--air", type=float, default=None, metavar="DB",
+                     help="dB of generated harmonics added to 8-20 kHz, for "
+                          "a top end a shelf cannot help because a codec "
+                          "emptied it. This one INVENTS -- the harmonics "
+                          "were never in the recording. 0 is off")
+    sub.add_argument("--air-tune", type=float, default=None, metavar="HZ",
+                     help="--air: the frequency the harmonics are generated "
+                          "from, upward (default "
+                          f"{profiles.FIELDS['air_tune'] / 1000:.1f} kHz). "
+                          "Lower is fuller and costs less peak; higher is "
+                          "more sizzle and costs a great deal more")
     sub.add_argument("--summary-only", action="store_true",
                      help="print only the policy preview, not a row per track")
     sub.add_argument("--dry-run", action="store_true",

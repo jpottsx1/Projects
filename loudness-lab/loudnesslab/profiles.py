@@ -140,6 +140,67 @@ BUILT_IN = {
         # material is full of gated reverb rather than attack.
         "punch": 0.0,
     },
+    # Measured on "Now Yearbook 99 (2026)", 82 tracks over four CDs, against
+    # the same 43-track modern reference the others use. The first corpus
+    # here whose problem is NOT a missing low end.
+    #
+    #   low end 31.5-63 Hz   CD4 -18.53  CD1 -18.43  CD3 -18.21  CD2 -17.38
+    #   reference            -14.89
+    #
+    # A deficit of 2.5 to 3.6 dB, against 6.2-10.9 for the eighties and
+    # 4.9-7.4 for the disco. By 1999 the bottom end was being put there. So
+    # the sub caps at 4, just above the measured worst, on the same rule
+    # that gave disco 8 and the eighties 11.
+    #
+    # What IS wrong with it is everything the loudness war did:
+    #
+    #   median LUFS-I   -9.48        median true peak  +0.86 dBTP
+    #   median s_p95    -7.71        median LRA         5.40
+    #   crest (peak - LUFS-I)        10.34 dB
+    #   arrived clipped              36 of 82 (43.9%), CD4 at 60%
+    #   worst offender               9652 clipped runs
+    #
+    # Crest at 10.3 is squarely in the hard-limited band (8-11 dB), and LRA
+    # at 5.4 in the loudness-war band (4-6). Both stages have something to
+    # do here, which is not true of any other corpus in this library.
+    #
+    # The top end needs nothing: these discs run 3.6 to 6.4 dB ABOVE the
+    # reference at 8-16 kHz, and CD2 is the brightest folder measured
+    # anywhere in the library.
+    "nineties": {
+        "description": "Late 1990s pop. Low end nearly there (2.5-3.6 dB "
+                       "short), but hard-limited: crest 10.3, LRA 5.4, 44% "
+                       "arrived clipped. Needs `reference`. Lossy.",
+        "target": -16.0, "estimator": "s_p95", "peak_ceiling": -1.0,
+        "auto": True,
+        "max_amount": 4.0,
+        # The default. Nothing has measured sub-octave activity on this
+        # material, and moving a gate on a guess is how a static floor gets
+        # mistaken for a bassline.
+        "min_activity": 20.0,
+        # 44% of the corpus, and 60% of CD4 -- between the eighties (0-10%,
+        # off) and the disco reissue (53-76%, on). The worst track carries
+        # 9652 clipped runs against the disco worst of 398, so expect the
+        # SMALLEST gain here: de-clipping returns about 2 dB at light
+        # clipping and 0.4 at heavy, and this is heavy.
+        "declip": True,
+        # Off. 2-6 kHz on this material is programmed hats and samples, and
+        # the top end already sits above the reference.
+        "punch": 0.0,
+        # From 5.40. Deliberately modest: +1.6 LU, which drops the quietest
+        # passages 1.6 dB and never approaches the 6 dB cap. A bigger target
+        # would make these duck under the next record, which for a DJ is the
+        # failure and not the feature.
+        "target_lra": 7.0,
+        # Crest 10.34 -> about 11.8 at roughly half a dB per dB. That lands
+        # just under the gate rather than past it, which is the intent: the
+        # stage should stop being needed, not overshoot into a different
+        # kind of wrong. Note the exchange rate was measured on a synthetic
+        # fixture, so the figure is an extrapolation until this corpus is
+        # processed and re-measured.
+        "transient": 3.0,
+        "min_crest": 12.0,
+    },
 }
 
 DEFAULT_FILE = Path("profiles.json")

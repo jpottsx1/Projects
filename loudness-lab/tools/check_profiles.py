@@ -22,6 +22,8 @@ from loudnesslab import profiles  # noqa: E402
 
 # Swift spelling -> Python spelling.
 NAMES = {
+    "targetLRA": "target_lra", "maxAttenuation": "max_attenuation",
+    "transient": "transient", "minCrest": "min_crest",
     "target": "target", "estimator": "estimator", "peakCeiling": "peak_ceiling",
     "auto": "auto", "reference": "reference", "amount": "amount",
     "maxAmount": "max_amount", "minActivity": "min_activity",

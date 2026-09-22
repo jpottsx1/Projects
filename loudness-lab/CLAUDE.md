@@ -41,6 +41,7 @@ swift test --package-path macapp             # 42 golden tests, ~2 min
 python3 tools/check_golden.py                # vectors vs the Swift structs
 python3 tools/check_manifest.py              # manifest vs the Swift structs
 python3 tools/check_help.py                  # every setting has help text
+python3 tools/check_profiles.py              # the two profile lists agree
 find macapp -name '*.swift' | xargs python3 tools/check_braces.py
 ```
 
@@ -73,13 +74,14 @@ Python measurement, and commit the result.
 It is deterministic: regenerating without a behaviour change should produce
 no diff. A diff you did not expect is a finding.
 
-Four checks run without a Swift toolchain, so they work anywhere. Each one
+Five checks run without a Swift toolchain, so they work anywhere. Each one
 exists because the mistake it catches cost a round trip to a Mac:
 
 ```sh
 python3 tools/check_golden.py    # will golden.json decode into the Swift structs?
 python3 tools/check_manifest.py  # will the manifest the Python writes?
 python3 tools/check_help.py      # does every setting have help text?
+python3 tools/check_profiles.py  # do the two profile lists agree?
 python3 tools/check_braces.py macapp/Sources/**/*.swift   # do the braces balance?
 ```
 
@@ -147,7 +149,7 @@ every machine but the one that made it for a while.
 loudnesslab/     the Python: bs1770, spectrum, subbass, declip, expand,
                  mp3gain, decode, db, report, render, write, cli
 tests/           its tests
-tools/           make_golden.py and the four checkers
+tools/           make_golden.py and the five checkers
 macapp/
   Sources/LoudnessKit/    the port: DSP, Loudness, Process, IO, Library
   Sources/LoudnessLabUI/  the app: Engine, ABPlayer, Views
@@ -288,18 +290,43 @@ What was measured on this library, all of it against
 | 100 Hits New Romantics (2011), 5 discs | -6.18 to -10.92 | 0% on four, 10% on one | ~4.5 |
 | DISCOinferno GOLD (2003), 2 discs | -4.91, -7.35 | 53%, 76% | ~4.1 |
 | Disco Delight | -4.80 | 18% | 3.71 |
+| Now Yearbook 99 (2026), 4 CDs | -2.49 to -3.64 | 29% to 60% | 5.40 |
 
-Top end runs +1.47 to +4.84 ABOVE the reference everywhere, so there is
-nothing to add up there. Levelling to -16 needs no track turned up.
+Top end runs ABOVE the reference everywhere -- +1.47 to +4.84 on the older
+corpora, +3.59 to +6.38 on the 99 discs -- so there is nothing to add up
+there. Levelling to -16 needs no track turned up.
+
+**The 1999 corpus is the one the dynamics stages were built for**, and it
+is the first here whose problem is not a missing low end. By 1999 the
+bottom end was being put there: 2.5 to 3.6 dB short, against 6.2-10.9 for
+the eighties. What is wrong with it is the loudness war itself --
+
+    median LUFS-I  -9.48      median true peak  +0.86 dBTP
+    median s_p95   -7.71      median LRA         5.40
+    crest                     10.34 dB
+    arrived clipped           36 of 82 (43.9%), CD4 at 60%
+    worst offender            9652 clipped runs
+
+-- crest at 10.3 sitting in the hard-limited band (8-11) and LRA at 5.4 in
+the loudness-war band (4-6). Hence the `nineties` profile: a sub capped at
+4, de-clipping on, `target_lra` 7.0 and `transient` 3.0.
+
+Note what that does NOT say. Crest here is the median peak minus the
+median loudness, which is close to but not the same as the median of the
+per-track crest, and the transient stage's exchange rate (about half a dB
+of crest per dB asked for) was measured on a synthetic fixture. Both are
+good enough to choose a starting setting and neither is a result. Process
+the corpus and measure it again.
 
 ## Open
 
-1. **The dynamics stages have never been set from THIS library.** Both
-   are built, tested and off by default, and their thresholds come from
-   the published ranges rather than from anything measured here. The
-   survey now reports LRA and crest per folder with a "wants" column;
-   measure the 1990s material and set `target_lra` and `min_crest` from
-   what comes back, the way `eighties` got its cap of 11.
+1. **The `nineties` profile has never been listened to.** Its settings
+   come from one measured corpus, which is how every other profile here
+   was set, but nothing has been processed with it and no ear has been on
+   the result. The two figures to check afterwards are crest (predicted
+   10.3 -> about 11.8) and LRA (5.4 -> 7.0); if either misses, the
+   exchange rate measured on a synthetic fixture does not hold on real
+   music, which is a finding worth having.
 2. **Serato markers only travel MP3 to MP3.** FLAC and M4A carry them
    too, in Vorbis comments and com.serato.dj atoms, but going between
    containers is translation rather than copying and needs a real Serato

@@ -170,7 +170,59 @@ public struct Profile: Codable, Equatable, Sendable {
         // floor gets mistaken for a bassline.
         eighties.minActivity = 20
 
+        // Measured on "Now Yearbook 99 (2026)", 82 tracks over four CDs,
+        // against the same 43-track modern reference the others use. The
+        // first corpus here whose problem is NOT a missing low end.
+        //
+        //   low end 31.5-63 Hz  CD4 -18.53  CD1 -18.43  CD3 -18.21  CD2 -17.38
+        //   reference           -14.89
+        //
+        // A deficit of 2.5 to 3.6 dB, against 6.2-10.9 for the eighties and
+        // 4.9-7.4 for the disco. By 1999 the bottom end was being put there.
+        //
+        // What IS wrong with it is everything the loudness war did:
+        //
+        //   median LUFS-I  -9.48      median true peak  +0.86 dBTP
+        //   median s_p95   -7.71      median LRA         5.40
+        //   crest                     10.34 dB
+        //   arrived clipped           36 of 82 (43.9%), CD4 at 60%
+        //   worst offender            9652 clipped runs
+        //
+        // Crest at 10.3 is squarely in the hard-limited band (8-11) and LRA
+        // at 5.4 in the loudness-war band (4-6). Both dynamics stages have
+        // something to do here, which is not true of any other corpus in
+        // this library. The top end needs nothing: these discs run 3.6 to
+        // 6.4 dB ABOVE the reference at 8-16 kHz.
+        var nineties = Profile()
+        nineties.description = "Late 1990s pop. Low end nearly there "
+            + "(2.5-3.6 dB short), but hard-limited: crest 10.3, LRA 5.4, "
+            + "44% arrived clipped. Needs a reference. Lossy."
+        nineties.auto = true
+        // Just above the measured worst of 3.64, on the same rule that gave
+        // disco 8 against 7.35 and the eighties 11 against 10.92.
+        nineties.maxAmount = 4
+        nineties.minActivity = 20
+        // Between the eighties (0-10%, off) and the disco reissue (53-76%,
+        // on). Expect the SMALLEST gain here: de-clipping returns about
+        // 2 dB at light clipping and 0.4 at heavy, and 9652 runs is heavy.
+        nineties.declip = true
+        // Off. 2-6 kHz here is programmed hats and samples, and the top end
+        // already sits above the reference.
+        nineties.punch = 0
+        // From 5.40, deliberately modest: +1.6 LU drops the quietest
+        // passages 1.6 dB and never approaches the cap. A bigger target
+        // would make these duck under the next record, which for a DJ is
+        // the failure and not the feature.
+        nineties.targetLRA = 7
+        // Crest 10.34 -> about 11.8 at roughly half a dB per dB, landing
+        // just under the gate rather than past it. The exchange rate was
+        // measured on a synthetic fixture, so that is an extrapolation
+        // until this corpus is processed and measured again.
+        nineties.transient = 3
+        nineties.minCrest = 12
+
         return ["level-only": levelOnly, "restore": restore,
-                "disco-70s": disco, "eighties": eighties]
+                "disco-70s": disco, "eighties": eighties,
+                "nineties": nineties]
     }()
 }

@@ -186,6 +186,36 @@ def measure(x: np.ndarray, rate: int = RATE) -> dict:
     return result
 
 
+def short_term_series(x: np.ndarray, rate: int = RATE):
+    """The short-term loudness curve, and the moment each value describes.
+
+    `measure` returns the GATED short-term values, which is right for a
+    percentile and useless for a gain: gating removes blocks, so what comes
+    back can no longer be lined up against the audio it came from. This
+    returns every block with its centre time.
+
+    Centres, not starts. A 3 s block beginning at t describes the music from
+    t to t+3, and the one moment it is most about is t+1.5. A rolling gain
+    driven off block starts lags the music by a second and a half, which is
+    long enough to turn a breakdown down after it has ended.
+
+    Returns (centres_s, loudness_lkfs, mean_square), both curves ungated and
+    the same length. `loudness` is -inf where a block is digital silence.
+    """
+    y = k_weight(x, rate)
+    mean_square = _block_mean_square(y, SHORT_S, SHORT_HOP_S, rate)
+    if mean_square.size == 0:
+        return np.array([]), np.array([]), np.zeros((0, x.shape[1]))
+    loudness = _block_loudness(mean_square)
+    centres = np.arange(loudness.size) * SHORT_HOP_S + SHORT_S / 2
+    return centres, loudness, mean_square
+
+
+def loudness_range(short_ms: np.ndarray, short_l: np.ndarray) -> float | None:
+    """EBU Tech 3342 loudness range, for a caller holding its own series."""
+    return _lra(short_ms, short_l)
+
+
 def _lra(short_ms: np.ndarray, short_l: np.ndarray) -> float | None:
     """EBU Tech 3342 loudness range: P95 - P10 of gated short-term loudness."""
     if short_ms.size == 0:

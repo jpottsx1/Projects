@@ -69,6 +69,20 @@ public struct Survey: Sendable {
         /// so there is no folder to aim at. It needs an absolute target,
         /// and this is the measurement that would set one.
         public var lra: Double?
+        /// Median crest, per folder: true peak minus integrated loudness,
+        /// the peak-to-loudness ratio.
+        ///
+        /// The OTHER half of "over-compressed", and a different injury from
+        /// the one LRA describes. LRA is what a slow compressor took out
+        /// over bars; this is what a fast limiter took out over
+        /// milliseconds. A record limited hard measures 8 to 11 dB, one
+        /// that was not measures 13 and up.
+        ///
+        /// Both are needed because a folder can be short of one and not the
+        /// other, and the stage that repairs one does nothing for the
+        /// other. Reading only LRA would have the attack stage set from a
+        /// number that says nothing about attacks.
+        public var crest: Double?
         /// Median shape per band, 31.5 to 63 Hz.
         public let curve: [Double: Double]
         /// Mean of the above -- one number to sort and compare folders on.
@@ -96,6 +110,7 @@ public struct Survey: Sendable {
     public var medianLUFSI: Double?
     public var medianSP95: Double?
     public var medianLRA: Double?
+    public var medianCrest: Double?
     public var medianTruePeak: Double?
     public var clipping = Clipping()
     public var targets: [TargetRow] = []
@@ -117,6 +132,7 @@ public struct Survey: Sendable {
         survey.medianLUFSI = BS1770.percentile(rows.compactMap(\.lufsI), 50)
         survey.medianSP95 = BS1770.percentile(rows.compactMap(\.sP95), 50)
         survey.medianLRA = BS1770.percentile(rows.compactMap(\.lra), 50)
+        survey.medianCrest = BS1770.percentile(rows.compactMap(\.crestDB), 50)
         survey.medianTruePeak = BS1770.percentile(rows.compactMap(\.truePeakDBTP), 50)
 
         // --- clipping ---
@@ -167,11 +183,15 @@ public struct Survey: Sendable {
         var counts: [String: Int] = [:]
         var clipped: [String: Int] = [:]
         var ranges: [String: [Double]] = [:]
+        var crests: [String: [Double]] = [:]
         for row in everything {
             let label = labels[row.path] ?? "(root)"
             counts[label, default: 0] += 1
             if (row.clipRuns ?? 0) > 0 { clipped[label, default: 0] += 1 }
             if let lra = row.lra, lra.isFinite { ranges[label, default: []].append(lra) }
+            if let crest = row.crestDB, crest.isFinite {
+                crests[label, default: []].append(crest)
+            }
         }
         let referenceName = wanted.flatMap { Library.resolveReference(curves, $0) }
         survey.reference = referenceName
@@ -196,6 +216,9 @@ public struct Survey: Sendable {
             var row = FolderLowEnd(folder: folder, tracks: counts[folder] ?? 0,
                                    clipped: clipped[folder] ?? 0,
                                    lra: ranges[folder].flatMap {
+                                       BS1770.percentile($0, 50)
+                                   },
+                                   crest: crests[folder].flatMap {
                                        BS1770.percentile($0, 50)
                                    },
                                    curve: curve, mean: mean, deficitVsReference: nil)
@@ -237,6 +260,7 @@ public struct Survey: Sendable {
         out += ["  median LUFS-I   \(dB(medianLUFSI))",
                 "  median s_p95    \(dB(medianSP95))",
                 "  median LRA      \(dB(medianLRA))",
+                "  median crest    \(dB(medianCrest)) dB",
                 "  median peak     \(dB(medianTruePeak)) dBTP", ""]
 
         out += ["Masters that were already clipped", String(repeating: "-", count: 62),
@@ -280,6 +304,41 @@ public struct Survey: Sendable {
                                   range, row.folder))
             }
         }
+        if folders.contains(where: { $0.lra != nil || $0.crest != nil }) {
+            out += ["", "Dynamics by folder — what the loudness war took out",
+                    String(repeating: "-", count: 62),
+                    "  Two different injuries, and the stage that repairs one does",
+                    "  nothing for the other, so both are here.",
+                    "",
+                    "  LRA is range over BARS: verse against chorus, breakdown",
+                    "  against drop. Loudness-war pop runs 4 to 6, a well-mastered",
+                    "  record 8 to 10. Low means the 'Loudness range' setting has",
+                    "  something to do — but keep the target modest, because a track",
+                    "  that ducks 8 LU in the breakdown disappears under the next one.",
+                    "",
+                    "  Crest is punch over MILLISECONDS: peak minus loudness. Limited",
+                    "  hard reads 8 to 11, untouched reads 13 and up. Low means the",
+                    "  'Attack' setting has something to do, and it is the one that",
+                    "  makes a record hit harder without making it duck.",
+                    "",
+                    "  tracks    LRA   crest   wants         folder"]
+            for row in folders.sorted(by: { ($0.crest ?? 99) < ($1.crest ?? 99) }) {
+                let range = row.lra.map { String(format: "%5.2f", $0) } ?? "    -"
+                let crest = row.crest.map { String(format: "%5.2f", $0) } ?? "    -"
+                // Said plainly rather than left to be worked out from two
+                // columns. The thresholds are the published ones above, not
+                // anything measured on this library -- which is why this
+                // says "wants" and not "needs".
+                var wants: [String] = []
+                if let lra = row.lra, lra < 6.0 { wants.append("range") }
+                if let c = row.crest, c < 12.0 { wants.append("attack") }
+                let verdict = (wants.isEmpty ? "—" : wants.joined(separator: "+"))
+                    .padding(toLength: 14, withPad: " ", startingAt: 0)
+                out.append(String(format: "  %6d  %@   %@   %@%@",
+                                  row.tracks, range, crest, verdict, row.folder))
+            }
+        }
+
         if !folders.isEmpty {
             out += ["", "Top end by folder, 8-16 kHz"
                     + (reference.map { " (against \($0))" } ?? ""),

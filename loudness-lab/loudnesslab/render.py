@@ -19,7 +19,7 @@ from pathlib import Path
 
 import numpy as np
 
-from . import bs1770, declip, decode, spectrum, subbass, write
+from . import bs1770, declip, decode, expand, spectrum, subbass, write
 
 
 def default_jobs() -> int:
@@ -95,7 +95,9 @@ def one(job: dict) -> dict:
     # preview over a whole library should not spend minutes decoding tracks
     # it has already determined need nothing.
     if skip is not None:
-        return {**base, "status": "skipped", "reason": skip, "amount": None}
+        return {**base, "status": "skipped", "reason": skip, "amount": None,
+                "range": expand._blank_range("not reached"),
+                "transient": expand._blank_transient("not reached")}
 
     amount = float(job["amount"])
     note_skip = None
@@ -115,14 +117,38 @@ def one(job: dict) -> dict:
             if np.isfinite(activity) and activity < job["min_activity"]:
                 skip = (f"sub octave barely moves ({activity:.0f} dB) -- "
                         f"a static floor rather than a bassline")
+        # Dynamics before the sub, and in this order, because each stage
+        # wants the signal the one before it produced. De-clipping goes
+        # first and on the file as it arrived; the range stage only
+        # attenuates, so doing it early gives everything after it headroom;
+        # the transient stage then shapes attacks that are no longer being
+        # held down by a loud chorus; and the sub is added last because it
+        # is the only one putting in something that was never there.
+        ranged = expand._blank_range("not asked for")
+        if job.get("target_lra", 0.0) > 0:
+            audio, ranged = expand.restore_range(
+                audio, decode.TARGET_RATE,
+                target_lra=job["target_lra"],
+                max_attenuation_db=job.get("max_attenuation",
+                                           expand.MAX_ATTENUATION_DB))
+        shaped = expand._blank_transient("not asked for")
+        if job.get("transient", 0.0) > 0:
+            audio, shaped = expand.restore_transients(
+                audio, decode.TARGET_RATE,
+                amount_db=job["transient"],
+                min_crest_db=job.get("min_crest", expand.MIN_CREST_DB))
+
         if skip is not None:
-            # A track can want de-clipping and not want a sub. Where one was
-            # done there is a new file worth writing, so only the sub is
-            # dropped; where nothing was done, say so and move on.
+            # A track can want de-clipping, or dynamics, and not want a sub.
+            # Where any of those did something there is a new file worth
+            # writing, so only the sub is dropped; where nothing was done,
+            # say so and move on.
             amount = 0.0
-            if clip is None or not clip["restored"]:
+            if not (ranged["applied"] or shaped["applied"]
+                    or (clip is not None and clip["restored"])):
                 return {**base, "status": "skipped", "reason": skip,
-                        "amount": None, "clip": clip}
+                        "amount": None, "clip": clip,
+                        "range": ranged, "transient": shaped}
             note_skip = skip
 
         after, info = subbass.enhance(audio, decode.TARGET_RATE,
@@ -190,12 +216,18 @@ def one(job: dict) -> dict:
                         _variant("processed", b_path, job["label"], b)]
     except Exception as exc:  # decode/DSP/encode failures are per-file
         return {**base, "status": "error",
-                "reason": f"{type(exc).__name__}: {exc}"[:500], "amount": None}
+                "reason": f"{type(exc).__name__}: {exc}"[:500], "amount": None,
+                "range": expand._blank_range("failed"),
+                "transient": expand._blank_transient("failed")}
 
     # "no spectral change asked for" contradicts the header on a de-clipping
     # run, where de-clipping IS the change that was asked for.
     reason = note_skip or info["note"]
-    if job["declip"] and reason == "no spectral change asked for":
+    if reason == "no spectral change asked for" and (
+            job["declip"] or ranged["applied"] or shaped["applied"]):
+        # The note is about the SUB, and on a run whose point was
+        # de-clipping, range or attack it reads as a complaint that nothing
+        # happened -- on a row that shows what happened.
         reason = None
 
     manifest = None
@@ -211,6 +243,7 @@ def one(job: dict) -> dict:
     return {
         **base, "status": "ok", "amount": amount, "reason": reason,
         "clip": clip, "manifest": manifest,
+        "range": ranged, "transient": shaped,
         "kicks_per_minute": float(info["kicks_per_minute"]),
         "shape_before": float(_mean_low(before_bands)),
         "shape_after": float(_mean_low(after_bands)),

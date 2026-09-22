@@ -31,6 +31,8 @@ enum CLI {
         var reference: String?, format: String?, out: String?
         var manifest: String?, message: String?
         var dryRun: Bool?
+        var lraBefore: Double?, lraAfter: Double?
+        var crestBefore: Double?, crestAfter: Double?
 
         enum CodingKeys: String, CodingKey {
             case event, phase, done, total, name, path, status, error, reason
@@ -38,6 +40,10 @@ enum CLI {
             case selected, duplicates, written, reference, format, out
             case manifest, message
             case dryRun = "dry_run"
+            case lraBefore = "lra_before"
+            case lraAfter = "lra_after"
+            case crestBefore = "crest_before"
+            case crestAfter = "crest_after"
         }
 
         init?(_ line: String) {

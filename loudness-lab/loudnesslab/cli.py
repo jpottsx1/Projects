@@ -16,7 +16,8 @@ import time
 from pathlib import Path
 
 from . import (__version__, analyze, apply_gain, bs1770, db, declip, decode,
-               mp3gain, profiles, render, report, subbass, write)
+               expand, mp3gain, profiles, render, report, subbass,
+               write)
 
 
 def _progress_printer(start: float):
@@ -199,7 +200,7 @@ def _policy_preview(outcomes: list) -> str:
             bucket["none"] += 1
 
     width = max(10, min(38, max(len(f) for f in grouped)))
-    lines = ["POLICY PREVIEW  (what this profile does, folder by folder)",
+    lines = ["POLICY PREVIEW  (what the sub does, folder by folder)",
              "-" * 78,
              f"  {'folder'.ljust(width)}{'n':>5}{'level only':>12}{'sub':>6}"
              f"{'gated':>7}{'median':>8}{'max':>7}"]
@@ -212,8 +213,9 @@ def _policy_preview(outcomes: list) -> str:
         lines.append(f"  {folder[-width:]:<{width}}{total:>5}{bucket['none']:>12}"
                      f"{len(subs):>6}{bucket['gated']:>7}{median:>8}{largest:>7}")
     lines += ["",
-              "  'level only' is a track already at the reference, so gain is all",
-              "  it needs. 'gated' is one whose sub octave holds a floor rather",
+              "  'level only' is a track already at the reference, so it needs no",
+              "  sub -- it may still have had range or attack work, which is the",
+              "  table above. 'gated' is one whose sub octave holds a floor rather",
               "  than a bassline. Neither is a failure; both are the policy",
               "  declining to act, which is most of what a good policy does."]
     return "\n".join(lines)
@@ -277,6 +279,20 @@ def _identity(artist: str | None, title: str | None, path: str) -> str:
     return "".join(c for c in joined if c.isalnum() or c == "\x1f")
 
 
+def _pair(before: float | None, after: float | None) -> str:
+    """"6.2>9.0" in seven characters, or the one figure there is.
+
+    Two numbers in one column because the pair is the point: a range or a
+    crest that did not move says the stage declined, and a column showing
+    only the result cannot tell that from one that never needed to act.
+    """
+    if before is None:
+        return "-"
+    if after is None:
+        return f"{before:.1f}"
+    return f"{before:.1f}>{after:.1f}"
+
+
 def _unique_stem(stem: str, folder: str, taken: set[str]) -> str:
     """A name no other track in this batch will write to.
 
@@ -325,13 +341,15 @@ def cmd_subbass(args: argparse.Namespace) -> int:
 
     if _settings(args) is None:
         return 2
-    if not args.auto and args.amount <= 0 and args.punch <= 0 and not args.declip:
+    if (not args.auto and args.amount <= 0 and args.punch <= 0
+            and not args.declip and args.target_lra <= 0
+            and args.transient <= 0):
         # level-only is a gain policy. Running this command under it would
         # decode every track, change nothing, and write pairs of identical
         # files -- worse than useless, because it looks like work happened.
         return fail(
-            "This profile asks for no spectral change (sub, punch and declip "
-            "are all off).\nNothing for subbass to do -- levelling is the "
+            "This profile changes nothing (sub, punch, declip, range and "
+            "attack are all off).\nNothing to do -- levelling is the "
             "gain command:\n  ./loudness-lab gain <path> --profile "
             f"{args.profile or 'level-only'}", 0)
     if args.auto and not args.reference:
@@ -472,6 +490,9 @@ def cmd_subbass(args: argparse.Namespace) -> int:
             "punch": args.punch, "punch_decay": args.punch_decay,
             "declip": bool(args.declip), "declip_max": args.declip_max,
             "min_activity": args.min_activity,
+            "target_lra": args.target_lra,
+            "max_attenuation": args.max_attenuation,
+            "transient": args.transient, "min_crest": args.min_crest,
             "target": args.target, "estimator": args.estimator,
             "peak_ceiling": args.peak_ceiling,
             "compare": not args.no_compare, "dry_run": bool(args.dry_run),
@@ -502,7 +523,9 @@ def cmd_subbass(args: argparse.Namespace) -> int:
         f"{subbass.SUB_LOW_HZ:.0f}-{subbass.SUB_HIGH_HZ:.0f} Hz  "
         f"punch={args.punch:+.1f} dB in "
         f"{subbass.PUNCH_LOW_HZ / 1000:.0f}-{subbass.PUNCH_HIGH_HZ / 1000:.0f} kHz"
-        + (f"  declip<={args.declip_max:.0f} dB" if args.declip else ""))
+        + (f"  declip<={args.declip_max:.0f} dB" if args.declip else "")
+        + (f"  range->{args.target_lra:.0f} LU" if args.target_lra > 0 else "")
+        + (f"  attack+{args.transient:.0f} dB" if args.transient > 0 else ""))
     out("=" * 104)
     out("  Lossy and irreversible, unlike the gain pass. Originals are never")
     out(f"  touched; these are new {write.label(args.format)} files to "
@@ -533,10 +556,14 @@ def cmd_subbass(args: argparse.Namespace) -> int:
         out(f"  {'artist / title':<40s}{'kicks/min':>10s}{'shape was':>11s}"
             f"{'now':>8s}{'added':>8s}{'trim':>7s}{'dBTP':>7s}"
             f"{'match':>8s}{'snap':>7s}"
-            + (f"{'clips':>7s}{'lift':>7s}" if args.declip else ""))
+            + (f"{'clips':>7s}{'lift':>7s}" if args.declip else "")
+            + (f"{'LRA':>10s}" if args.target_lra > 0 else "")
+            + (f"{'crest':>10s}" if args.transient > 0 else ""))
 
     blank = (f"{'':>10}{'':>11}{'':>8}{'':>8}{'':>7}{'':>7}{'':>8}{'':>7}"
-             + (f"{'':>7}{'':>7}" if args.declip else ""))
+             + (f"{'':>7}{'':>7}" if args.declip else "")
+             + (f"{'':>10}" if args.target_lra > 0 else "")
+             + (f"{'':>10}" if args.transient > 0 else ""))
 
     def report_one(done: int, total: int, result: dict) -> None:
         if porcelain:
@@ -546,7 +573,11 @@ def cmd_subbass(args: argparse.Namespace) -> int:
                    "status": result["status"],
                    "reason": result.get("reason"),
                    "sub_db": result.get("applied_db"),
-                   "clips_restored": (result.get("clip") or {}).get("restored")})
+                   "clips_restored": (result.get("clip") or {}).get("restored"),
+                   "lra_before": (result.get("range") or {}).get("lra_before"),
+                   "lra_after": (result.get("range") or {}).get("lra_after"),
+                   "crest_before": (result.get("transient") or {}).get("crest_before"),
+                   "crest_after": (result.get("transient") or {}).get("crest_after")})
             return
         if result["status"] == "error":
             print(f"  {result['name'][:39]:<40s}  FAILED: {result['reason']}")
@@ -555,6 +586,8 @@ def cmd_subbass(args: argparse.Namespace) -> int:
         elif not args.summary_only:
             note = "" if result["reason"] is None else f"  {result['reason']}"
             clip = result.get("clip") or {"restored": 0, "lift_db": 0.0}
+            ranged = result.get("range") or {}
+            shaped = result.get("transient") or {}
             print(f"  {result['name'][:39]:<40s}"
                   f"{result['kicks_per_minute']:>10.0f}"
                   f"{result['shape_before']:>11.1f}{result['shape_after']:>8.1f}"
@@ -563,6 +596,10 @@ def cmd_subbass(args: argparse.Namespace) -> int:
                   f"{result['snap_db']:>+7.2f}"
                   + (f"{clip['restored']:>7d}{clip['lift_db']:>+7.2f}"
                      if args.declip else "")
+                  + (f"{_pair(ranged.get('lra_before'), ranged.get('lra_after')):>10s}"
+                     if args.target_lra > 0 else "")
+                  + (f"{_pair(shaped.get('crest_before'), shaped.get('crest_after')):>10s}"
+                     if args.transient > 0 else "")
                   + note)
 
     results = render.run(jobs, workers=workers, progress=report_one)
@@ -572,11 +609,19 @@ def cmd_subbass(args: argparse.Namespace) -> int:
                  else None) for r in results]
     clips = [r["clip"] for r in results
              if r["status"] == "ok" and r.get("clip") is not None]
+    ranges = [r["range"] for r in results
+              if r.get("range") and r["status"] != "error"]
+    shapes = [r["transient"] for r in results
+              if r.get("transient") and r["status"] != "error"]
     manifest = [r["manifest"] for r in results if r.get("manifest")]
 
     out()
     if args.declip:
         out(declip.summarise(clips))
+        out()
+    if args.target_lra > 0 or args.transient > 0:
+        out(expand.summarise(ranges if args.target_lra > 0 else [],
+                             shapes if args.transient > 0 else []))
         out()
     out(_policy_preview(outcomes))
     out()
@@ -1134,6 +1179,27 @@ def build_parser() -> argparse.ArgumentParser:
                      metavar="DB",
                      help="cap on how far --declip may lift one peak "
                           f"(default {profiles.FIELDS['declip_max']:.0f} dB)")
+    sub.add_argument("--target-lra", type=float, default=None, metavar="LU",
+                     help="widen the loudness range to this, by pulling the "
+                          "quiet passages down (never by pushing the loud "
+                          "ones up -- there is no headroom there). 0 is off. "
+                          "A DJ caution: a track that drops 8 LU in the "
+                          "breakdown disappears under the next record")
+    sub.add_argument("--max-attenuation", type=float, default=None,
+                     metavar="DB",
+                     help="cap on how far --target-lra may pull a quiet "
+                          f"passage down (default "
+                          f"{profiles.FIELDS['max_attenuation']:.0f} dB)")
+    sub.add_argument("--transient", type=float, default=None, metavar="DB",
+                     help="dB of emphasis at each onset, for attacks a fast "
+                          "limiter flattened. Acts only where the signal is "
+                          "rising, so it cannot breathe the way an expander "
+                          "does. 0 is off")
+    sub.add_argument("--min-crest", type=float, default=None, metavar="DB",
+                     help="--transient: skip a track whose peak-to-loudness "
+                          "ratio already reaches this, because nothing "
+                          f"flattened it (default "
+                          f"{profiles.FIELDS['min_crest']:.0f} dB)")
     sub.add_argument("--summary-only", action="store_true",
                      help="print only the policy preview, not a row per track")
     sub.add_argument("--dry-run", action="store_true",

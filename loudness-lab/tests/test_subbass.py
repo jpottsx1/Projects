@@ -387,7 +387,7 @@ class TestComparisonPairs(unittest.TestCase):
         self.assertNotIn("kicks/min", output)
         # level-only is a gain policy: subbass must decline rather than
         # decode everything, change nothing and write identical pairs.
-        self.assertIn("no spectral change", output)
+        self.assertIn("changes nothing", output)
         self.assertIn("gain", output)
 
     def test_auto_without_a_reference_is_refused(self):

@@ -28,6 +28,13 @@ public struct Profile: Codable, Equatable, Sendable {
     public var punchDecay: Double = 8.0
     public var declip: Bool = false
     public var declipMax: Double = 6.0
+    // Putting dynamics back. Both off by default: they reshape what a
+    // compressor left rather than recovering anything, so they are a
+    // choice about a record and not a repair every record wants.
+    public var targetLRA: Double = 0.0       // loudness range to widen to
+    public var maxAttenuation: Double = 6.0  // how far the quiet parts may drop
+    public var transient: Double = 0.0       // dB of emphasis at an onset
+    public var minCrest: Double = 12.0       // above this, nothing flattened it
 
     public init() {}
 
@@ -40,6 +47,10 @@ public struct Profile: Codable, Equatable, Sendable {
         case minActivity = "min_activity"
         case punchDecay = "punch_decay"
         case declipMax = "declip_max"
+        case transient
+        case targetLRA = "target_lra"
+        case maxAttenuation = "max_attenuation"
+        case minCrest = "min_crest"
     }
 
     /// Tolerant of a key that is not there, which the synthesised decoder
@@ -74,6 +85,10 @@ public struct Profile: Codable, Equatable, Sendable {
         punchDecay = try number(.punchDecay, fallback.punchDecay)
         declip = try values.decodeIfPresent(Bool.self, forKey: .declip) ?? fallback.declip
         declipMax = try number(.declipMax, fallback.declipMax)
+        targetLRA = try number(.targetLRA, fallback.targetLRA)
+        maxAttenuation = try number(.maxAttenuation, fallback.maxAttenuation)
+        transient = try number(.transient, fallback.transient)
+        minCrest = try number(.minCrest, fallback.minCrest)
     }
 
     public static let estimators = ["lufs_i", "s_p50", "s_p90", "s_p95", "s_max"]

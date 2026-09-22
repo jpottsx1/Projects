@@ -301,6 +301,10 @@ final class Engine: ObservableObject {
                 "--punch", String(profile.punch),
                 "--punch-decay", String(profile.punchDecay),
                 "--declip-max", String(profile.declipMax),
+                "--target-lra", String(profile.targetLRA),
+                "--max-attenuation", String(profile.maxAttenuation),
+                "--transient", String(profile.transient),
+                "--min-crest", String(profile.minCrest),
             ]
             if profile.auto { arguments += ["--auto"] }
             if let reference = profile.reference, !reference.isEmpty {

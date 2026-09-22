@@ -241,6 +241,97 @@ class TestOutputFormats(unittest.TestCase):
 
 
 @unittest.skipUnless(HAVE_FFMPEG, "ffmpeg/ffprobe not installed")
+class TestDynamicsThroughTheCommand(unittest.TestCase):
+    """The two dynamics stages, as the app drives them.
+
+    Tested here rather than only in test_expand because the wiring is where
+    this goes wrong: a stage can be perfect and still never run, because a
+    guard decided the profile asked for nothing.
+    """
+
+    def setUp(self):
+        self.dir = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.dir, ignore_errors=True)
+        self.src = self.dir / "src"
+        self.out = self.dir / "out"
+        self.src.mkdir(parents=True)
+        from tests.test_expand import peak_limited, sectioned, slow_compressed
+        subbass.write_flac(self.src / "squashed.flac",
+                           slow_compressed(sectioned(), ratio=8.0,
+                                           threshold_db=-28.0), RATE)
+        subbass.write_flac(self.src / "limited.flac",
+                           peak_limited(sectioned()), RATE)
+
+    def _events(self, *extra: str) -> list[dict]:
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            code = cli.main(["subbass", str(self.src), "--db",
+                             str(self.dir / "l.db"), "--out", str(self.out),
+                             "--no-compare", "--jobs", "1", "--porcelain",
+                             *extra])
+        self.assertEqual(code, 0, buffer.getvalue())
+        return [json.loads(line) for line in buffer.getvalue().splitlines()
+                if line.strip()]
+
+    def test_dynamics_alone_is_enough_to_have_something_to_do(self):
+        """With no sub, no punch and no declip the command normally
+        declines, on the grounds that it would decode every track and write
+        copies of them. A range or attack setting IS a change, and the
+        guard has to know that or the stages are unreachable from a profile
+        that asks for nothing else."""
+        events = self._events("--amount", "0", "--target-lra", "9")
+        self.assertEqual(events[-1]["event"], "done")
+        self.assertEqual(events[-1]["written"], 2)
+
+    def test_without_any_of_them_it_still_declines(self):
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            code = cli.main(["subbass", str(self.src), "--db",
+                             str(self.dir / "l.db"), "--amount", "0",
+                             "--porcelain"])
+        self.assertEqual(code, 0)
+        self.assertIn("changes nothing", buffer.getvalue())
+
+    def test_the_range_reaches_the_target_through_the_whole_chain(self):
+        """End to end, not just in the stage: the levelling that follows
+        scales the whole file, which cannot change a ratio of loudnesses,
+        so the range asked for is the range that survives to the file."""
+        events = self._events("--amount", "0", "--target-lra", "9")
+        rows = [e for e in events if e["event"] == "progress"
+                and e.get("phase") == "process" and e.get("lra_after")]
+        self.assertTrue(rows)
+        for row in rows:
+            self.assertLess(row["lra_after"], 9.0 + 0.6)
+            self.assertGreater(row["lra_after"], row["lra_before"])
+
+    def test_each_stage_declines_on_the_damage_it_does_not_repair(self):
+        """The argument the whole module rests on. The squashed fixture has
+        range taken out and its peaks intact; the limited one the reverse.
+        Each stage should act on one and decline on the other."""
+        events = self._events("--amount", "0", "--target-lra", "9",
+                              "--transient", "3", "--min-crest", "12")
+        rows = {e["name"]: e for e in events
+                if e["event"] == "progress" and e.get("phase") == "process"}
+        self.assertEqual(set(rows), {"squashed", "limited"})
+        # Squashed: range widens a long way, crest is left alone.
+        self.assertGreater(rows["squashed"]["lra_after"]
+                           - rows["squashed"]["lra_before"], 3.0)
+        self.assertIsNone(rows["squashed"]["crest_after"])
+        # Limited: crest comes back, range was never the problem.
+        self.assertGreater(rows["limited"]["crest_after"]
+                           - rows["limited"]["crest_before"], 0.7)
+        self.assertLess(abs(rows["limited"]["lra_after"]
+                            - rows["limited"]["lra_before"]), 1.0)
+
+    def test_the_originals_are_never_written_to(self):
+        """The standing rule, checked where a new stage could break it."""
+        before = {p: p.read_bytes() for p in self.src.glob("*.flac")}
+        self._events("--amount", "0", "--target-lra", "9", "--transient", "3")
+        for path, content in before.items():
+            self.assertEqual(path.read_bytes(), content, path.name)
+
+
+@unittest.skipUnless(HAVE_FFMPEG, "ffmpeg/ffprobe not installed")
 class TestSeratoSurvivesTheCommand(unittest.TestCase):
     """The standing rule, tested where it now actually happens.
 

@@ -227,6 +227,34 @@ struct SettingsPanel: View {
 
                 Divider()
 
+                slider(Help.targetLRA, $profile.targetLRA, 0...14, "LU",
+                       // Off is the default. A squashed master measures 3
+                       // to 5; past about 9 a track starts ducking under
+                       // the next record, which for a DJ is the failure.
+                       sweet: 0...9)
+                Text("Widens the gap between the quiet parts and the loud "
+                     + "ones, by pulling the quiet ones down. Zero turns it off.")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .help(Help.targetLRA.detail)
+                if profile.targetLRA > 0 {
+                    slider(Help.maxAttenuation, $profile.maxAttenuation, 1...12, "dB",
+                           // Past a few dB a quiet intro stops being quiet
+                           // and starts being missing.
+                           sweet: 3...6)
+                }
+
+                slider(Help.transient, $profile.transient, 0...8, "dB",
+                       // About half a dB of crest comes back per dB asked
+                       // for, measured. Past 4 it stops being an attack.
+                       sweet: 0...4)
+                if profile.transient > 0 {
+                    slider(Help.minCrest, $profile.minCrest, 8...18, "dB",
+                           // Limited hard measures 8-11; untouched, 13 up.
+                           sweet: 11...14)
+                }
+
+                Divider()
+
                 slider(Help.target, $profile.target, -24...(-8), "LUFS",
                        // Measured on this library: at -16 nothing needs
                        // a boost, at -14 almost nothing does.

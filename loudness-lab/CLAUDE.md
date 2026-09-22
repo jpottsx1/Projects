@@ -124,6 +124,18 @@ every machine but the one that made it for a while.
   output folder and a library of compilations is full of "01 Track.mp3".
   Writing both to one path lost one and reported both as written;
   `_unique_stem` adds the folder, then a counter.
+- **A test that passes is not a test that works.** Seven deliberate
+  breakages were fed to `test_expand.py`; four passed. The lag test
+  measured the slew rate instead of the lag, the silence test read a gain
+  off digital zeros where no gain can be read, the timing test had a
+  second and a half of slack inside an eight-second window, and the stereo
+  test probed a property the mutation did not change. Each is now written
+  against the failure it is for, and each has been seen to fail.
+- **`max_lift_db` is the wrong statistic for a transient stage.** The
+  start of any file is an onset, so the maximum is reached whatever the
+  detector can hear -- a steady tone reads the full amount.
+  `lifted_fraction` is the one that distinguishes shaping from gaining:
+  0.006 for that tone, and it is what the tests assert on.
 - **Folder grouping uses `Library.folderLabels`,** not the parent's name:
   two compilations each with a CD1 otherwise merge into one corpus, and a
   corpus silently averaged with another is a wrong number that looks
@@ -132,8 +144,8 @@ every machine but the one that made it for a while.
 ## Layout
 
 ```
-loudnesslab/     the Python: bs1770, spectrum, subbass, declip, mp3gain,
-                 decode, db, report, render, write, cli
+loudnesslab/     the Python: bs1770, spectrum, subbass, declip, expand,
+                 mp3gain, decode, db, report, render, write, cli
 tests/           its tests
 tools/           make_golden.py and the four checkers
 macapp/
@@ -202,6 +214,51 @@ one worker against 36.1 s at four. On six ten-second fixtures it goes the
 other way (6.1 s against 7.7 s): spawning a worker re-imports numpy and
 scipy, and on a short enough track that is the whole job.
 
+## Putting dynamics back
+
+"Over-compressed" is three injuries, not one, and the word "expander"
+conflates them. `expand.py` has the argument in full; the short version:
+
+| injury | over | measured by | repaired by |
+|---|---|---|---|
+| peak truncation | samples | `clip_runs` | `declip` |
+| micro-dynamics | milliseconds | crest (peak minus loudness) | `restore_transients` |
+| macro-dynamics | bars | LRA | `restore_range` |
+
+**Only de-clipping recovers anything.** The other two reshape what
+survived: a compressor that took 8 dB off a chorus did not record what it
+removed. Worth doing, worth saying.
+
+**Separating the timescales is what stops it pumping.** One gain trying to
+serve both has to be fast enough for a snare and slow enough for a chorus,
+and the compromise is audible as breathing. That is what a plain broadband
+expander is, and why it is not what this does.
+
+`restore_range` only ever attenuates. A loudness-war master has no
+headroom -- that is what made it one -- so the loudest 5% is anchored and
+everything below is pulled away. The levelling at the end of the chain
+gives the average back, so the drop ends up louder than it started. Hits
+its target to within about 0.06 LU.
+
+`restore_transients` acts only where the signal is rising, so it cannot
+turn a quiet passage down and therefore cannot breathe. About **0.5 dB of
+crest per dB asked for**, measured; the setting is a ceiling on the gain
+at an onset, not a promise about the statistic. Note the contrast with
+`subbass.shape_attacks`, which is band-limited and deliberately does NOT
+move crest.
+
+**The DJ caution, which is the part worth arguing about.** Restoring macro
+range makes a track duck in a mix: eight LU down in a breakdown and the
+record disappears under the next one. Club masters are flat partly because
+of the loudness war and partly because flat works. What "the drops hit
+harder" actually wants is mostly the transient stage plus a modest range
+target -- so both are off by default, and the survey's "wants" column is
+there to be read before either is turned on.
+
+Chain order: declip, range, transient, sub, level. Each stage wants the
+signal the one before it produced, and the sub goes last because it is the
+only one adding something that was never there.
+
 ## Where this got to
 
 **The premise is confirmed by ear.** Processed with `eighties`, sized per
@@ -237,11 +294,12 @@ nothing to add up there. Levelling to -16 needs no track turned up.
 
 ## Open
 
-1. **A rolling expander**, to pull apart over-compressed records and give
-   the drops back their impact. LRA is the measurement and it is now
-   reported per folder. Note the catch: modern masters are the MOST
-   compressed, so unlike the sub stage there is no reference folder to
-   aim at -- it needs an absolute target.
+1. **The dynamics stages have never been set from THIS library.** Both
+   are built, tested and off by default, and their thresholds come from
+   the published ranges rather than from anything measured here. The
+   survey now reports LRA and crest per folder with a "wants" column;
+   measure the 1990s material and set `target_lra` and `min_crest` from
+   what comes back, the way `eighties` got its cap of 11.
 2. **Serato markers only travel MP3 to MP3.** FLAC and M4A carry them
    too, in Vorbis comments and com.serato.dj atoms, but going between
    containers is translation rather than copying and needs a real Serato

@@ -38,6 +38,13 @@ FIELDS = {
     "punch_decay": 8.0,
     "declip": False,        # restore peaks that were clipped before we got them
     "declip_max": 6.0,      # dB, hard cap on how far one peak may be lifted
+    # Putting dynamics back. Both off by default: they reshape what a
+    # compressor left rather than recovering anything, so they are a choice
+    # about a record and not a repair every record wants.
+    "target_lra": 0.0,      # loudness range to widen to; 0 is off
+    "max_attenuation": 6.0, # dB the quiet passages may be pulled down by
+    "transient": 0.0,       # dB of attack emphasis at an onset; 0 is off
+    "min_crest": 12.0,      # above this a track was never flattened
 }
 
 BUILT_IN = {

@@ -126,6 +126,52 @@ enum Help {
         rather than reasoning.
         """)
 
+    // MARK: - Dynamics
+
+    static let targetLRA = HelpEntry(
+        title: "Loudness range",
+        summary: "Widen the gap between the quiet parts and the loud ones. Off at zero.",
+        detail: """
+        What the loudness war took out over BARS, as opposed to over         milliseconds: the difference between a verse and a chorus, a         breakdown and a drop. Measured as LRA, the spread of a track's         3-second loudness, and this widens it to the figure you set.
+
+        It only ever turns things DOWN. A master that has been squashed to         the ceiling has no headroom left -- that is what made it one -- so         raising the loud parts would clip, or be trimmed straight back out.         The loudest 5% is left exactly where it is and everything below it         is pulled away, which costs the track some average loudness. The         levelling at the end of the chain gives that back, so the drop ends         up LOUDER than it started. What changed is what sits around it.
+
+        Nothing is recovered here. A compressor that took 8 dB off a chorus         did not write down what it removed, so what comes back is a         plausible shape rather than the original one. That is worth doing         and worth being honest about.
+
+        A caution for DJ use, which is what this is for: a track that drops         8 LU in the breakdown disappears under the next record. Club         masters are flat partly because of the loudness war and partly         because flat works in a mix. Start low.
+        """)
+
+    static let maxAttenuation = HelpEntry(
+        title: "Pull down at most",
+        summary: "How far a quiet passage may be turned down to widen the range.",
+        detail: """
+        A cap rather than an estimate. Past a few dB the intro of a record         stops being quiet and starts being missing, and there is no         measurement that says where that line is -- so it is a limit you         set rather than one the tool works out.
+
+        When the cap is reached before the target, the run says so instead         of quietly falling short. Raising the target past what the cap         allows otherwise looks like a setting that does nothing.
+        """)
+
+    static let transient = HelpEntry(
+        title: "Attack",
+        summary: "Give back the punch a fast limiter flattened. Off at zero.",
+        detail: """
+        The other half of "over-compressed", and the one that usually         matters more here: what was taken out over MILLISECONDS. The front         of a kick, the crack of a snare.
+
+        Two envelopes of the same signal, one fast enough to follow a         beater click and one that cannot. Where the fast one stands above         the slow one there is an onset, and only there is any gain applied.         A sustained note gives both envelopes the same value and therefore         no gain at all -- which is what separates this from an expander. It         cannot turn a quiet passage down, so it cannot breathe.
+
+        The measurement is crest, the gap between a track's peak and its         loudness. Measured here, about half a decibel of crest comes back         per decibel asked for; the setting is a ceiling on the gain at an         onset, not a promise about the statistic.
+
+        This is broadband, unlike the kick punch above, which is deliberately         band-limited and deliberately does NOT move crest.
+        """)
+
+    static let minCrest = HelpEntry(
+        title: "Skip above",
+        summary: "A track already this peaky was never flattened, so leave it.",
+        detail: """
+        Crest is peak minus loudness. A record that was limited hard         measures 8 to 11 dB; one that was not measures 13 and up. Above         this figure the attack stage declines, on the same principle as the         sub's activity gate: most of what a good policy does is decline.
+
+        Measure a folder first and read the survey. Setting this from taste         rather than from the numbers is how a stage ends up working on         material that never needed it.
+        """)
+
     static let output = HelpEntry(
         title: "To",
         summary: "Where processed files go. Originals are never written to.",
@@ -457,6 +503,7 @@ enum Help {
         HelpSection("Clipped peaks", [declip, declipMax]),
         HelpSection("Sub bass", [amount, auto, reference, maxAmount, minActivity]),
         HelpSection("Attack", [punch, punchDecay]),
+        HelpSection("Dynamics", [targetLRA, maxAttenuation, transient, minCrest]),
         HelpSection("Level", [target, estimator, peakCeiling]),
         HelpSection("The run", [limit, format, output, compare, dryRun]),
         HelpSection("Listening", [switching, matchLoudness, blind]),

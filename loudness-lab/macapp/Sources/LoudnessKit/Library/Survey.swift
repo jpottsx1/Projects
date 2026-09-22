@@ -359,23 +359,46 @@ public struct Survey: Sendable {
         }
 
         if !folders.isEmpty {
-            out += ["", "Top end by folder, 8-16 kHz"
+            out += ["", "Top end by folder, 8-20 kHz"
                     + (reference.map { " (against \($0))" } ?? ""),
                     String(repeating: "-", count: 62),
-                    "  A high shelf can only lift what is there. A cliff "
-                    + "between 12.5k and 16k is",
-                    "  an MP3 low-pass, and boosting it raises noise; a gentle "
-                    + "slope is the record.", "",
-                    "   mean    vs ref      8k    10k   12.5k     16k   folder"]
+                    "  A high shelf can only lift what is THERE, so this is the "
+                    + "table that says",
+                    "  whether adding air is even an option.",
+                    "",
+                    "  'cliff' is the drop from 16k to 20k. Recorded music rolls "
+                    + "off a few dB",
+                    "  across that step; a lossy codec falls off a wall. 128 kbps "
+                    + "cuts near 16k",
+                    "  and 320 near 20k, so a large figure here means the band is "
+                    + "empty and a",
+                    "  shelf would raise nothing but the noise under it. Only a "
+                    + "harmonic",
+                    "  exciter can put content where there is none -- and that is "
+                    + "invention,",
+                    "  not restoration, which is why nothing here does it.",
+                    "",
+                    "   mean    vs ref      8k    10k   12.5k     16k     20k"
+                    + "   cliff   folder"]
             for row in folders {
                 let versus = row.topDeficitVsReference.map { String(format: "%+7.2f", $0) }
                     ?? "      -"
-                let bands = [8000.0, 10000.0, 12500.0, 16000.0].map { band in
+                let bands = [8000.0, 10000.0, 12500.0, 16000.0, 20000.0].map { band in
                     row.topCurve[band].map { String(format: "%6.1f", $0) } ?? "     -"
                 }.joined(separator: "  ")
-                out.append(String(format: "  %+6.2f  %@  %@   %@",
+                // The step that shows a codec, rather than the 12.5k-to-16k
+                // one this table used to name: at 320 kbps the low-pass sits
+                // near 20k, so it does not touch 16k at all and the old
+                // reading could not see it.
+                let cliff: String
+                if let a = row.topCurve[16000.0], let b = row.topCurve[20000.0] {
+                    cliff = String(format: "%6.1f", a - b)
+                } else {
+                    cliff = "     -"
+                }
+                out.append(String(format: "  %+6.2f  %@  %@  %@   %@",
                                   row.topMean.isFinite ? row.topMean : 0,
-                                  versus, bands, row.folder))
+                                  versus, bands, cliff, row.folder))
             }
         }
         return out.joined(separator: "\n")

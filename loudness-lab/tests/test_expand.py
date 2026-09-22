@@ -383,6 +383,65 @@ class TestTheTwoStagesAreSeparate(unittest.TestCase):
         self.assertLess(abs(after["lra"] - before["lra"]), 1.0)
 
 
+class TestLevellingAndDynamicsAreIndependent(unittest.TestCase):
+    """The question that decides whether any of this is compatible with
+    levelling at all, and the answer is that they cannot interact.
+
+    Levelling multiplies the whole file by one number. LRA and crest are
+    both DIFFERENCES of loudnesses -- P95 minus P10, peak minus integrated
+    -- and a constant offset cancels out of a difference. So no target,
+    however chosen, can widen or narrow a track's dynamics, and no dynamics
+    stage can move a track off its target.
+
+    Worth a test rather than an argument because the conclusion people
+    reach without one is that a lower target "leaves room for" dynamics, or
+    that a higher one costs them. It does neither.
+    """
+
+    def test_a_scalar_gain_moves_every_level_and_no_range(self):
+        x = sectioned()
+        before = bs1770.measure(x)
+        for gain in (-16.0, -8.0, 4.0):
+            with self.subTest(gain=gain):
+                y = (x * 10 ** (gain / 20)).astype(np.float32)
+                after = bs1770.measure(y)
+                # Levels move by exactly the gain...
+                for field in ("lufs_i", "s_p95", "true_peak_dbtp"):
+                    self.assertAlmostEqual(after[field], before[field] + gain,
+                                           places=3, msg=field)
+                # ...and the range statistics do not move.
+                #
+                # LRA is exact: measured, it holds to about 1e-9, because
+                # it is a difference of block loudnesses and the offset
+                # cancels before anything is rounded.
+                self.assertAlmostEqual(after["lra"], before["lra"], places=6)
+                # Crest holds to about 1e-6 rather than exactly, and the
+                # residue is in the TRUE PEAK, not the loudness: the peak
+                # is found by 4x oversampling, and that interpolation
+                # rounds slightly differently at a different scale. It
+                # survives keeping the audio in float64, so it is the peak
+                # arithmetic and not the float32 the fixture is stored in.
+                # A millionth of a decibel, and pinned here at a hundred
+                # thousandth so the distinction stays visible.
+                self.assertAlmostEqual(after["crest_db"], before["crest_db"],
+                                       delta=1e-5)
+
+    def test_the_range_stage_does_not_move_a_track_off_its_target(self):
+        """The other direction. The range stage costs average loudness --
+        it only attenuates -- but the levelling that follows is what sets
+        the final figure, so the two compose rather than fight."""
+        squashed = slow_compressed(sectioned())
+        widened, report = expand.restore_range(squashed, RATE, target_lra=9.0)
+        self.assertTrue(report["applied"])
+        measured = bs1770.measure(widened)
+        # Level it afterwards, as the chain does.
+        wanted = -16.0 - measured["s_p95"]
+        levelled = (widened * 10 ** (wanted / 20)).astype(np.float32)
+        final = bs1770.measure(levelled)
+        self.assertAlmostEqual(final["s_p95"], -16.0, delta=0.05)
+        self.assertAlmostEqual(final["lra"], report["lra_after"], delta=0.05)
+
+
 class TestSummary(unittest.TestCase):
 
     def test_a_batch_that_needed_nothing_says_so(self):

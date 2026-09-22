@@ -384,7 +384,7 @@ public final class Library {
     /// is where an MP3's low-pass usually shows itself -- which is a thing
     /// worth seeing, not hiding.
     public static let topShapeBands = Spectrum.bandCentres.filter {
-        (8000.0...16000.0).contains($0)
+        (8000.0...20000.0).contains($0)
     }
 
     /// A folder label for each track that is actually distinctive.

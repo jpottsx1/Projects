@@ -297,6 +297,25 @@ What was measured on this library, all of it against
 | Disco Delight | -4.80 | 18% | 3.71 |
 | Now Yearbook 99 (2026), 4 CDs | -2.49 to -3.64 | 29% to 60% | 5.40 |
 
+### Air, and why the top-end table now goes to 20 kHz
+
+`topShapeBands` stopped at 16 kHz while its own comment said the range was
+"where an MP3's low-pass usually shows itself". That is wrong for the
+bitrates this library actually holds: 128 kbps cuts near 16k, but 320
+cuts near 20k and never touches the 16k band at all. The measurement
+could not see the thing it was named for.
+
+The 20 kHz band was being measured and stored the whole time -- the
+spectrum runs to 20k -- and simply was not shown. It is now, with the
+16k-to-20k drop beside it as `cliff`.
+
+That is the number that answers whether air is an option, because a shelf
+can only lift what is there. Recorded music rolls off a few dB across that
+step; a codec falls off a wall. Only a harmonic exciter -- an Aphex Aural
+Exciter generates harmonics from a high-passed copy rather than boosting
+the band -- can put content where there is none, and that is invention
+rather than restoration, which is why nothing here does it.
+
 Top end runs ABOVE the reference everywhere -- +1.47 to +4.84 on the older
 corpora, +3.59 to +6.38 on the 99 discs -- so there is nothing to add up
 there. Levelling to -16 needs no track turned up.
@@ -382,6 +401,27 @@ anti-correlation first seen on four discs holds on a larger sample. The
 old material has the punch and none of the range; the new material has
 what range there is and no punch. No single "how squashed is it" number
 orders this library correctly, which is the whole case for two stages.
+
+### Levelling and dynamics cannot interact
+
+Asked directly, and worth writing down because the intuition goes the
+other way: a lower target does not "leave room for" dynamics and a higher
+one does not cost them.
+
+Levelling multiplies the whole file by one number. LRA and crest are both
+DIFFERENCES of loudnesses -- P95 minus P10, peak minus integrated -- and a
+constant offset cancels out of a difference. Measured: LRA holds to about
+1e-9 under gains from -16 to +4 dB, and crest to about 1e-6, the residue
+being in the true peak's 4x oversampling rather than in any loudness.
+`TestLevellingAndDynamicsAreIndependent` keeps it that way.
+
+So the target is chosen for headroom and consistency, not for range. On
+this library, -16 is where every track can be hit exactly: 0% need a
+boost, against 20.8% at -10 and 55.1% of that same set breaching the peak
+ceiling. A target that cannot be reached is not a target -- those tracks
+land wherever the ceiling stops them, which is the opposite of levelling.
+Moving to -11 would buy nothing for range and cost the headroom the
+transient stage spends.
 
 ### Low LRA is not always damage
 

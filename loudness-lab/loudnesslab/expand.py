@@ -49,6 +49,13 @@ DEFAULT_TARGET_LRA = 7.0
 # past a few dB the intro of a record stops being quiet and starts being
 # missing, and there is no measurement that says where that is.
 MAX_ATTENUATION_DB = 6.0
+# Close enough to the target to leave alone, matching the 0.5 dB the sub
+# stage uses for the same purpose. Measured need for it: CD2 of the 1999
+# corpus sits at LRA 6.49 against a target of 7.0, which is a stretch of
+# 0.079 -- half a decibel at the quietest point of the record. That is not
+# a restoration, it is arithmetic, and reporting it as work done makes the
+# stage look like it acted when it did not.
+RANGE_MARGIN_LU = 0.5
 # The gain may move this fast and no faster. A 3 s window already smooths
 # heavily; this is the second guard, and it is what separates "the mix
 # breathes" from "the breakdown is quieter".
@@ -160,7 +167,8 @@ def _blank_range(note: str | None = None) -> dict:
 def restore_range(x: np.ndarray, rate: int,
                   target_lra: float = DEFAULT_TARGET_LRA,
                   max_attenuation_db: float = MAX_ATTENUATION_DB,
-                  slew_db_per_s: float = SLEW_DB_PER_S) -> tuple[np.ndarray, dict]:
+                  slew_db_per_s: float = SLEW_DB_PER_S,
+                  margin_lu: float = RANGE_MARGIN_LU) -> tuple[np.ndarray, dict]:
     """Pull the quiet passages down until the track's loudness range reaches
     `target_lra`. Returns the audio and a report.
 
@@ -195,8 +203,9 @@ def restore_range(x: np.ndarray, rate: int,
     report = _blank_range()
     report["lra_before"] = lra
     report["target_lra"] = target_lra
-    if lra >= target_lra:
-        report["note"] = f"already {lra:.1f} LU, at or above the target"
+    if lra >= target_lra - abs(margin_lu):
+        report["note"] = (f"already {lra:.1f} LU, within {abs(margin_lu):.1f} "
+                          f"of the target")
         return x, report
 
     # How much wider everything below the anchor has to sit.

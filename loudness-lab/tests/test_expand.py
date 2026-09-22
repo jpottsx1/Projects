@@ -174,6 +174,27 @@ class TestRestoreRange(unittest.TestCase):
         self.assertIn("already", report["note"])
         np.testing.assert_array_equal(y, self.squashed)
 
+    def test_a_track_close_enough_to_the_target_is_not_touched_either(self):
+        """The same margin the sub stage uses, and for the same reason.
+
+        Measured need: CD2 of the 1999 corpus sits at LRA 6.49 against a
+        target of 7.0. That is a stretch of 0.079 -- half a decibel at the
+        quietest point of the record, which is arithmetic rather than a
+        restoration. Without the margin the stage reports it as work done.
+        """
+        just_under = self.lra + 0.3
+        y, report = expand.restore_range(self.squashed, RATE,
+                                         target_lra=just_under, margin_lu=0.5)
+        self.assertFalse(report["applied"])
+        self.assertIn("within", report["note"])
+        np.testing.assert_array_equal(y, self.squashed)
+        # And past the margin it acts again, so this is a threshold and not
+        # a way of never doing anything.
+        _, acted = expand.restore_range(self.squashed, RATE,
+                                        target_lra=self.lra + 0.8,
+                                        margin_lu=0.5)
+        self.assertTrue(acted["applied"])
+
     def test_hitting_the_floor_is_reported_rather_than_hidden(self):
         """Raising the target past what the cap allows should say so, or a
         setting that does nothing looks like a setting that did."""

@@ -156,13 +156,29 @@ BUILT_IN = {
     #
     #   median LUFS-I   -9.48        median true peak  +0.86 dBTP
     #   median s_p95    -7.71        median LRA         5.40
-    #   crest (peak - LUFS-I)        10.34 dB
+    #   median crest                 10.01 dB
     #   arrived clipped              36 of 82 (43.9%), CD4 at 60%
     #   worst offender               9652 clipped runs
     #
-    # Crest at 10.3 is squarely in the hard-limited band (8-11 dB), and LRA
+    # Crest at 10.0 is squarely in the hard-limited band (8-11 dB), and LRA
     # at 5.4 in the loudness-war band (4-6). Both stages have something to
     # do here, which is not true of any other corpus in this library.
+    #
+    # Per disc, and this is the part that matters:
+    #
+    #   disc   LRA   crest   clipped
+    #   CD2    6.49   9.88     29%
+    #   CD3    5.45   9.95     38%
+    #   CD4    5.66  10.47     60%
+    #   CD1    4.44  10.73     50%
+    #
+    # LRA and crest run in OPPOSITE directions across the four (r = -0.80,
+    # on four folder medians, so suggestive rather than settled). CD2 has
+    # the most range left and the least punch; CD1 the reverse. A single
+    # "how squashed is it" number would call CD2 the healthiest disc and
+    # CD1 the worst, when they are damaged in different ways and want
+    # different stages. That is the two-stage design being right about real
+    # music rather than about a fixture.
     #
     # The top end needs nothing: these discs run 3.6 to 6.4 dB ABOVE the
     # reference at 8-16 kHz, and CD2 is the brightest folder measured
@@ -192,12 +208,16 @@ BUILT_IN = {
         # would make these duck under the next record, which for a DJ is the
         # failure and not the feature.
         "target_lra": 7.0,
-        # Crest 10.34 -> about 11.8 at roughly half a dB per dB. That lands
+        # Crest 10.01 -> about 11.5 at roughly half a dB per dB. That lands
         # just under the gate rather than past it, which is the intent: the
         # stage should stop being needed, not overshoot into a different
         # kind of wrong. Note the exchange rate was measured on a synthetic
         # fixture, so the figure is an extrapolation until this corpus is
         # processed and re-measured.
+        #
+        # All four discs (9.88 to 10.73) pass the 12 dB gate, and the spread
+        # is only 0.85 dB -- so unlike the sub, one figure genuinely does
+        # suit the whole corpus here.
         "transient": 3.0,
         "min_crest": 12.0,
     },

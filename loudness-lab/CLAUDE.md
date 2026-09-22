@@ -236,6 +236,11 @@ serve both has to be fast enough for a snare and slow enough for a chorus,
 and the compromise is audible as breathing. That is what a plain broadband
 expander is, and why it is not what this does.
 
+`restore_range` declines when a track is already within 0.5 LU of the
+target, matching the sub's rule. CD2 above needed it: at 6.49 against a
+target of 7.0 the stretch is 0.079, half a decibel at the quietest point
+of the record, which is arithmetic rather than a restoration.
+
 `restore_range` only ever attenuates. A loudness-war master has no
 headroom -- that is what made it one -- so the loudest 5% is anchored and
 everything below is pulled away. The levelling at the end of the chain
@@ -303,20 +308,39 @@ the eighties. What is wrong with it is the loudness war itself --
 
     median LUFS-I  -9.48      median true peak  +0.86 dBTP
     median s_p95   -7.71      median LRA         5.40
-    crest                     10.34 dB
+    median crest              10.01 dB
     arrived clipped           36 of 82 (43.9%), CD4 at 60%
     worst offender            9652 clipped runs
 
--- crest at 10.3 sitting in the hard-limited band (8-11) and LRA at 5.4 in
+-- crest at 10.0 sitting in the hard-limited band (8-11) and LRA at 5.4 in
 the loudness-war band (4-6). Hence the `nineties` profile: a sub capped at
 4, de-clipping on, `target_lra` 7.0 and `transient` 3.0.
 
-Note what that does NOT say. Crest here is the median peak minus the
-median loudness, which is close to but not the same as the median of the
-per-track crest, and the transient stage's exchange rate (about half a dB
-of crest per dB asked for) was measured on a synthetic fixture. Both are
-good enough to choose a starting setting and neither is a result. Process
-the corpus and measure it again.
+Per disc:
+
+| disc | LRA | crest | clipped |
+|---|---|---|---|
+| CD2 | 6.49 | 9.88 | 29% |
+| CD3 | 5.45 | 9.95 | 38% |
+| CD4 | 5.66 | 10.47 | 60% |
+| CD1 | 4.44 | 10.73 | 50% |
+
+**LRA and crest run in opposite directions here** -- r = -0.80, on four
+folder medians, so suggestive rather than settled. CD2 has the most range
+left and the least punch; CD1 the reverse. A single "how squashed is it"
+number would call CD2 the healthiest disc and CD1 the worst, when they are
+damaged in different ways and want different stages. That is the two-stage
+design being right about real music rather than about a fixture, which is
+the only evidence for it that counts.
+
+Note also that crest is NOT a clipping detector: crest and clipped share a
+correlation of +0.82 across the four, the wrong way round, because a
+clipped master has its peak pinned at full scale by definition. Count the
+runs to find clipping.
+
+One prediction was checked and was slightly wrong: crest estimated from
+the medians (median peak minus median loudness) read 10.34 against a
+measured 10.01. Close, as it was said to be, and not the same number.
 
 ## Open
 

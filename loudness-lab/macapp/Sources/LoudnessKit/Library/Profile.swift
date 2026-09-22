@@ -184,18 +184,31 @@ public struct Profile: Codable, Equatable, Sendable {
         //
         //   median LUFS-I  -9.48      median true peak  +0.86 dBTP
         //   median s_p95   -7.71      median LRA         5.40
-        //   crest                     10.34 dB
+        //   median crest              10.01 dB
         //   arrived clipped           36 of 82 (43.9%), CD4 at 60%
         //   worst offender            9652 clipped runs
         //
-        // Crest at 10.3 is squarely in the hard-limited band (8-11) and LRA
+        // Crest at 10.0 is squarely in the hard-limited band (8-11) and LRA
         // at 5.4 in the loudness-war band (4-6). Both dynamics stages have
         // something to do here, which is not true of any other corpus in
-        // this library. The top end needs nothing: these discs run 3.6 to
+        // this library. Per disc:
+        //
+        //   disc   LRA   crest   clipped
+        //   CD2    6.49   9.88     29%
+        //   CD3    5.45   9.95     38%
+        //   CD4    5.66  10.47     60%
+        //   CD1    4.44  10.73     50%
+        //
+        // LRA and crest run in OPPOSITE directions (r = -0.80 on four
+        // folder medians, so suggestive rather than settled). CD2 has the
+        // most range left and the least punch; CD1 the reverse. A single
+        // "how squashed is it" number would call CD2 the healthiest and CD1
+        // the worst, when they are damaged in different ways and want
+        // different stages. The top end needs nothing: these discs run 3.6 to
         // 6.4 dB ABOVE the reference at 8-16 kHz.
         var nineties = Profile()
         nineties.description = "Late 1990s pop. Low end nearly there "
-            + "(2.5-3.6 dB short), but hard-limited: crest 10.3, LRA 5.4, "
+            + "(2.5-3.6 dB short), but hard-limited: crest 10.0, LRA 5.4, "
             + "44% arrived clipped. Needs a reference. Lossy."
         nineties.auto = true
         // Just above the measured worst of 3.64, on the same rule that gave
@@ -214,10 +227,12 @@ public struct Profile: Codable, Equatable, Sendable {
         // would make these duck under the next record, which for a DJ is
         // the failure and not the feature.
         nineties.targetLRA = 7
-        // Crest 10.34 -> about 11.8 at roughly half a dB per dB, landing
+        // Crest 10.01 -> about 11.5 at roughly half a dB per dB, landing
         // just under the gate rather than past it. The exchange rate was
         // measured on a synthetic fixture, so that is an extrapolation
-        // until this corpus is processed and measured again.
+        // until this corpus is processed and measured again. All four discs
+        // (9.88 to 10.73) pass the gate and the spread is only 0.85 dB, so
+        // unlike the sub, one figure genuinely suits the whole corpus.
         nineties.transient = 3
         nineties.minCrest = 12
 

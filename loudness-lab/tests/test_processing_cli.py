@@ -317,11 +317,15 @@ class TestDynamicsThroughTheCommand(unittest.TestCase):
         self.assertGreater(rows["squashed"]["lra_after"]
                            - rows["squashed"]["lra_before"], 3.0)
         self.assertIsNone(rows["squashed"]["crest_after"])
-        # Limited: crest comes back, range was never the problem.
+        # Limited: crest comes back, and the range stage declines outright
+        # -- its LRA is already inside the margin of the target, so there is
+        # no `lra_after` at all. That is a stronger result than a small
+        # change would have been: the stage did not act, rather than acting
+        # to no effect.
         self.assertGreater(rows["limited"]["crest_after"]
                            - rows["limited"]["crest_before"], 0.7)
-        self.assertLess(abs(rows["limited"]["lra_after"]
-                            - rows["limited"]["lra_before"]), 1.0)
+        self.assertIsNone(rows["limited"]["lra_after"])
+        self.assertGreater(rows["limited"]["lra_before"], 9.0 - 0.5)
 
     def test_the_originals_are_never_written_to(self):
         """The standing rule, checked where a new stage could break it."""

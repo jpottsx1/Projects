@@ -167,25 +167,49 @@ they are the fallback if bundling Python ever becomes the better answer.
 Speed to expect: five short fixtures measured in 1.7 seconds through the
 Python.
 
-## Open — in the order that matters
+## Where this got to
 
-1. **Measure three folders: 1970s, 1980s, and something modern.** Name the
-   modern one as reference. Nothing else here can be decided without it.
-   This has been outstanding for days only because the previous session ran
-   in the cloud and could not reach the music.
-2. **Does `disco-70s` turn de-clipping on?** The clipped share of the real
-   disco folders decides it. About a third of the disco measured so far
-   carries clipped runs, but the honest gain through MP3 is 2.0 dB at light
-   clipping falling to 0.4 at heavy -- against the cost of a lossy
-   generation. Measure, then listen, then decide.
-3. **An `eighties` profile.** Legitimate -- `disco-70s` is the same kind of
-   thing, a policy you select rather than an era read off a year tag. But
-   its cap has to come from the measured deficit of an eighties corpus,
-   exactly as `disco-70s`'s 8 dB came from three 1970s corpora. Not before
-   step 1.
-4. **The A/B switch has never been heard.** Versions are scheduled together
-   on one host clock so a switch lands on the same sample. Reasoned, not
-   proven. A tick or a flam on Shift-Space is the bug, and it is the
-   feature the app exists for.
-5. **Process some music.** The app has never been through a full run on
-   real records.
+**The premise is confirmed by ear.** Processed with `eighties`, sized per
+track against a modern reference, the result matches the reference's
+bottom end and impact. Subtle, which is the right answer: a deficit of 6
+to 11 dB in one octave, sized per track and gated where there is no
+bassline, should not announce itself. A dramatic result would have meant
+the stage was doing more than the measurement justified.
+
+That closes the chain the project was built on: measure a corpus, size
+each track against it, and the thing you hear is what the numbers said
+would happen.
+
+What was measured on this library, all of it against
+`Gathered/New Music 2026-08-14`:
+
+| | low end vs modern | clipped | LRA |
+|---|---|---|---|
+| 100 Hits New Romantics (2011), 5 discs | -6.18 to -10.92 | 0% on four, 10% on one | ~4.5 |
+| DISCOinferno GOLD (2003), 2 discs | -4.91, -7.35 | 53%, 76% | ~4.1 |
+| Disco Delight | -4.80 | 18% | 3.71 |
+
+Top end runs +1.47 to +4.84 ABOVE the reference everywhere, so there is
+nothing to add up there. Levelling to -16 needs no track turned up.
+
+## Open
+
+1. **Processing still goes through the Swift `Processor`,** not the CLI.
+   Measuring was moved and is fast; this is the other half. `subbass`
+   needs a `--porcelain` like `analyze`, with a test, and then
+   `Engine.run` can drive it.
+2. **The A/B switch has still never been confirmed.** Versions are
+   scheduled together on one host clock so a switch lands on the same
+   sample. A tick or a flam on Shift-Space is the bug.
+3. **A rolling expander**, to pull apart over-compressed records and give
+   the drops back their impact. LRA is the measurement and it is now
+   reported per folder. Note the catch: modern masters are the MOST
+   compressed, so unlike the sub stage there is no reference folder to
+   aim at -- it needs an absolute target.
+4. **Serato markers only travel MP3 to MP3.** FLAC and M4A carry them
+   too, in Vorbis comments and com.serato.dj atoms, but going between
+   containers is translation rather than copying and needs a real Serato
+   file of each to check against.
+5. **Nobody but Jeff has run this.** No licence file, no signing
+   identity, and ffmpeg's licensing needs a real answer before anything
+   is sold. `libmp3lame` is GPL.

@@ -215,6 +215,14 @@ That closes the chain the project was built on: measure a corpus, size
 each track against it, and the thing you hear is what the numbers said
 would happen.
 
+**The A/B switch is confirmed too.** Shift-Space mid-track lands on the
+same sample, with no tick and no flam -- which is what makes the
+comparison above worth anything. A switch that clicked, or that jumped a
+few milliseconds, would have been audible as a difference between the two
+versions and indistinguishable from the processing. Scheduling both
+versions together on one host clock, rather than starting one and seeking
+the other, is what does it.
+
 What was measured on this library, all of it against
 `Gathered/New Music 2026-08-14`:
 
@@ -229,18 +237,15 @@ nothing to add up there. Levelling to -16 needs no track turned up.
 
 ## Open
 
-1. **The A/B switch has still never been confirmed.** Versions are
-   scheduled together on one host clock so a switch lands on the same
-   sample. A tick or a flam on Shift-Space is the bug.
-2. **A rolling expander**, to pull apart over-compressed records and give
+1. **A rolling expander**, to pull apart over-compressed records and give
    the drops back their impact. LRA is the measurement and it is now
    reported per folder. Note the catch: modern masters are the MOST
    compressed, so unlike the sub stage there is no reference folder to
    aim at -- it needs an absolute target.
-3. **Serato markers only travel MP3 to MP3.** FLAC and M4A carry them
+2. **Serato markers only travel MP3 to MP3.** FLAC and M4A carry them
    too, in Vorbis comments and com.serato.dj atoms, but going between
    containers is translation rather than copying and needs a real Serato
    file of each to check against.
-4. **Nobody but Jeff has run this.** No licence file, no signing
+3. **Nobody but Jeff has run this.** No licence file, no signing
    identity, and ffmpeg's licensing needs a real answer before anything
    is sold. `libmp3lame` is GPL.

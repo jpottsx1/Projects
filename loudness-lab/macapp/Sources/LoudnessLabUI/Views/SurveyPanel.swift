@@ -260,6 +260,13 @@ struct SurveyPanel: View {
                         .foregroundStyle(row.clippedShare > 0.25 ? .orange : .secondary)
                         .frame(width: 44, alignment: .trailing)
                         .help("\(row.clipped) of \(row.tracks) tracks arrived clipped")
+                    Text(row.lra.map { String(format: "%.1f", $0) } ?? "—")
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundStyle((row.lra ?? 99) < 5 ? .orange : .secondary)
+                        .frame(width: 38, alignment: .trailing)
+                        .help("Median loudness range. Classical runs 15 to 20, "
+                              + "a well-mastered pop record 8 to 10, "
+                              + "loudness-war pop 4 to 6.")
                     Text(row.deficitVsReference.map { String(format: "%+.2f", $0) }
                          ?? (row.folder == survey.reference ? "ref" : "—"))
                         .font(.system(.caption, design: .monospaced))

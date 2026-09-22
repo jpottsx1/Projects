@@ -56,6 +56,19 @@ public struct Survey: Sendable {
         public var clippedShare: Double {
             tracks == 0 ? 0 : Double(clipped) / Double(tracks)
         }
+
+        /// Median loudness range, per folder.
+        ///
+        /// How far apart the quiet parts and the loud parts sit -- the
+        /// number that says whether a record has drops or just has volume.
+        /// Classical runs 15 to 20, a well-mastered pop record 8 to 10,
+        /// loudness-war pop 4 to 6.
+        ///
+        /// Here because restoring dynamics is the one thing a reference
+        /// folder cannot help with: modern masters are the MOST compressed,
+        /// so there is no folder to aim at. It needs an absolute target,
+        /// and this is the measurement that would set one.
+        public var lra: Double?
         /// Median shape per band, 31.5 to 63 Hz.
         public let curve: [Double: Double]
         /// Mean of the above -- one number to sort and compare folders on.
@@ -153,10 +166,12 @@ public struct Survey: Sendable {
         let labels = Library.folderLabels(everything.map(\.path))
         var counts: [String: Int] = [:]
         var clipped: [String: Int] = [:]
+        var ranges: [String: [Double]] = [:]
         for row in everything {
             let label = labels[row.path] ?? "(root)"
             counts[label, default: 0] += 1
             if (row.clipRuns ?? 0) > 0 { clipped[label, default: 0] += 1 }
+            if let lra = row.lra, lra.isFinite { ranges[label, default: []].append(lra) }
         }
         let referenceName = wanted.flatMap { Library.resolveReference(curves, $0) }
         survey.reference = referenceName
@@ -180,6 +195,9 @@ public struct Survey: Sendable {
             let mean = values.reduce(0, +) / Double(values.count)
             var row = FolderLowEnd(folder: folder, tracks: counts[folder] ?? 0,
                                    clipped: clipped[folder] ?? 0,
+                                   lra: ranges[folder].flatMap {
+                                       BS1770.percentile($0, 50)
+                                   },
                                    curve: curve, mean: mean, deficitVsReference: nil)
             if let referenceCurve, folder != referenceName {
                 row.deficitVsReference = gap(curve, referenceCurve,
@@ -251,13 +269,15 @@ public struct Survey: Sendable {
                     + (reference.map { " (against \($0))" }
                        ?? "  — no reference named, so vs ref is blank"),
                     String(repeating: "-", count: 62),
-                    "   tracks   mean    vs ref   clipped   folder"]
+                    "   tracks   mean    vs ref   clipped    LRA   folder"]
             for row in folders {
                 let versus = row.deficitVsReference.map { String(format: "%+7.2f", $0) }
                     ?? "      -"
-                out.append(String(format: "  %6d  %+6.2f  %@   %3d (%3.0f%%)   %@",
+                let range = row.lra.map { String(format: "%5.2f", $0) } ?? "    -"
+                out.append(String(format: "  %6d  %+6.2f  %@   %3d (%3.0f%%)  %@   %@",
                                   row.tracks, row.mean, versus,
-                                  row.clipped, row.clippedShare * 100, row.folder))
+                                  row.clipped, row.clippedShare * 100,
+                                  range, row.folder))
             }
         }
         if !folders.isEmpty {

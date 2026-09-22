@@ -172,13 +172,21 @@ BUILT_IN = {
     #   CD4    5.66  10.47     60%
     #   CD1    4.44  10.73     50%
     #
-    # LRA and crest run in OPPOSITE directions across the four (r = -0.80,
-    # on four folder medians, so suggestive rather than settled). CD2 has
-    # the most range left and the least punch; CD1 the reverse. A single
-    # "how squashed is it" number would call CD2 the healthiest disc and
-    # CD1 the worst, when they are damaged in different ways and want
-    # different stages. That is the two-stage design being right about real
-    # music rather than about a fixture.
+    # LRA and crest run in OPPOSITE directions across the four. CD2 has the
+    # most range left and the least punch; CD1 the reverse. A single "how
+    # squashed is it" number would call CD2 the healthiest disc and CD1 the
+    # worst, when they are damaged in different ways and want different
+    # stages. Measured again over eleven folders and 216 tracks the same
+    # relationship holds at r = -0.85, so this is the library speaking and
+    # not four points of noise.
+    #
+    # Two figures from that larger measurement bear on this profile. The
+    # modern reference corpus sits at crest 10.21 and LRA 5.45 -- in the
+    # same band as this 1999 material and below every pre-1990 folder
+    # measured, so there is no reference to aim at for dynamics and these
+    # targets have to stay absolute. And the 12 dB crest gate lands in a
+    # real gap: unlimited-era material reads 11.87 to 12.11 here, 1999 pop
+    # 9.88 to 10.73, and nothing at all in between.
     #
     # The top end needs nothing: these discs run 3.6 to 6.4 dB ABOVE the
     # reference at 8-16 kHz, and CD2 is the brightest folder measured

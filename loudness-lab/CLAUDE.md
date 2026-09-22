@@ -333,14 +333,67 @@ damaged in different ways and want different stages. That is the two-stage
 design being right about real music rather than about a fixture, which is
 the only evidence for it that counts.
 
-Note also that crest is NOT a clipping detector: crest and clipped share a
-correlation of +0.82 across the four, the wrong way round, because a
-clipped master has its peak pinned at full scale by definition. Count the
-runs to find clipping.
-
 One prediction was checked and was slightly wrong: crest estimated from
 the medians (median peak minus median loudness) read 10.34 against a
 measured 10.01. Close, as it was said to be, and not the same number.
+
+**A second one was wrong and is withdrawn.** On those four discs crest and
+clipped correlated at +0.82, and the reasoning offered for it -- that a
+clipped master has its peak pinned at full scale -- sounded good enough to
+write down. Across eleven folders it is **-0.05**. There is no relationship;
+the +0.82 was four points of noise. The standing rule about not deciding
+anything from a library average applies just as well to a library of four.
+
+## What the whole library says about dynamics
+
+Eleven folders, 216 tracks, measured together:
+
+| folder | LRA | crest | clipped |
+|---|---|---|---|
+| DISCOinferno GOLD, Disc 01 | 4.10 | 12.92 | 53% |
+| DISCOinferno GOLD, Disc 02 | 3.91 | 12.23 | 76% |
+| 1977 - Dance Music | 4.23 | 12.11 | 0% |
+| 1980 - Dance Music | 4.26 | 12.10 | 0% |
+| 1983 - Dance Music | 4.18 | 11.91 | 0% |
+| 1974 - Dance Music | 5.06 | 11.87 | 0% |
+| Now Yearbook 99, CD1 | 4.44 | 10.73 | 50% |
+| Now Yearbook 99, CD4 | 5.66 | 10.47 | 60% |
+| **Gathered/New Music 2026-08-14** | **5.45** | **10.21** | 0% |
+| Now Yearbook 99, CD3 | 5.45 | 9.95 | 38% |
+| Now Yearbook 99, CD2 | 6.49 | 9.88 | 29% |
+
+Three things follow.
+
+**The reference corpus is itself compressed.** It sits at crest 10.21 and
+LRA 5.45, in the same band as the 1999 pop and below every pre-1990 folder
+in the library. For low end it is the thing to aim at; for dynamics there
+is nothing here to aim at, which the sub stage's design note predicted and
+this measures. `target_lra` and `min_crest` are absolute figures for that
+reason, and have to stay absolute.
+
+**The `min_crest` default of 12 lands in a real gap.** It was taken from
+the published range. Measured here, unlimited-era material (the four
+0%-clipped Dance Music folders) reads 11.87 to 12.11 and 1999 pop reads
+9.88 to 10.73. Nothing sits between 11.13 and 11.87. The threshold was
+lucky, and is now evidence.
+
+**LRA and crest run opposite, r = -0.85 over eleven folders.** The
+anti-correlation first seen on four discs holds on a larger sample. The
+old material has the punch and none of the range; the new material has
+what range there is and no punch. No single "how squashed is it" number
+orders this library correctly, which is the whole case for two stages.
+
+### Low LRA is not always damage
+
+The survey used to mark every disco compilation as wanting the range
+stage, on LRA alone -- on records whose crest was the highest measured
+anywhere in the library. A groove that holds one level for seven minutes
+is the arrangement, not a compressor, and expanding it invents dynamics
+the record never had.
+
+So `wants` now needs BOTH to be low: **low LRA with crest intact is the
+arrangement; low LRA with crest gone is the mastering.** The disco discs
+now read `declip`, which is what is actually wrong with them.
 
 ## Open
 

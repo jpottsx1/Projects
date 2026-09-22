@@ -316,26 +316,45 @@ public struct Survey: Sendable {
                     "  something to do — but keep the target modest, because a track",
                     "  that ducks 8 LU in the breakdown disappears under the next one.",
                     "",
-                    "  Crest is punch over MILLISECONDS: peak minus loudness. Limited",
-                    "  hard reads 8 to 11, untouched reads 13 and up. Low means the",
-                    "  'Attack' setting has something to do, and it is the one that",
-                    "  makes a record hit harder without making it duck.",
+                    "  Crest is punch over MILLISECONDS: peak minus loudness. Low",
+                    "  means the 'Attack' setting has something to do, and it is the",
+                    "  one that makes a record hit harder without making it duck.",
                     "",
-                    "  tracks    LRA   crest   wants         folder"]
+                    "  'range' needs BOTH to be low, not LRA alone. A seven-minute",
+                    "  disco groove runs at one level because that is the record, not",
+                    "  because a compressor did it -- and expanding it would invent",
+                    "  dynamics it never had. Low LRA with crest intact is the",
+                    "  arrangement; low LRA with crest gone is the mastering.",
+                    "",
+                    "  tracks    LRA   crest  clipped   wants                  folder"]
             for row in folders.sorted(by: { ($0.crest ?? 99) < ($1.crest ?? 99) }) {
                 let range = row.lra.map { String(format: "%5.2f", $0) } ?? "    -"
                 let crest = row.crest.map { String(format: "%5.2f", $0) } ?? "    -"
-                // Said plainly rather than left to be worked out from two
-                // columns. The thresholds are the published ones above, not
-                // anything measured on this library -- which is why this
-                // says "wants" and not "needs".
+                // Said plainly rather than left to be worked out from three
+                // columns, and "wants" rather than "needs" because these are
+                // thresholds, not a diagnosis.
+                //
+                // The crest figure of 12 was taken from the published range
+                // and then measured here: across this library, material from
+                // before the loudness war reads 11.87 to 12.11 and 1999 pop
+                // reads 9.88 to 10.73. The threshold sits in the gap.
+                //
+                // `range` deliberately requires a low crest as well. Asking
+                // LRA alone marked every disco compilation in the library as
+                // wanting it, on records whose crest was the highest measured
+                // anywhere -- a groove that holds one level for seven minutes
+                // is the arrangement, and expanding it invents dynamics the
+                // record never had.
                 var wants: [String] = []
-                if let lra = row.lra, lra < 6.0 { wants.append("range") }
-                if let c = row.crest, c < 12.0 { wants.append("attack") }
+                let flattened = (row.crest ?? 99) < 12.0
+                if row.clippedShare > 0.20 { wants.append("declip") }
+                if let lra = row.lra, lra < 6.0, flattened { wants.append("range") }
+                if flattened, row.crest != nil { wants.append("attack") }
                 let verdict = (wants.isEmpty ? "—" : wants.joined(separator: "+"))
-                    .padding(toLength: 14, withPad: " ", startingAt: 0)
-                out.append(String(format: "  %6d  %@   %@   %@%@",
-                                  row.tracks, range, crest, verdict, row.folder))
+                    .padding(toLength: 23, withPad: " ", startingAt: 0)
+                out.append(String(format: "  %6d  %@   %@    %3.0f%%    %@%@",
+                                  row.tracks, range, crest,
+                                  row.clippedShare * 100, verdict, row.folder))
             }
         }
 

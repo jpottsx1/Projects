@@ -19,7 +19,7 @@ let package = Package(
         .executableTarget(name: "LoudnessLabUI",
                           dependencies: ["LoudnessKit"],
                           path: "Sources/LoudnessLabUI",
-                          resources: [.copy("Resources/SplashLogo.jpg")]),
+                          resources: [.copy("Resources/SplashLogo.png")]),
 
         .testTarget(name: "LoudnessKitTests",
                     dependencies: ["LoudnessKit"],

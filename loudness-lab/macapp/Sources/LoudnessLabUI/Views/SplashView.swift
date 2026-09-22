@@ -12,7 +12,7 @@ struct SplashView: View {
     private static let duration: Duration = .seconds(5)
 
     private var logo: NSImage? {
-        Bundle.module.url(forResource: "SplashLogo", withExtension: "jpg")
+        Bundle.module.url(forResource: "SplashLogo", withExtension: "png")
             .flatMap(NSImage.init(contentsOf:))
     }
 
@@ -24,6 +24,10 @@ struct SplashView: View {
                     .resizable()
                     .aspectRatio(contentMode: .fit)
                     .padding(80)
+                    // Background is gone from the artwork itself; the
+                    // shadow is what tells the eye the circle is sitting
+                    // above the black rather than painted onto it.
+                    .shadow(color: .black.opacity(0.6), radius: 40, y: 20)
             }
         }
         .ignoresSafeArea()

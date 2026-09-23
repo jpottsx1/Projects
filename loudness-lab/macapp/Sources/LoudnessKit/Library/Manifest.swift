@@ -1,5 +1,4 @@
 import Foundation
-import LoudnessKit
 
 /// What `loudness-lab subbass` writes beside the audio it renders.
 ///
@@ -7,28 +6,28 @@ import LoudnessKit
 /// manifest is where the tool states that a track's versions came out of a
 /// single decode and are therefore sample-aligned. A folder of files makes
 /// no such promise.
-struct Manifest: Codable {
-    let version: Int
-    let rate: Int
-    let aligned: Bool
-    let profile: String?
-    let settings: Profile
-    let tracks: [Track]
+public struct Manifest: Codable {
+    public let version: Int
+    public let rate: Int
+    public let aligned: Bool
+    public let profile: String?
+    public let settings: Profile
+    public let tracks: [Track]
 
-    struct Track: Codable, Identifiable, Equatable {
-        let source: String
-        let name: String
-        let folder: String
-        let subDB: Double
-        let punchDB: Double
+    public struct Track: Codable, Identifiable, Equatable {
+        public let source: String
+        public let name: String
+        public let folder: String
+        public let subDB: Double
+        public let punchDB: Double
         /// Nil for a manifest written before this was added -- an older
         /// run genuinely has no air figure to show, not a zero one.
-        let airDB: Double?
-        let clipsRestored: Int
-        let clipLiftDB: Double
-        let variants: [Variant]
+        public let airDB: Double?
+        public let clipsRestored: Int
+        public let clipLiftDB: Double
+        public let variants: [Variant]
 
-        var id: String { source }
+        public var id: String { source }
 
         enum CodingKeys: String, CodingKey {
             case source, name, folder, variants
@@ -40,17 +39,17 @@ struct Manifest: Codable {
         }
     }
 
-    struct Variant: Codable, Identifiable, Equatable {
-        let kind: String
-        let label: String
-        let path: String
-        let seconds: Double
-        let lufsI: Double?
-        let sP95: Double?
-        let truePeakDBTP: Double?
+    public struct Variant: Codable, Identifiable, Equatable {
+        public let kind: String
+        public let label: String
+        public let path: String
+        public let seconds: Double
+        public let lufsI: Double?
+        public let sP95: Double?
+        public let truePeakDBTP: Double?
 
-        var id: String { path }
-        var url: URL { URL(fileURLWithPath: path) }
+        public var id: String { path }
+        public var url: URL { URL(fileURLWithPath: path) }
 
         enum CodingKeys: String, CodingKey {
             case kind, label, path, seconds
@@ -60,7 +59,7 @@ struct Manifest: Codable {
         }
     }
 
-    static func read(_ url: URL) throws -> Manifest {
+    public static func read(_ url: URL) throws -> Manifest {
         try JSONDecoder().decode(Manifest.self, from: Data(contentsOf: url))
     }
 }
@@ -72,7 +71,7 @@ extension Manifest.Track {
     /// upwards would risk clipping the thing you are auditioning, and not
     /// matching at all would mean the louder version wins on loudness alone --
     /// which it reliably does, whatever else is true of it.
-    func matchGains(using estimator: KeyPath<Manifest.Variant, Double?>) -> [String: Float] {
+    public func matchGains(using estimator: KeyPath<Manifest.Variant, Double?>) -> [String: Float] {
         let levels = variants.compactMap { $0[keyPath: estimator] }
         guard levels.count == variants.count, let quietest = levels.min() else {
             return Dictionary(uniqueKeysWithValues: variants.map { ($0.id, Float(0)) })

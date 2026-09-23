@@ -127,43 +127,52 @@ public struct Survey: Sendable {
         var survey = Survey()
         let rows = try library.tracks(under: roots)
         survey.measured = rows.count
-        guard !rows.isEmpty else { return survey }
 
-        survey.medianLUFSI = BS1770.percentile(rows.compactMap(\.lufsI), 50)
-        survey.medianSP95 = BS1770.percentile(rows.compactMap(\.sP95), 50)
-        survey.medianLRA = BS1770.percentile(rows.compactMap(\.lra), 50)
-        survey.medianCrest = BS1770.percentile(rows.compactMap(\.crestDB), 50)
-        survey.medianTruePeak = BS1770.percentile(rows.compactMap(\.truePeakDBTP), 50)
+        // Everything below this point that depends on the CURRENT
+        // selection's own rows -- medians, clipping, targets -- has
+        // nothing to compute if that selection has never been measured.
+        // The folder table further down does not: it is library-wide by
+        // design (see below), and skipping it here would mean a brand
+        // new, not-yet-measured folder can never see the reference list
+        // it needs to be sized against -- exactly the case this feature
+        // exists for.
+        if !rows.isEmpty {
+            survey.medianLUFSI = BS1770.percentile(rows.compactMap(\.lufsI), 50)
+            survey.medianSP95 = BS1770.percentile(rows.compactMap(\.sP95), 50)
+            survey.medianLRA = BS1770.percentile(rows.compactMap(\.lra), 50)
+            survey.medianCrest = BS1770.percentile(rows.compactMap(\.crestDB), 50)
+            survey.medianTruePeak = BS1770.percentile(rows.compactMap(\.truePeakDBTP), 50)
 
-        // --- clipping ---
-        var clipping = Clipping()
-        clipping.measured = rows.count
-        let withRuns = rows.filter { ($0.clipRuns ?? 0) > 0 }
-        clipping.tracks = withRuns.count
-        clipping.heavy = rows.filter { ($0.clipRuns ?? 0) > 100 }.count
-        clipping.medianRuns = Int(BS1770.percentile(
-            withRuns.map { Double($0.clipRuns ?? 0) }, 50) ?? 0)
-        if let worst = withRuns.max(by: { ($0.clipRuns ?? 0) < ($1.clipRuns ?? 0) }) {
-            clipping.worst = (worst.name, worst.clipRuns ?? 0)
-        }
-        survey.clipping = clipping
+            // --- clipping ---
+            var clipping = Clipping()
+            clipping.measured = rows.count
+            let withRuns = rows.filter { ($0.clipRuns ?? 0) > 0 }
+            clipping.tracks = withRuns.count
+            clipping.heavy = rows.filter { ($0.clipRuns ?? 0) > 100 }.count
+            clipping.medianRuns = Int(BS1770.percentile(
+                withRuns.map { Double($0.clipRuns ?? 0) }, 50) ?? 0)
+            if let worst = withRuns.max(by: { ($0.clipRuns ?? 0) < ($1.clipRuns ?? 0) }) {
+                clipping.worst = (worst.name, worst.clipRuns ?? 0)
+            }
+            survey.clipping = clipping
 
-        // --- what levelling would cost, per target ---
-        let levels = rows.compactMap { row -> (Double, Double)? in
-            guard let value = row.sP95 ?? row.lufsI, value.isFinite else { return nil }
-            return (value, row.truePeakDBTP ?? -.infinity)
-        }
-        if !levels.isEmpty {
-            for target in stride(from: -10.0, through: -18.0, by: -2.0) {
-                let gains = levels.map { (target - $0.0, $0.1) }
-                let count = Double(gains.count)
-                survey.targets.append(TargetRow(
-                    targetLUFS: target,
-                    needBoost: Double(gains.filter { $0.0 > 0 }.count) / count,
-                    bigBoost: Double(gains.filter { $0.0 > 3 }.count) / count,
-                    wouldExceedCeiling: Double(gains.filter {
-                        $0.1.isFinite && $0.1 + $0.0 > peakCeiling
-                    }.count) / count))
+            // --- what levelling would cost, per target ---
+            let levels = rows.compactMap { row -> (Double, Double)? in
+                guard let value = row.sP95 ?? row.lufsI, value.isFinite else { return nil }
+                return (value, row.truePeakDBTP ?? -.infinity)
+            }
+            if !levels.isEmpty {
+                for target in stride(from: -10.0, through: -18.0, by: -2.0) {
+                    let gains = levels.map { (target - $0.0, $0.1) }
+                    let count = Double(gains.count)
+                    survey.targets.append(TargetRow(
+                        targetLUFS: target,
+                        needBoost: Double(gains.filter { $0.0 > 0 }.count) / count,
+                        bigBoost: Double(gains.filter { $0.0 > 3 }.count) / count,
+                        wouldExceedCeiling: Double(gains.filter {
+                            $0.1.isFinite && $0.1 + $0.0 > peakCeiling
+                        }.count) / count))
+                }
             }
         }
 

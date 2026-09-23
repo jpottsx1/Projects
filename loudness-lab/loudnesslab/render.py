@@ -251,6 +251,7 @@ def one(job: dict) -> dict:
             "source": str(source), "name": job["name"], "folder": job["folder"],
             "sub_db": round(float(info["applied_db"]), 3),
             "punch_db": round(float(info["punch_db"]), 3),
+            "air_db": round(float(aired.get("measured_db", 0.0)), 3),
             "clips_restored": (clip or {}).get("restored", 0),
             "clip_lift_db": round(float((clip or {}).get("lift_db", 0.0)), 3),
             "variants": variants,

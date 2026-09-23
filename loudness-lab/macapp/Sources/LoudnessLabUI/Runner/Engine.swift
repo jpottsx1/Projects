@@ -55,15 +55,33 @@ final class Engine: ObservableObject {
         private let lock = NSLock()
         private var manifest: String?
         private var message: String?
+        /// Tracks that failed to (re-)measure, before processing ever
+        /// looked at them, and tracks that failed during processing
+        /// itself -- two different stages, so kept apart rather than
+        /// added together, in case only one of them ever fires for a
+        /// given command.
+        private var measuredErrors = 0
+        private var doneErrors = 0
 
         func record(_ event: CLI.Event) {
             lock.lock(); defer { lock.unlock() }
             if event.event == "done", let path = event.manifest { manifest = path }
             if event.event == "error", let said = event.message { message = said }
+            if event.event == "measured", let errors = event.errors { measuredErrors = errors }
+            if event.event == "done", let errors = event.errors { doneErrors = errors }
         }
 
         var manifestPath: String? { lock.lock(); defer { lock.unlock() }; return manifest }
         var refusal: String? { lock.lock(); defer { lock.unlock() }; return message }
+
+        /// A track measured but never processed, and a track that failed
+        /// mid-process, are both a row missing from the results table --
+        /// `subbass` can produce both in one run, so they add.
+        var processFailures: Int { lock.lock(); defer { lock.unlock() }; return measuredErrors + doneErrors }
+        /// `analyze` alone reports the same failures once, under whichever
+        /// of the two event names it happens to use -- the larger of the
+        /// two rather than the sum, so a track is not counted twice.
+        var measureFailures: Int { lock.lock(); defer { lock.unlock() }; return max(measuredErrors, doneErrors) }
     }
 
 
@@ -86,9 +104,16 @@ final class Engine: ObservableObject {
         log = ""; progress = nil
         defer { isRunning = false; progress = nil; progressNote = nil }
 
+        let outcome = Outcome()
         do {
-            try await measurePass(folders: folders, databaseURL: databaseURL)
+            try await measurePass(folders: folders, databaseURL: databaseURL, outcome: outcome)
             if cancelled { say("  Stopped."); return }
+            // Otherwise a folder with a few unreadable files just looks
+            // smaller in the survey afterward, with no line saying why.
+            if outcome.measureFailures > 0 {
+                failure = "\(outcome.measureFailures) track(s) failed to measure "
+                    + "— see the log below for which, and why."
+            }
 
             progress = nil
             progressNote = "Building the survey…"
@@ -105,7 +130,7 @@ final class Engine: ObservableObject {
     ///
     /// Shared by Measure and by Process, which needs the same numbers
     /// before it can choose what to work on.
-    private func measurePass(folders: [URL], databaseURL: URL) async throws {
+    private func measurePass(folders: [URL], databaseURL: URL, outcome: Outcome? = nil) async throws {
         guard let tool = CLI.locate() else { throw CLI.Failure(CLI.missing) }
         // The database's folder, because the CLI will not make it and a
         // first run has nowhere to put the file.
@@ -124,6 +149,7 @@ final class Engine: ObservableObject {
         try await CLI.run(tool, arguments,
                           isCancelled: { [flag] in flag.isCancelled }) { [weak self] line in
             guard let event = CLI.Event(line) else { return }
+            outcome?.record(event)
             Task { @MainActor in self?.apply(event) }
         }
     }
@@ -224,6 +250,37 @@ final class Engine: ObservableObject {
         guard FileManager.default.fileExists(atPath: databaseURL.path),
               let library = try? Library(at: databaseURL) else { return }
         survey = try? Survey.of(library, under: folders, reference: reference)
+    }
+
+    /// Forget a folder's measurements, so the library can be rebuilt more
+    /// selectively than "everything ever measured".
+    ///
+    /// Nothing on disk is touched -- this removes the folder's rows from
+    /// the database, which is the only place "measured" is recorded.
+    /// Off the main actor because a folder can be thousands of tracks and
+    /// this is a delete plus a full survey rebuild, not a lookup.
+    func forget(folder: String, folders: [URL], databaseURL: URL, reference: String?) async {
+        let outcome: (removed: Int, survey: Survey?)? = await Task.detached(priority: .userInitiated) {
+            guard let library = try? Library(at: databaseURL) else { return nil }
+            guard let removed = try? library.forget(folder: folder) else { return nil }
+            return (removed, try? Survey.of(library, under: folders, reference: reference))
+        }.value
+        guard let outcome, outcome.removed > 0 else { return }
+        survey = outcome.survey
+        say("Cleared \(outcome.removed) track(s) measured under \"\(folder)\".")
+    }
+
+    /// Forget everything the database has ever measured, so a new set of
+    /// reference standards can be ingested without the old ones still
+    /// counting toward a median or a corpus curve.
+    func forgetEverything(databaseURL: URL) async {
+        let removed: Int? = await Task.detached(priority: .userInitiated) {
+            guard let library = try? Library(at: databaseURL) else { return nil }
+            return try? library.forgetEverything()
+        }.value
+        guard let removed, removed > 0 else { return }
+        survey = Survey()
+        say("Cleared \(removed) track(s) — the whole library's measured history.")
     }
 
     /// Process, by running the command line tool.
@@ -340,6 +397,15 @@ final class Engine: ObservableObject {
             } else {
                 say("Nothing was written -- every track was already at the "
                     + "reference, or gated out.")
+            }
+            // A track that failed to (re-)measure is dropped before
+            // selection ever sees it; one that failed during processing
+            // is dropped from the manifest afterward. Either way it is
+            // simply missing from the results table above, with nothing
+            // there to say why -- so it is said here instead.
+            if outcome.processFailures > 0 {
+                failure = "\(outcome.processFailures) track(s) did not make it "
+                    + "into the results — see the log below for which, and why."
             }
 
             let wanted = profile.reference

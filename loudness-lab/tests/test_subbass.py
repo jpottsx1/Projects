@@ -463,6 +463,41 @@ class TestComparisonPairs(unittest.TestCase):
         self.assertTrue(full)
         self.assertIn("within", full[0])
 
+    def test_auto_sizes_air_from_the_measured_top_end_too(self):
+        """Air was a flat dB for every track regardless of how much top end
+        it already had -- blind application rather than tied to a
+        reference. --auto now sizes it the same way it sizes the sub: from
+        each track's own measured shortfall in the band air works in."""
+        from scipy.signal import butter, sosfiltfilt
+        from loudnesslab import cli
+        x, _ = programme(seconds=14.0)
+        dark = sosfiltfilt(butter(4, 6000.0, btype="low", fs=RATE,
+                                  output="sos"), x, axis=0).astype(np.float32)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "src"
+            (root / "Modern").mkdir(parents=True)
+            (root / "Old").mkdir(parents=True)
+            subbass.write_flac(root / "Modern" / "full.flac", x, RATE)
+            subbass.write_flac(root / "Old" / "dark.flac", dark, RATE)
+            buffer = io.StringIO()
+            with contextlib.redirect_stdout(buffer):
+                code = cli.main(["subbass", str(root), "--db",
+                                 str(Path(tmp) / "a.db"), "--auto", "--air", "3",
+                                 "--reference", "Modern", "--dry-run",
+                                 "--jobs", "1", "--quiet"])
+            output = buffer.getvalue()
+        self.assertEqual(code, 0)
+        self.assertIn("air<=+3 dB (per track)", output)
+        # The dark copy is missing top end against the reference, so it
+        # should measure a real rise; the reference itself needs neither
+        # sub nor air and is correctly skipped, same as the sub-only case.
+        dark_row = [ln for ln in output.splitlines() if "dark" in ln]
+        full_row = [ln for ln in output.splitlines() if "full" in ln]
+        self.assertTrue(dark_row and full_row)
+        self.assertNotIn("skipped", dark_row[0])
+        self.assertGreater(float(dark_row[0].split()[-1]), 0.5)
+        self.assertIn("within", full_row[0])
+
     def test_auto_without_a_resolvable_reference_stops(self):
         from loudnesslab import cli
         x, _ = programme(seconds=6.0)

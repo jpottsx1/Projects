@@ -1391,6 +1391,32 @@
    ]
   },
   {
+   "labels": {
+    "/m/Now Yearbook 99 (2026)/CD1/a.mp3": "Now Yearbook 99 (2026)",
+    "/m/Now Yearbook 99 (2026)/CD2/b.mp3": "Now Yearbook 99 (2026)",
+    "/m/Now Yearbook 99 (2026)/CD3/c.mp3": "Now Yearbook 99 (2026)",
+    "/m/Now Yearbook 99 (2026)/CD4/d.mp3": "Now Yearbook 99 (2026)"
+   },
+   "paths": [
+    "/m/Now Yearbook 99 (2026)/CD1/a.mp3",
+    "/m/Now Yearbook 99 (2026)/CD2/b.mp3",
+    "/m/Now Yearbook 99 (2026)/CD3/c.mp3",
+    "/m/Now Yearbook 99 (2026)/CD4/d.mp3"
+   ]
+  },
+  {
+   "labels": {
+    "/m/Now Yearbook 99 (2026)/CD1/a.mp3": "CD1",
+    "/m/Now Yearbook 99 (2026)/CD2/b.mp3": "CD2",
+    "/m/Now Yearbook 99 (2026)/bonus.mp3": "Now Yearbook 99 (2026)"
+   },
+   "paths": [
+    "/m/Now Yearbook 99 (2026)/CD1/a.mp3",
+    "/m/Now Yearbook 99 (2026)/CD2/b.mp3",
+    "/m/Now Yearbook 99 (2026)/bonus.mp3"
+   ]
+  },
+  {
    "labels": {},
    "paths": []
   }

@@ -95,23 +95,31 @@ def cmd_analyze(args: argparse.Namespace) -> int:
     return 0
 
 
-def _reference_curve(conn, wanted: str) -> tuple[str | None, dict]:
-    """Median low-band shape of the folder named by `wanted`."""
-    bands, shape = report._band_matrix(conn, "shape_db", group_by="folder")
+def _reference_curve(conn, wanted: str,
+                     bands=report.LOW_SHAPE_BANDS) -> tuple[str | None, dict]:
+    """Median shape of the folder named by `wanted`, over `bands`.
+
+    Low bands for the sub stage, top bands for air -- same query, same
+    resolution of which folder "the reference" names, different slice of
+    the spectrum.
+    """
+    matrix_bands, shape = report._band_matrix(conn, "shape_db", group_by="folder")
     name = report.resolve_reference(shape, wanted)
     if name is None:
         return None, {}
     curve = {b: float(np.median(shape[name][b]))
-             for b in report.LOW_SHAPE_BANDS if shape[name].get(b)}
+             for b in bands if shape[name].get(b)}
     return name, curve
 
 
-def _auto_amount(conn, path: str, curve: dict, cap: float) -> tuple[float, str | None]:
-    """How much this track is short of the reference, and whether it can take it."""
+def _auto_amount(conn, path: str, curve: dict, cap: float,
+                 bands=report.LOW_SHAPE_BANDS) -> tuple[float, str | None]:
+    """How much this track is short of the reference over `bands`, and
+    whether it can take it."""
     rows = conn.execute(
         "SELECT b.band_hz, b.shape_db FROM bands b "
         "JOIN tracks t ON t.id = b.track_id WHERE t.path = ? "
-        f"AND b.band_hz IN ({', '.join(str(b) for b in report.LOW_SHAPE_BANDS)})",
+        f"AND b.band_hz IN ({', '.join(str(b) for b in bands)})",
         (path,)).fetchall()
     deficits = []
     for row in rows:
@@ -440,6 +448,7 @@ def cmd_subbass(args: argparse.Namespace) -> int:
                        str(root).rstrip(os.sep) + os.sep + "%")]).fetchone()[0]
         analysed = in_scope
         reference_name, curve = (None, {})
+        top_curve = {}
         if args.auto:
             reference_name, curve = _reference_curve(conn, args.reference or "")
             if reference_name is None:
@@ -447,11 +456,23 @@ def cmd_subbass(args: argparse.Namespace) -> int:
                     f"--auto needs a reference folder; {args.reference!r} "
                     f"matched none (or matched several).\nName one of the "
                     f"folders that report lowend --by folder lists.")
+            if args.air > 0:
+                # Same idea as the sub's shortfall, over the band air is
+                # measured in: --air becomes the ceiling per track gets
+                # sized up to, rather than a flat amount every track gets
+                # regardless of how much brighter the reference already is.
+                _, top_curve = _reference_curve(conn, args.reference or "",
+                                                bands=report.TOP_SHAPE_BANDS)
         amounts = {}
+        air_amounts = {}
         if args.auto:
             for row in rows:
                 amounts[row["path"]] = _auto_amount(conn, row["path"], curve,
                                                     args.max_amount)
+                if args.air > 0 and top_curve:
+                    air_amounts[row["path"]] = _auto_amount(
+                        conn, row["path"], top_curve, args.air,
+                        bands=report.TOP_SHAPE_BANDS)
     finally:
         conn.close()
     if not rows:
@@ -479,6 +500,14 @@ def cmd_subbass(args: argparse.Namespace) -> int:
                 continue
             seen.add(key)
         amount, skip = amounts.get(row["path"], (args.amount, None))
+        air_amount, _ = air_amounts.get(row["path"], (args.air, None))
+        # `skip` short-circuits the whole track in render.one() -- right,
+        # back when the sub was the only thing --auto could size, wrong
+        # now that air is a second one. A track can easily be fine on bass
+        # and still short on top end; skipping it there would silently
+        # skip air too, on tracks air auto-sizing exists to help.
+        if air_amount > 0:
+            skip = None
         name = " - ".join(p for p in (row["artist"], row["title"]) if p) \
             or Path(row["path"]).stem
         jobs.append({
@@ -494,7 +523,7 @@ def cmd_subbass(args: argparse.Namespace) -> int:
             "target_lra": args.target_lra,
             "max_attenuation": args.max_attenuation,
             "transient": args.transient, "min_crest": args.min_crest,
-            "air": args.air, "air_tune": args.air_tune,
+            "air": air_amount, "air_tune": args.air_tune,
             "target": args.target, "estimator": args.estimator,
             "peak_ceiling": args.peak_ceiling,
             "compare": not args.no_compare, "dry_run": bool(args.dry_run),
@@ -521,6 +550,8 @@ def cmd_subbass(args: argparse.Namespace) -> int:
         out(f"profile: {args.profile}")
     heading = ("sub=auto (per track)" if args.auto
                else f"sub={args.amount:+.1f} dB")
+    air_heading = (f"air<=+{args.air:.0f} dB (per track)" if args.auto
+                  else f"air+{args.air:.0f} dB")
     out(f"KICK PROTOTYPE  {heading} in "
         f"{subbass.SUB_LOW_HZ:.0f}-{subbass.SUB_HIGH_HZ:.0f} Hz  "
         f"punch={args.punch:+.1f} dB in "
@@ -528,7 +559,7 @@ def cmd_subbass(args: argparse.Namespace) -> int:
         + (f"  declip<={args.declip_max:.0f} dB" if args.declip else "")
         + (f"  range->{args.target_lra:.0f} LU" if args.target_lra > 0 else "")
         + (f"  attack+{args.transient:.0f} dB" if args.transient > 0 else "")
-        + (f"  air+{args.air:.0f} dB from {args.air_tune / 1000:.1f}k"
+        + (f"  {air_heading} from {args.air_tune / 1000:.1f}k"
            if args.air > 0 else ""))
     out("=" * 104)
     out("  Lossy and irreversible, unlike the gain pass. Originals are never")
@@ -1174,7 +1205,8 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_argument("--freq", type=float, default=subbass.DEFAULT_FREQ_HZ)
     sub.add_argument("--decay", type=float, default=subbass.DEFAULT_DECAY_S)
     sub.add_argument("--auto", action="store_true", default=None,
-                     help="set the sub amount per track from its own measured "
+                     help="set the sub amount -- and, if --air is on, the air "
+                          "amount too -- per track from its own measured "
                           "shortfall against --reference, rather than using "
                           "one figure for everything")
     sub.add_argument("--reference", default=None, metavar="TEXT",
@@ -1218,7 +1250,10 @@ def build_parser() -> argparse.ArgumentParser:
                      help="dB of generated harmonics added to 8-20 kHz, for "
                           "a top end a shelf cannot help because a codec "
                           "emptied it. This one INVENTS -- the harmonics "
-                          "were never in the recording. 0 is off")
+                          "were never in the recording. 0 is off. --auto: "
+                          "this becomes the per-track cap, sized from the "
+                          "track's own measured shortfall against "
+                          "--reference in that same band, same as the sub")
     sub.add_argument("--air-tune", type=float, default=None, metavar="HZ",
                      help="--air: the frequency the harmonics are generated "
                           "from, upward (default "

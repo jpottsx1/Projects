@@ -59,6 +59,7 @@ fi
     || die "dependency install failed"
 ok "numpy $("$VENV/bin/python3" -c 'import numpy; print(numpy.__version__)')"
 ok "scipy $("$VENV/bin/python3" -c 'import scipy; print(scipy.__version__)')"
+ok "soxr $("$VENV/bin/python3" -c 'import soxr; print(soxr.__version__)')"
 
 # --- self-test --------------------------------------------------------------
 echo

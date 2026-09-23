@@ -14,12 +14,26 @@ let package = Package(
     targets: [
         // The measurement and processing, with no UI in it, so it can be
         // tested against the Python's own numbers without launching anything.
-        .target(name: "LoudnessKit", path: "Sources/LoudnessKit"),
+        //
+        // `AudioDecoder.decode` lives here, and the waveform is its only
+        // runtime caller now that Analyzer/Processor are set aside -- so
+        // Debug's -Onone was landing on it too: 5.6s to decode a six-minute
+        // file that a raw, optimized AVAudioFile read does in 0.86s, same
+        // code path. Same fix as LoudnessLabUI below, same reasoning.
+        .target(name: "LoudnessKit", path: "Sources/LoudnessKit",
+               swiftSettings: [.unsafeFlags(["-O"], .when(configuration: .debug))]),
 
         .executableTarget(name: "LoudnessLabUI",
                           dependencies: ["LoudnessKit"],
                           path: "Sources/LoudnessLabUI",
-                          resources: [.copy("Resources/SplashLogo.png")]),
+                          resources: [.copy("Resources/SplashLogo.png")],
+                          // Debug's -Onone leaves bounds-checking in the
+                          // waveform's sample-by-sample filtering, which is
+                          // the difference between 9s and 0.4s over a
+                          // six-minute track. Release already optimizes;
+                          // this just brings Cmd-R's everyday debug build
+                          // in line with it.
+                          swiftSettings: [.unsafeFlags(["-O"], .when(configuration: .debug))]),
 
         .testTarget(name: "LoudnessKitTests",
                     dependencies: ["LoudnessKit"],

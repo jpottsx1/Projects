@@ -13,18 +13,26 @@ struct ComparePanel: View {
     @ObservedObject var player: ABPlayer
     let track: Manifest.Track?
     @Binding var blind: Bool
+    /// Spreads this whole panel under the queue list too, for a track
+    /// whose waveform needs more than the results column's own width.
+    @Binding var wide: Bool
     let estimator: String
 
     @State private var shuffled: [String] = []
     @State private var revealed = false
     @State private var scrubbing = false
     @State private var scrubPosition: Double = 0
+    /// Keyed by variant path, so switching between two already-looked-at
+    /// tracks is instant and re-picking the same one never re-decodes.
+    @State private var envelopes: [String: WaveformEnvelope] = [:]
+    @State private var waveformMode: WaveformView.Mode = .overlay
 
     var body: some View {
         VStack(spacing: 10) {
             if let track {
                 Text(track.name).font(.headline)
                 transport
+                waveform(track)
                 scrubber
                 versions(track)
                 footnote
@@ -41,6 +49,57 @@ struct ComparePanel: View {
         }
     }
 
+    /// The original's shape, and -- once revealed -- what this run added
+    /// on top of it, in the same bass/mid/treble colors a mixer's own
+    /// overview waveform uses. Loaded per track rather than for the whole
+    /// queue at once: decoding is real work, and most tracks in a batch
+    /// are never opened here at all.
+    private func waveform(_ track: Manifest.Track) -> some View {
+        let original = track.variants.first { $0.kind == "original" } ?? track.variants.first
+        let processed = track.variants.first { $0.kind == "processed" }
+        let originalEnvelope = original.flatMap { envelopes[$0.id] }
+        let processedEnvelope = processed.flatMap { envelopes[$0.id] }
+        let hasComparison = processed != nil && processed?.id != original?.id
+        let showDifference = !blind || revealed
+        return VStack(alignment: .leading, spacing: 4) {
+            if hasComparison, showDifference {
+                Picker("", selection: $waveformMode) {
+                    ForEach(WaveformView.Mode.allCases) { Text($0.rawValue).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(width: 180)
+                .help("Overlay shows what changed on top of the original's "
+                      + "shape. Compare stacks both full waveforms, "
+                      + "original above processed, so a level or shape "
+                      + "difference is literal rather than tinted.")
+            }
+            if let originalEnvelope {
+                WaveformView(
+                    original: originalEnvelope,
+                    processed: processed?.id == original?.id ? nil : processedEnvelope,
+                    mode: waveformMode,
+                    showDifference: showDifference,
+                    progress: player.duration > 0 ? player.position / player.duration : 0,
+                    onSeek: { player.seek(to: $0 * player.duration) })
+            } else {
+                RoundedRectangle(cornerRadius: 4)
+                    .fill(Color.black.opacity(0.85))
+                    .frame(height: WaveformView.height)
+                    .overlay(ProgressView().controlSize(.small))
+            }
+        }
+        .task(id: track.id) { await loadEnvelopes(for: track) }
+    }
+
+    private func loadEnvelopes(for track: Manifest.Track) async {
+        for variant in track.variants where envelopes[variant.id] == nil {
+            if let envelope = try? await WaveformAnalyzer.analyze(variant.url) {
+                envelopes[variant.id] = envelope
+            }
+        }
+    }
+
     private var transport: some View {
         HStack(spacing: 14) {
             Button(action: {
@@ -51,6 +110,10 @@ struct ComparePanel: View {
             .font(.title2)
             Button(action: { player.stop() }) { Image(systemName: "stop.fill") }
             Spacer()
+            Toggle("Widen", isOn: $wide)
+                .toggleStyle(.switch)
+                .help("Spread this panel under the queue list as well, "
+                      + "for more room to see the waveform in.")
             Toggle("Match loudness", isOn: $player.matchLoudness)
                 .toggleStyle(.switch)
                 .help(Help.matchLoudness.summary)

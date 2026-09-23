@@ -239,6 +239,17 @@ class TestOutputFormats(unittest.TestCase):
                 self.assertTrue(Path(variant["path"]).is_file(), variant["path"])
                 self.assertEqual(Path(variant["path"]).suffix, ".m4a")
 
+    def test_the_manifest_carries_the_air_figure(self):
+        """The app's Results table has an Air column reading this. Without
+        it in the manifest, air ran and nothing on screen could say by
+        how much."""
+        self.assertEqual(self._run("flac", "--no-compare", "--air", "3"), 0)
+        manifest = json.loads((self.out / "manifest.json").read_text())
+        tracks = manifest["tracks"]
+        self.assertTrue(tracks)
+        for track in tracks:
+            self.assertIsInstance(track["air_db"], (int, float))
+
 
 @unittest.skipUnless(HAVE_FFMPEG, "ffmpeg/ffprobe not installed")
 class TestDynamicsThroughTheCommand(unittest.TestCase):

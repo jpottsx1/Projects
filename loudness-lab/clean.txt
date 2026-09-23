@@ -1,0 +1,257 @@
+SCAN  /Users/jeff/Downloads/Disco Music, /Users/jeff/Downloads/Disco Delight - The Beat Goes On, /Users/jeff/Downloads/Various - DISCOinferno GOLD (2003)
+      91 analysed, 34 already current, 0 errors, in 1.5 min
+
+LOUDNESS  (582 tracks)
+==============================================================================
+
+Where the library sits now
+------------------------------------------------------------------------------
+  lufs_i           sd  2.09   p10  -13.75   med  -11.00   p90   -8.31   span  5.43
+  s_p50            sd  2.19   p10  -13.93   med  -11.08   p90   -8.23   span  5.70
+  s_p90            sd  2.04   p10  -12.44   med   -9.50   p90   -6.94   span  5.51
+  s_p95            sd  2.02   p10  -11.97   med   -9.09   p90   -6.66   span  5.31
+  s_max            sd  1.99   p10  -11.12   med   -8.24   p90   -5.96   span  5.17
+  lra              sd  2.48   p10    2.41   med    4.05   p90    8.00   span  5.59
+  true_peak_dbtp   sd  1.32   p10   -2.12   med    0.07   p90    1.10   span  3.21
+  crest_db         sd  1.94   p10    8.36   med   10.47   p90   13.07   span  4.72
+
+How much the estimator choice changes the gain decision
+------------------------------------------------------------------------------
+  Each row is (estimator - LUFS-I) per track: the dB by which normalising
+  on that estimator differs from normalising on integrated loudness.
+  If these are near zero the whole argument is academic.
+
+  s_p50            sd  0.35   p10   -0.45   med   -0.03   p90    0.24   span  0.69
+  s_p90            sd  0.47   p10    0.87   med    1.33   p90    2.01   span  1.14
+  s_p95            sd  0.56   p10    1.05   med    1.66   p90    2.39   span  1.34
+  s_max            sd  0.82   p10    1.56   med    2.45   p90    3.54   span  1.98
+
+  ...broken down by loudness range (the prediction being tested is that
+  the disagreement grows with LRA):
+
+      LRA band      n    median s_p95 - lufs_i      p90
+        0-3 LU    145                     1.16     1.41
+        3-6 LU    316                     1.70     2.22
+        6-9 LU     79                     2.16     2.91
+       9-12 LU     33                     2.47     3.04
+        12+ LU      9                     2.76     3.60
+
+Choosing a target: how many tracks would need a BOOST
+------------------------------------------------------------------------------
+  A negative gain is free. A positive gain eventually needs a limiter,
+  which is the one thing this project is trying to avoid, so the useful
+  target is the one where almost nothing gets turned up.
+
+    target   estimator   need boost   > +3 dB   clip -1 dBTP
+       -10      lufs_i        63.1%     13.6%          78.9%
+       -12      lufs_i        22.3%      4.1%          41.6%
+       -14      lufs_i         8.6%      0.9%          10.8%
+       -16      lufs_i         1.5%      0.0%           2.6%
+       -18      lufs_i         0.2%      0.0%           0.3%
+       -10       s_p95        32.5%      5.0%          45.4%
+       -12       s_p95         9.5%      0.3%          15.5%
+       -14       s_p95         2.1%      0.0%           3.3%
+       -16       s_p95         0.0%      0.0%           0.3%
+       -18       s_p95         0.0%      0.0%           0.0%
+
+Masters that were already clipped
+------------------------------------------------------------------------------
+  tracks with runs of consecutive full-scale samples: 76 of 582 (13.1%)
+  tracks with more than 100 such runs:                22 (3.8%)
+
+FOLDERS  (582 tracks in 19 folders)
+================================================================================================================
+  Medians per folder. The last four columns are 1/3-octave shape,
+  in dB relative to each track's own broadband level.
+
+  folder                                    n    yr   LUFS-I    sd   s_p95    LRA   dBTP      32      40      50      63
+  its - The New Romantics (2011)/Disc 1    20  2011    -14.0 1.21    -12.1    4.8   -1.8   -38.9   -25.8   -18.0   -11.5
+  its - The New Romantics (2011)/Disc 2    20  2011    -12.5 2.24    -10.3    6.1    0.1   -34.3   -23.5   -14.7   -11.8
+  its - The New Romantics (2011)/Disc 3    20  2011    -13.9 1.19    -11.8    5.0   -0.6   -36.1   -25.0   -15.8   -10.5
+  its - The New Romantics (2011)/Disc 4    20  2011    -14.6 1.90    -12.7    4.5   -1.2   -39.7   -30.1   -19.2   -14.2
+  its - The New Romantics (2011)/Disc 5    20  2011    -13.8 1.40    -12.4    3.5   -2.1   -37.6   -25.8   -16.3   -13.6
+  Disco Delight - The Beat Goes On         40  2019    -12.3 0.90    -10.4    3.7    0.3   -30.9   -22.1   -14.6   -11.2
+  Disco Music                              51  2010     -9.7 1.06     -8.2    3.0    0.3   -33.5   -23.2   -15.9   -12.6
+  Gathered/New Music 2026-09-02            15  2026     -7.9 1.88     -6.7    5.3    0.8   -24.2   -12.0    -7.9    -9.7
+  ts Party/NOW - 100 HITS - PARTY - CD1    40  2019    -10.7 1.35     -8.4    4.4   -0.3   -23.6   -15.3    -9.2    -8.9
+  ts Party/NOW - 100 HITS - PARTY - CD2    40  2019    -10.8 1.52     -8.5    5.1   -0.4   -27.2   -17.5    -9.8   -10.1
+  ts Party/NOW - 100 HITS - PARTY - CD3    60  2019    -10.2 1.41     -8.3    3.4   -0.0   -36.0   -23.5   -14.8   -11.6
+  ts Party/NOW - 100 HITS - PARTY - CD4    60  2019    -10.2 1.29     -8.9    3.4    0.2   -32.6   -23.4   -18.3   -13.6
+  ts Party/NOW - 100 HITS - PARTY - CD5    60  2019    -11.1 1.16     -9.2    3.3   -0.3   -30.0   -20.8   -12.7   -11.3
+  Now Yearbook 99 (2026)/CD1               20  2026    -10.0 1.64     -8.0    4.4    0.6   -27.9   -20.5   -14.2   -11.1
+  Now Yearbook 99 (2026)/CD2               21  2026     -9.7 1.47     -7.7    6.5    0.6   -27.0   -17.7   -12.3   -12.4
+  Now Yearbook 99 (2026)/CD3               21  2026     -8.5 1.37     -7.1    5.4    0.8   -29.4   -20.8   -12.8    -9.8
+  Now Yearbook 99 (2026)/CD4               20  2026     -9.5 1.41     -7.8    5.7    1.0   -29.8   -19.9   -13.4   -11.1
+  us - DISCOinferno GOLD (2003)/Disc 01    17  2003    -12.2 1.61    -10.2    4.1    0.6   -30.2   -22.5   -15.1   -11.4
+  us - DISCOinferno GOLD (2003)/Disc 02    17  2003    -11.6 1.55     -9.9    3.9    0.7   -32.9   -25.1   -17.6   -13.4
+
+  Spread of the folder medians in each band (max - min):
+    32 Hz: 16.0 dB   40 Hz: 18.1 dB   50 Hz: 11.4 dB   63 Hz: 5.4 dB
+
+  If these folders are musical keys and this spread is large,
+  low-end shape is tracking the key, not the mastering -- and a
+  spectral match fitted to it would 'correct' tracks for the key
+  they are in. Broad smoothing is what protects against that.
+  A small spread means the risk is not real in this library.
+
+LOW END  (1/3-octave, relative to each track's own broadband level)
+==============================================================================
+
+Median shape per folder, in dB relative to broadband
+------------------------------------------------------------------------------
+  A number here is level-independent: it says what fraction of the
+  track's energy sits in that band, not how loud the track is.
+
+  folder                                     n      20      25      32      40      50      63      80     100     125     160     200     250     315
+  Hits - The New Romantics (2011)/Disc 1    20   -52.1   -48.9   -38.9   -25.8   -18.0   -11.5   -12.0   -12.8   -13.0   -11.8   -13.5   -14.7   -14.3
+  Hits - The New Romantics (2011)/Disc 2    20   -49.0   -43.5   -34.3   -23.5   -14.7   -11.8   -11.1   -11.8   -13.1   -12.6   -12.4   -13.3   -12.8
+  Hits - The New Romantics (2011)/Disc 3    20   -49.9   -44.4   -36.1   -25.0   -15.8   -10.5   -11.7   -11.2   -12.8   -11.6   -12.8   -13.9   -14.4
+  Hits - The New Romantics (2011)/Disc 4    20   -55.0   -50.8   -39.7   -30.1   -19.2   -14.2   -12.8   -12.1   -13.3   -12.7   -12.6   -13.3   -13.4
+  Hits - The New Romantics (2011)/Disc 5    20   -54.3   -48.8   -37.6   -25.8   -16.3   -13.6   -11.8   -12.4   -12.6   -11.6   -12.8   -14.5   -13.7
+  Disco Delight - The Beat Goes On          40   -45.9   -39.8   -30.9   -22.1   -14.6   -11.2   -11.3   -11.5   -12.3   -12.0   -13.2   -15.2   -15.5
+  Disco Music                               51   -44.8   -40.1   -33.5   -23.2   -15.9   -12.6   -11.2   -11.3   -11.9   -11.8   -12.7   -13.9   -13.5
+  Gathered/New Music 2026-09-02             15   -39.6   -35.0   -24.2   -12.0    -7.9    -9.7   -12.1   -13.0   -13.2   -15.7   -14.6   -14.3   -15.3
+  its Party/NOW - 100 HITS - PARTY - CD1    40   -37.1   -31.7   -23.6   -15.3    -9.2    -8.9    -9.8   -11.0   -12.7   -13.9   -15.6   -15.7   -15.5
+  its Party/NOW - 100 HITS - PARTY - CD2    40   -41.1   -36.2   -27.2   -17.5    -9.8   -10.1   -11.5   -12.1   -13.8   -14.3   -14.5   -14.9   -14.5
+  its Party/NOW - 100 HITS - PARTY - CD3    60   -45.4   -42.5   -36.0   -23.5   -14.8   -11.6   -12.8   -12.5   -13.4   -13.3   -13.5   -15.0   -14.6
+  its Party/NOW - 100 HITS - PARTY - CD4    60   -43.8   -41.8   -32.6   -23.4   -18.3   -13.6   -12.2   -11.7   -12.5   -11.3   -13.3   -15.5   -15.2
+  its Party/NOW - 100 HITS - PARTY - CD5    60   -45.1   -37.5   -30.0   -20.8   -12.7   -11.3   -10.8   -11.7   -12.6   -13.6   -14.0   -16.0   -17.1
+  Now Yearbook 99 (2026)/CD1                20   -40.3   -33.8   -27.9   -20.5   -14.2   -11.1   -11.5   -11.3   -12.2   -12.8   -13.7   -13.0   -13.0
+  Now Yearbook 99 (2026)/CD2                21   -42.2   -34.2   -27.0   -17.7   -12.3   -12.4   -12.3   -12.2   -14.0   -14.0   -13.4   -13.3   -13.3
+  Now Yearbook 99 (2026)/CD3                21   -36.6   -34.4   -29.4   -20.8   -12.8    -9.8    -9.4   -10.3   -12.7   -13.6   -13.8   -15.3   -15.6
+  Now Yearbook 99 (2026)/CD4                20   -41.3   -36.5   -29.8   -19.9   -13.4   -11.1   -11.2   -12.3   -13.2   -13.2   -14.0   -14.5   -14.2
+  ous - DISCOinferno GOLD (2003)/Disc 01    17   -49.9   -41.1   -30.2   -22.5   -15.1   -11.4   -10.1   -10.6   -11.6   -11.7   -14.5   -14.8   -15.2
+  ous - DISCOinferno GOLD (2003)/Disc 02    17   -49.0   -44.3   -32.9   -25.1   -17.6   -13.4   -11.3   -10.1   -11.3   -11.6   -13.1   -15.1   -14.8
+
+Difference from the Gathered/New Music 2026-09-02 reference (positive = this row has LESS energy here)
+------------------------------------------------------------------------------
+  This is the candidate stage-2 correction curve. Values are
+  deliberately un-smoothed; stage 2 should fit 3-4 gentle filters to
+  them and cap the result at about 5 dB.
+
+  folder                                     n      20      25      32      40      50      63      80     100     125     160     200     250     315
+  Hits - The New Romantics (2011)/Disc 1    20    12.6    13.9    14.6    13.7    10.1     1.8    -0.1    -0.2    -0.1    -3.8    -1.0     0.4    -1.0
+  Hits - The New Romantics (2011)/Disc 2    20     9.4     8.5    10.1    11.5     6.8     2.1    -0.9    -1.2    -0.1    -3.1    -2.2    -1.0    -2.5
+  Hits - The New Romantics (2011)/Disc 3    20    10.3     9.5    11.9    13.0     7.9     0.9    -0.4    -1.8    -0.3    -4.0    -1.8    -0.4    -0.9
+  Hits - The New Romantics (2011)/Disc 4    20    15.4    15.9    15.4    18.1    11.4     4.6     0.8    -0.9     0.1    -3.0    -1.9    -1.0    -1.9
+  Hits - The New Romantics (2011)/Disc 5    20    14.7    13.8    13.4    13.8     8.4     3.9    -0.2    -0.6    -0.6    -4.0    -1.7     0.2    -1.6
+  Disco Delight - The Beat Goes On          40     6.3     4.9     6.6    10.1     6.7     1.5    -0.7    -1.5    -0.9    -3.6    -1.4     0.8     0.2
+  Disco Music                               51     5.2     5.1     9.3    11.1     8.0     3.0    -0.9    -1.7    -1.3    -3.8    -1.8    -0.4    -1.8
+  its Party/NOW - 100 HITS - PARTY - CD1    40    -2.5    -3.2    -0.6     3.3     1.3    -0.8    -2.3    -2.0    -0.4    -1.8     1.1     1.4     0.2
+  its Party/NOW - 100 HITS - PARTY - CD2    40     1.5     1.2     2.9     5.5     1.9     0.5    -0.6    -0.9     0.6    -1.4    -0.0     0.6    -0.8
+  its Party/NOW - 100 HITS - PARTY - CD3    60     5.9     7.6    11.8    11.5     6.9     1.9     0.7    -0.5     0.3    -2.3    -1.1     0.7    -0.7
+  its Party/NOW - 100 HITS - PARTY - CD4    60     4.2     6.9     8.3    11.4    10.4     4.0     0.2    -1.3    -0.6    -4.4    -1.3     1.2    -0.1
+  its Party/NOW - 100 HITS - PARTY - CD5    60     5.5     2.5     5.8     8.8     4.8     1.6    -1.3    -1.3    -0.6    -2.1    -0.6     1.7     1.9
+  Now Yearbook 99 (2026)/CD1                20     0.8    -1.1     3.6     8.5     6.3     1.4    -0.5    -1.7    -1.0    -2.8    -0.9    -1.3    -2.3
+  Now Yearbook 99 (2026)/CD2                21     2.6    -0.8     2.8     5.7     4.4     2.7     0.3    -0.8     0.8    -1.7    -1.2    -1.1    -2.0
+  Now Yearbook 99 (2026)/CD3                21    -3.0    -0.6     5.2     8.8     5.0     0.1    -2.7    -2.7    -0.5    -2.1    -0.8     1.0     0.3
+  Now Yearbook 99 (2026)/CD4                20     1.7     1.5     5.5     7.9     5.5     1.4    -0.8    -0.7     0.1    -2.5    -0.6     0.2    -1.1
+  ous - DISCOinferno GOLD (2003)/Disc 01    17    10.3     6.1     6.0    10.4     7.2     1.8    -2.0    -2.4    -1.6    -4.0    -0.1     0.4    -0.1
+  ous - DISCOinferno GOLD (2003)/Disc 02    17     9.5     9.4     8.6    13.1     9.7     3.7    -0.7    -2.9    -1.9    -4.1    -1.5     0.8    -0.5
+
+  Read the two halves separately: a positive number at 25-50 Hz means
+  missing sub, which EQ can only fix if the content is actually there
+  (check the modulation table below). A NEGATIVE number at 200-315 Hz
+  means this era has MORE low-mid than modern masters -- that is
+  congestion, and cutting it is cheap, safe and often does more for
+  perceived weight than any sub boost.
+
+How consistent is the low end BETWEEN tracks? (p90 - p10 of shape, dB)
+------------------------------------------------------------------------------
+  The rows above are medians, which say nothing about whether the
+  tracks agree with each other. This is the spread across tracks
+  within each era, and it is the figure that decides whether
+  levelling alone is enough.
+
+  A tight spread (roughly 3 dB or less) means the records share a
+  low-end balance, so once they sit at the same loudness they sit
+  together full stop -- any correction would be one curve for the
+  whole group, or none. A wide spread means some tracks are much
+  thinner than their neighbours and no single gain will reconcile
+  them; those need treating individually or not at all.
+
+  folder                                     n      20      25      32      40      50      63      80     100     125     160     200     250     315
+  Hits - The New Romantics (2011)/Disc 1    20       .       .    23.9    17.2    14.0     9.7     8.6     7.8     4.4     5.6     7.1     6.8     7.7
+  Hits - The New Romantics (2011)/Disc 2    20       .       .    18.0    10.5     8.7     7.2     5.0     5.1     5.0     4.5     4.9     5.5     3.9
+  Hits - The New Romantics (2011)/Disc 3    20       .       .    23.8    16.3     9.7     6.7     5.8     5.4     6.6     5.9     5.8     5.6     6.2
+  Hits - The New Romantics (2011)/Disc 4    20       .       .    23.0    16.4    11.2     7.8     5.2     5.1     4.8     7.1     6.1     4.2     4.9
+  Hits - The New Romantics (2011)/Disc 5    20       .       .    13.5    12.4     9.2     8.6     6.1     5.4     4.8     7.2     6.2     4.4     4.3
+  Disco Delight - The Beat Goes On          40       .    10.9    14.5    11.7     7.7     6.3     5.4     6.8     5.1     3.7     6.8     5.3     5.1
+  Disco Music                               51       .       .    17.5    13.0     8.9     8.3     6.0     6.2     6.4     5.1     6.3     4.7     5.4
+  Gathered/New Music 2026-09-02             15    17.3    15.8    14.4    14.7     9.4     6.4     7.1     5.5     6.3     6.7     6.9     8.3     6.3
+  its Party/NOW - 100 HITS - PARTY - CD1    40    19.0    17.6    23.2    10.6     6.7     3.8     4.6     6.5     5.6     4.8     5.0     3.9     6.7
+  its Party/NOW - 100 HITS - PARTY - CD2    40       .    13.5    12.6    13.0     3.8     5.6     6.3     7.0     5.7     5.2     6.6     5.3     4.5
+  its Party/NOW - 100 HITS - PARTY - CD3    60       .       .    18.7    15.8     7.4     4.5     6.6     5.2     5.4     9.0     5.9     6.9     6.3
+  its Party/NOW - 100 HITS - PARTY - CD4    60       .       .    14.9    14.7    13.7     9.8     5.0     5.1     6.2     7.4     7.2     4.7     6.2
+  its Party/NOW - 100 HITS - PARTY - CD5    60       .    18.1    16.5    12.4    10.6     7.4     6.1     6.6     5.2     5.3     4.6     5.9     4.6
+  Now Yearbook 99 (2026)/CD1                20       .    15.3    12.8    10.2     7.8     7.2     4.7     5.9     7.4     6.6     6.5     4.9     5.1
+  Now Yearbook 99 (2026)/CD2                21       .    15.5    18.1    11.7     8.3     7.9     7.8     4.9     3.3     4.4     5.9     5.7     4.8
+  Now Yearbook 99 (2026)/CD3                21    17.9    11.2    13.0    15.3     8.9     6.3     6.0     4.9     7.1     6.6     4.2     5.5     7.9
+  Now Yearbook 99 (2026)/CD4                20       .    17.8    17.2    13.6     7.8     7.2     5.8     4.9     4.0     5.4     4.7     3.3     4.1
+  ous - DISCOinferno GOLD (2003)/Disc 01    17       .       .    11.8    10.2     9.7     7.9     6.0     5.4     3.1     5.1     7.5     5.6     5.6
+  ous - DISCOinferno GOLD (2003)/Disc 02    17       .       .    19.8    15.7     8.3     7.4     6.8     4.6     5.7     4.9     5.3     4.7     4.9
+  '.' = the band is more than 40 dB down; there is nothing to compare.
+
+How much does each band vary ACROSS the track? (median p90 - p10, dB)
+------------------------------------------------------------------------------
+  Measured over 0.68 s windows, so this reports arrangement dynamics:
+  intros, breakdowns, drops. It does NOT report whether a band holds
+  music or noise, and reading it that way is a mistake -- a window that
+  long averages over several bars, so a relentless groove, which is the
+  most musical low end there is, scores LOW. Measured this way a
+  wall-to-wall funk record read 10.9 dB against 6.2 for static rumble.
+  To tell content from a noise floor, use the sub octave's own envelope
+  instead, which separates the same two cases 43.7 against 11.3; that is
+  what subbass --auto gates on.
+  Also: the narrow low bands show 8-9 dB here on noise alone, so compare
+  across folders rather than against an absolute threshold.
+
+  folder                                     n      20      25      32      40      50      63      80     100     125     160     200     250     315
+  Hits - The New Romantics (2011)/Disc 1    20       .       .    15.4    19.8    16.7    23.4    22.1    19.1    15.8    14.2    12.7    12.8    12.4
+  Hits - The New Romantics (2011)/Disc 2    20       .       .    22.5    23.7    27.5    23.0    22.8    21.8    18.5    16.1    13.3    14.8    13.4
+  Hits - The New Romantics (2011)/Disc 3    20       .       .    18.3    19.4    18.8    19.4    16.4    15.6    14.9    14.3    11.0    11.3    13.4
+  Hits - The New Romantics (2011)/Disc 4    20       .       .    22.0    21.3    23.5    21.7    18.9    17.7    14.3    14.4    13.5    12.5    13.1
+  Hits - The New Romantics (2011)/Disc 5    20       .       .    16.9    18.4    14.6    12.9    15.9    17.4    13.9    11.2    10.3    11.2    10.9
+  Disco Delight - The Beat Goes On          40       .    13.1    12.6    12.4    12.6    11.9    12.3    12.4    11.8    11.5    11.9    11.2    10.9
+  Disco Music                               51       .       .    13.4    14.7    14.8    13.7    13.1    13.9    13.6    11.2    10.8     9.9    10.5
+  Gathered/New Music 2026-09-02             15    27.4    27.7    33.7    46.6    48.4    44.7    27.2    27.7    27.2    18.6    18.3    15.3    11.8
+  its Party/NOW - 100 HITS - PARTY - CD1    40    24.2    23.5    27.0    28.8    29.8    26.3    26.4    20.5    17.2    17.5    13.9    12.2    13.2
+  its Party/NOW - 100 HITS - PARTY - CD2    40       .    25.0    31.6    37.8    43.8    39.2    28.3    25.8    20.7    18.2    13.1    13.0    13.1
+  its Party/NOW - 100 HITS - PARTY - CD3    60       .       .    14.6    21.0    21.4    19.9    19.1    17.4    15.1    13.3    14.8    10.9    11.9
+  its Party/NOW - 100 HITS - PARTY - CD4    60       .       .    14.2    18.7    19.1    17.4    16.4    17.1    15.0    14.3    10.6    11.1    10.5
+  its Party/NOW - 100 HITS - PARTY - CD5    60       .    18.6    20.8    22.6    18.9    18.4    18.2    18.0    14.6    12.7    11.1    10.6    10.2
+  Now Yearbook 99 (2026)/CD1                20       .    20.1    21.5    22.3    25.5    25.5    22.3    21.9    19.5    16.2    13.6    12.4    12.1
+  Now Yearbook 99 (2026)/CD2                21       .    25.7    30.6    35.2    34.2    31.4    32.8    24.6    21.4    16.2    14.4    14.0    13.4
+  Now Yearbook 99 (2026)/CD3                21    23.2    24.9    24.0    26.3    25.3    23.5    18.6    20.1    21.6    15.7    13.2    13.7    10.9
+  Now Yearbook 99 (2026)/CD4                20       .    19.4    21.7    28.4    27.3    27.2    24.1    21.7    20.8    16.3    13.8    12.2    12.4
+  ous - DISCOinferno GOLD (2003)/Disc 01    17       .       .    16.4    14.1    14.7    11.5    12.2    12.0    10.4    12.3    10.1    11.3    12.2
+  ous - DISCOinferno GOLD (2003)/Disc 02    17       .       .    12.1    12.9    13.0    11.0    11.5    10.9    11.6    11.0    10.6     9.5     9.0
+  '.' = the band is more than 40 dB down, so there is nothing there to measure.
+
+Stereo width in the low end (median side/mid, dB)
+------------------------------------------------------------------------------
+  Strongly negative values low down mean the bass is effectively mono:
+  the signature of a record cut for vinyl. Those tracks have a hard
+  floor on how much genuine sub can be recovered.
+
+  folder                                     n      20      25      32      40      50      63      80     100     125     160     200     250     315
+  Hits - The New Romantics (2011)/Disc 1    20       .       .   -20.2   -20.3   -20.9   -21.7   -20.1   -19.5   -17.3   -13.5   -12.7   -13.2   -10.6
+  Hits - The New Romantics (2011)/Disc 2    20       .       .   -19.0   -18.6   -21.4   -17.9   -15.8   -15.2   -13.6   -11.8    -8.7    -8.4    -7.1
+  Hits - The New Romantics (2011)/Disc 3    20       .       .   -17.9   -19.9   -22.1   -21.5   -19.8   -16.7   -16.1   -13.2   -12.6   -10.0    -8.3
+  Hits - The New Romantics (2011)/Disc 4    20       .       .   -14.7   -18.1   -20.0   -18.1   -17.3   -15.9   -12.3   -12.2   -10.9    -9.4    -8.2
+  Hits - The New Romantics (2011)/Disc 5    20       .       .   -16.5   -20.7   -19.6   -17.6   -15.8   -14.1   -15.3   -11.2   -11.9    -9.0    -7.8
+  Disco Delight - The Beat Goes On          40       .   -12.5   -17.2   -18.7   -19.8   -20.4   -19.5   -19.1   -17.9   -17.4   -14.3   -11.3    -8.9
+  Disco Music                               51       .       .   -13.0   -14.3   -16.8   -16.0   -16.1   -15.3   -14.5   -13.9   -12.4   -10.4    -9.2
+  Gathered/New Music 2026-09-02             15   -15.6   -14.3   -17.7   -22.2   -24.1   -26.3   -19.9   -13.1   -13.3   -11.3    -8.3    -7.9    -6.6
+  its Party/NOW - 100 HITS - PARTY - CD1    40   -14.7   -18.5   -21.8   -27.9   -26.5   -25.5   -22.1   -17.6   -17.7   -14.7   -11.5    -9.0    -9.4
+  its Party/NOW - 100 HITS - PARTY - CD2    40       .   -17.8   -19.9   -22.1   -24.5   -18.4   -16.7   -15.2   -13.0   -10.7    -8.0    -6.9    -6.7
+  its Party/NOW - 100 HITS - PARTY - CD3    60       .       .   -18.5   -20.1   -21.6   -20.2   -17.3   -15.4   -15.2   -14.0   -10.7    -9.3    -7.5
+  its Party/NOW - 100 HITS - PARTY - CD4    60       .       .   -15.5   -17.1   -18.2   -18.7   -19.4   -17.5   -16.5   -14.7   -12.2   -10.5    -9.9
+  its Party/NOW - 100 HITS - PARTY - CD5    60       .   -14.8   -17.2   -22.5   -23.4   -20.1   -19.9   -17.2   -19.3   -18.3   -14.7   -12.7   -10.6
+  Now Yearbook 99 (2026)/CD1                20       .   -16.5   -18.6   -20.7   -21.7   -22.3   -20.9   -18.4   -15.1   -12.2    -9.6    -9.2    -7.1
+  Now Yearbook 99 (2026)/CD2                21       .   -18.2   -22.2   -24.3   -24.4   -22.2   -20.7   -16.1   -14.2    -9.7    -8.5    -8.3    -6.5
+  Now Yearbook 99 (2026)/CD3                21   -17.4   -19.3   -22.5   -18.4   -23.4   -23.0   -20.2   -19.4   -16.4   -16.9   -12.9   -11.5    -9.9
+  Now Yearbook 99 (2026)/CD4                20       .   -18.6   -18.5   -24.1   -25.7   -22.9   -23.1   -16.9   -14.6   -12.5   -11.4    -7.6    -6.7
+  ous - DISCOinferno GOLD (2003)/Disc 01    17       .       .   -10.5   -16.6   -18.5   -17.1   -17.4   -18.4   -16.6   -15.9   -12.4    -9.1    -8.6
+  ous - DISCOinferno GOLD (2003)/Disc 02    17       .       .   -14.9   -19.1   -18.2   -20.6   -20.4   -19.6   -19.1   -17.6   -14.5   -11.4   -11.1
+  '.' = the band is more than 40 dB down; width there is filter residue, not music.

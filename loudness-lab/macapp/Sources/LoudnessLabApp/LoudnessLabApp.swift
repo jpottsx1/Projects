@@ -32,8 +32,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 /// second one built against the same kit. What is left is the part that is
 /// genuinely about being an app — the activation policy, the window, and
 /// the menu commands.
+// Named LoudnessLabUIApp, not LoudnessLabApp: the TARGET is called
+// LoudnessLabApp, and a type sharing its module's name is a reliable way
+// to confuse Swift's lookup. Keeping the name it always had costs nothing.
 @main
-struct LoudnessLabApp: App {
+struct LoudnessLabUIApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
 
     var body: some Scene {

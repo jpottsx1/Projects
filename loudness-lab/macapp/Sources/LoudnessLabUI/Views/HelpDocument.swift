@@ -35,12 +35,27 @@ struct HelpDocument {
 
     let blocks: [Block]
 
-    /// Load a `.md` from the bundle. Nil rather than a crash: a help file
+    /// A document made of blocks already parsed -- what a search returns
+    /// when it keeps some of another document's. Written out because
+    /// declaring `init(_ text:)` below suppresses the memberwise one.
+    init(blocks: [Block]) { self.blocks = blocks }
+
+    /// Load a `.md` from a bundle. Nil rather than a crash: a help file
     /// that failed to copy should cost the reader the guide, not the app.
-    static func bundled(_ name: String, subdirectory: String? = nil) -> HelpDocument? {
-        guard let url = Bundle.module.url(forResource: name, withExtension: "md",
-                                          subdirectory: subdirectory),
-              let text = try? String(contentsOf: url, encoding: .utf8)
+    ///
+    /// Both layouts are tried, because the two ways a Mac app gets built
+    /// put the file in different places. SwiftPM's `.copy("Help")` keeps
+    /// the folder, so the file is in a `Help` subdirectory of
+    /// `Bundle.module`. An Xcode target adds the same files as a group and
+    /// they land flat in `Bundle.main`'s Resources. Asking for the
+    /// subdirectory first and then without it covers both, and means this
+    /// file can be dropped into either kind of app unchanged.
+    static func bundled(_ name: String, subdirectory: String? = nil,
+                        in bundle: Bundle = .main) -> HelpDocument? {
+        let url = bundle.url(forResource: name, withExtension: "md",
+                             subdirectory: subdirectory)
+            ?? bundle.url(forResource: name, withExtension: "md")
+        guard let url, let text = try? String(contentsOf: url, encoding: .utf8)
         else { return nil }
         return HelpDocument(text)
     }

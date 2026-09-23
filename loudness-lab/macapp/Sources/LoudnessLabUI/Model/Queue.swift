@@ -75,12 +75,18 @@ final class Queue: ObservableObject {
         defer { if mine == token { scanning = false } }
 
         let found = await Task.detached(priority: .userInitiated) {
-            var audio: [URL] = []
+            // Tagged with the root folder actually added, not the file's
+            // own immediate parent -- a multi-disc release added as one
+            // folder is one release. Without this, "Now Yearbook 99
+            // (2026)" split into CD1..CD4 subfolders would list as four
+            // unrelated folders instead of the one thing that was added.
+            var audio: [(url: URL, root: String)] = []
             var skipped: [String: Int] = [:]
             var errors: [String] = []
             for folder in folders {
                 let result = FileSurvey.survey(folder)
-                audio += result.audio
+                let root = folder.lastPathComponent
+                audio += result.audio.map { (url: $0, root: root) }
                 for (suffix, count) in result.skipped {
                     skipped[suffix, default: 0] += count
                 }
@@ -91,11 +97,11 @@ final class Queue: ObservableObject {
         guard mine == token else { return }   // a later refresh overtook this one
 
         let (audio, skipped, errors) = found
-        var rows = audio.map { url in
-            Item(path: url.path,
-                 name: url.deletingPathExtension().lastPathComponent,
-                 folder: url.deletingLastPathComponent().lastPathComponent,
-                 included: !excluded.contains(url.path))
+        var rows = audio.map { entry in
+            Item(path: entry.url.path,
+                 name: entry.url.deletingPathExtension().lastPathComponent,
+                 folder: entry.root,
+                 included: !excluded.contains(entry.url.path))
         }
 
         // Anything already measured, so the order and the numbers are real

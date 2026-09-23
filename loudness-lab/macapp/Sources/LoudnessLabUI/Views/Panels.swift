@@ -121,6 +121,7 @@ struct SettingsPanel: View {
     @Binding var limited: Bool
     @Binding var compare: Bool
     @Binding var dryRun: Bool
+    @ObservedObject var personal: PersonalProfiles
     /// The folders already measured, for the reference list.
     let folders: [String]
 
@@ -130,6 +131,8 @@ struct SettingsPanel: View {
 
     @Environment(\.openWindow) private var openWindow
     @State private var typedReference = false
+    @State private var showingSave = false
+    @State private var savingName = ""
 
     var body: some View {
         ScrollView {
@@ -151,18 +154,60 @@ struct SettingsPanel: View {
                 // a profile added to the kit stayed invisible in the app --
                 // which is the same drift the help checker exists to catch,
                 // one layer down.
-                Picker("Profile", selection: $profileName) {
-                    Text("none").tag("")
-                    ForEach(Profile.builtIn.keys.sorted(), id: \.self) {
-                        Text($0).tag($0)
+                HStack {
+                    Picker("Profile", selection: $profileName) {
+                        Text("none").tag("")
+                        ForEach(Profile.builtIn.keys.sorted(), id: \.self) {
+                            Text($0).tag($0)
+                        }
+                        if !personal.profiles.isEmpty {
+                            Divider()
+                            ForEach(personal.profiles.keys.sorted(), id: \.self) {
+                                Text($0).tag($0)
+                            }
+                        }
+                    }
+                    .help(Help.profile.summary)
+                    .onChange(of: profileName) { _, name in
+                        // A profile replaces every setting at once, so that
+                        // what is on screen is the policy being run and not
+                        // a mixture of it and whatever was there before.
+                        if let chosen = Profile.builtIn[name] ?? personal.profiles[name] {
+                            profile = chosen
+                        }
+                    }
+                    Button("Save…") {
+                        savingName = personal.profiles[profileName] != nil
+                            ? profileName : ""
+                        showingSave = true
+                    }
+                    .buttonStyle(.link)
+                    .help("Save the current settings as a personal preset, "
+                          + "to recall later.")
+                    if personal.profiles[profileName] != nil {
+                        Button("Delete") {
+                            personal.delete(profileName)
+                            profileName = ""
+                        }
+                        .buttonStyle(.link)
+                        .foregroundStyle(.red)
+                        .help("Delete this personal preset. Built-in "
+                              + "profiles cannot be deleted.")
                     }
                 }
-                .help(Help.profile.summary)
-                .onChange(of: profileName) { _, name in
-                    // A profile replaces every setting at once, so that what
-                    // is on screen is the policy being run and not a mixture
-                    // of it and whatever was there before.
-                    if let chosen = Profile.builtIn[name] { profile = chosen }
+                .alert("Save Preset", isPresented: $showingSave) {
+                    TextField("Name", text: $savingName)
+                    Button("Save") {
+                        if personal.save(profile, as: savingName) {
+                            profileName = savingName.trimmingCharacters(
+                                in: .whitespacesAndNewlines)
+                        }
+                    }
+                    Button("Cancel", role: .cancel) {}
+                } message: {
+                    Text("Saved under this name, alongside the built-in "
+                         + "profiles, so it can be recalled later. A name "
+                         + "matching a built-in profile is refused.")
                 }
                 Text(profile.description.isEmpty
                      ? "A profile fixes what is allowed. How much each track "
@@ -440,6 +485,9 @@ struct ResultsPanel: View {
                     set: { ids in chosen = manifest.tracks.first { ids.contains($0.id) } })) {
                     TableColumn("Track", value: \.name)
                     TableColumn("Sub") { Text(String(format: "%+.2f dB", $0.subDB)) }
+                    TableColumn("Air") { row in
+                        Text(row.airDB.map { String(format: "%+.2f dB", $0) } ?? "—")
+                    }
                     TableColumn("Punch") { Text(String(format: "%+.1f dB", $0.punchDB)) }
                     TableColumn("Clips") { Text("\($0.clipsRestored)") }
                     TableColumn("Lift") { Text(String(format: "%+.2f dB", $0.clipLiftDB)) }
@@ -458,21 +506,35 @@ struct ResultsPanel: View {
 struct LogPanel: View {
     let text: String
     let failure: String?
+    /// True in the Results tab: the run that produced these results is
+    /// over, so its progress text is history rather than something to
+    /// watch, and the room it was taking is worth more to the waveform
+    /// below. A failure still says so -- collapsed hides the transcript,
+    /// not the fact that something went wrong.
+    var collapsed: Bool = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        if collapsed {
             if let failure {
                 Label(failure, systemImage: "exclamationmark.triangle")
-                    .foregroundStyle(.orange).font(.callout).padding(.horizontal, 8)
+                    .foregroundStyle(.orange).font(.callout)
+                    .padding(.horizontal, 8).padding(.vertical, 4)
             }
-            ScrollView {
-                Text(text)
-                    .font(.system(.caption, design: .monospaced))
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(8)
+        } else {
+            VStack(alignment: .leading, spacing: 4) {
+                if let failure {
+                    Label(failure, systemImage: "exclamationmark.triangle")
+                        .foregroundStyle(.orange).font(.callout).padding(.horizontal, 8)
+                }
+                ScrollView {
+                    Text(text)
+                        .font(.system(.caption, design: .monospaced))
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(8)
+                }
             }
+            .frame(minHeight: 120, maxHeight: 200)
         }
-        .frame(minHeight: 120, maxHeight: 200)
     }
 }

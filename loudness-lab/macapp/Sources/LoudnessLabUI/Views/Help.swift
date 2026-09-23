@@ -247,6 +247,13 @@ enum Help {
         Check the survey's cliff column first. A folder with a gentle roll-off \
         already has a top end and this is taste; one with a wall has had it \
         thrown away by an encoder, and the honest fix there is a better rip.
+
+        With "Size it per track against a reference" on, this number becomes \
+        a ceiling rather than a flat amount: each track is measured against \
+        the reference folder's own 8–20 kHz band and given air up to this \
+        much, in proportion to how much brighter the reference already is -- \
+        the same idea as the sub's cap, applied to the top end instead of \
+        the bottom.
         """)
 
     static let airTune = HelpEntry(
@@ -275,6 +282,11 @@ enum Help {
         The measurements do not follow it. They stay in one database, \
         because pointing the output somewhere else for one run should not \
         hide a folder you measured last week.
+
+        "Clear" deletes every FLAC, MP3 and M4A sitting directly in this \
+        folder -- both sides of every A/B pair -- so a new batch is not \
+        mixed in with an old one. Nothing else in the folder is touched: \
+        not the manifest, not anything put there by hand.
         """)
 
     // MARK: - Profile
@@ -305,6 +317,12 @@ enum Help {
         5 dB between one era's median and the next, so a curve fitted to the \
         era moves the median and leaves most tracks further from the target \
         than they started.
+
+        "Save…" keeps whatever is on the sliders right now under a name of \
+        your own, listed below the built-in profiles. It carries no measured \
+        claim -- unlike the profiles above it, it is not backed by a \
+        corpus -- so it cannot be saved under one of their names. "Delete" \
+        removes a saved one; the built-in profiles cannot be deleted.
         """)
 
     // MARK: - De-clipping
@@ -373,6 +391,10 @@ enum Help {
         track gets the same number of decibels whether it needs them or not. \
         With it on, each track is measured against the reference folder's low \
         end and given what it is actually short of.
+
+        Air is sized the same way, against the reference folder's top end, \
+        whenever both this and Air are on -- Air's own amount then reads as \
+        a cap rather than a flat number every track gets.
 
         This needs a reference to measure against. Without one the setting \
         cannot be honoured, and the run stops rather than quietly applying \
@@ -574,10 +596,12 @@ enum Help {
 
     static let results = HelpEntry(
         title: "Results columns",
-        summary: "Sub and Punch are what was applied. Clips and Lift are the de-clipper.",
+        summary: "Sub, Air and Punch are what was applied. Clips and Lift are the de-clipper.",
         detail: """
-        Sub and Punch are what was actually applied to that track, which with \
-        per-track sizing on is not the same as what was asked for.
+        Sub, Air and Punch are what was actually applied to that track, which \
+        with per-track sizing on is not the same as what was asked for. Air \
+        reads "—" for a manifest written before this column existed, rather \
+        than a false "+0.00 dB".
 
         Clips is the number of clipped runs restored. Lift is the median \
         amount one restored peak gained -- deliberately not the change in the \

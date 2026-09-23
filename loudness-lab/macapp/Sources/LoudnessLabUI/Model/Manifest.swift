@@ -21,6 +21,9 @@ struct Manifest: Codable {
         let folder: String
         let subDB: Double
         let punchDB: Double
+        /// Nil for a manifest written before this was added -- an older
+        /// run genuinely has no air figure to show, not a zero one.
+        let airDB: Double?
         let clipsRestored: Int
         let clipLiftDB: Double
         let variants: [Variant]
@@ -31,6 +34,7 @@ struct Manifest: Codable {
             case source, name, folder, variants
             case subDB = "sub_db"
             case punchDB = "punch_db"
+            case airDB = "air_db"
             case clipsRestored = "clips_restored"
             case clipLiftDB = "clip_lift_db"
         }

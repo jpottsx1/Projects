@@ -17,6 +17,7 @@ These are built to test the claims the project rests on, not to confirm them:
 
 from __future__ import annotations
 
+import re
 import sqlite3
 
 import numpy as np
@@ -407,6 +408,26 @@ def lowend_report(conn: sqlite3.Connection, reference: str = REFERENCE_ERA,
 # and a hardcoded 32.0 silently matches nothing.
 LOW_SHAPE_BANDS = tuple(b for b in BAND_CENTRES if 31.0 <= b <= 63.0)
 
+# The band `air.excite` is measured in -- matches air.BAND_LOW_HZ/HIGH_HZ,
+# so the deficit this sizes the stage from is the same deficit its own
+# report checks the result against.
+TOP_SHAPE_BANDS = tuple(b for b in BAND_CENTRES if 8000.0 <= b <= 20000.0)
+
+
+# CD1, Disc 2, disc-3, DVD4, Vol. 5, Part6, or that same token as a SUFFIX
+# after the release's own name repeated in full -- "NOW - 100 HITS -
+# PARTY - CD4" is the ordinary way ripping software names a disc, not the
+# rare case, so anchoring to the whole name would miss the real thing this
+# is for. Case insensitive, and the number has to be the last thing in the
+# name either way. Deliberately narrow otherwise: the collapse in
+# `_folder_labels` trusts this to mean "a disc of ONE release", and a
+# structural rule alone cannot tell that apart from "several different
+# releases that happen to share a parent folder" -- which is the ordinary
+# shape of a music library, not a rare edge case, so a false positive here
+# is not a corner case either.
+_DISC_LIKE = re.compile(r"(?:^|[\s\-_])(?:cd|dvd|disc|disk|vol\.?|part)"
+                        r"[\s\-_]*\d+$", re.IGNORECASE)
+
 
 def _folder_labels(paths) -> dict:
     """Map each track path to a folder label that is actually distinctive.
@@ -415,6 +436,15 @@ def _folder_labels(paths) -> dict:
     two different compilations each with a CD1 would land in one row. Labels
     are taken relative to the common prefix of every path in the database, so
     "Now Yearbook 99 (2026)/CD1" stays separate from "NOW 100 Hits Party/CD1".
+
+    A folder holding nothing but disc-numbered subfolders, and no track of
+    its own, is one release rather than one row per disc: its children
+    collapse to it, so four discs of the same compilation read as one
+    folder, not four. Gated on the sibling names actually looking like
+    discs (see `_DISC_LIKE`) -- "nothing but subfolders, none of them
+    holding a loose track" is also just what a folder of several DIFFERENT
+    albums looks like, and collapsing that would be the exact merge this
+    function exists to prevent, one level up.
     """
     import os
 
@@ -422,17 +452,30 @@ def _folder_labels(paths) -> dict:
     if not unique:
         return {}
     parents = [os.path.dirname(path) for path in unique]
+    distinct_parents = set(parents)
     try:
-        base = os.path.commonpath(parents) if len(set(parents)) > 1 else \
+        base = os.path.commonpath(parents) if len(distinct_parents) > 1 else \
             os.path.dirname(parents[0])
     except ValueError:            # different drives, or relative vs absolute
         base = ""
+
+    group_for = {}
+    for leaf in distinct_parents:
+        grandparent = os.path.dirname(leaf)
+        siblings = [p for p in distinct_parents
+                    if os.path.dirname(p) == grandparent]
+        collapses = (len(siblings) > 1
+                     and grandparent not in distinct_parents
+                     and all(_DISC_LIKE.search(os.path.basename(p))
+                             for p in siblings))
+        group_for[leaf] = grandparent if collapses else leaf
+
     labels = {}
     for path in unique:
-        parent = os.path.dirname(path)
-        relative = os.path.relpath(parent, base) if base else parent
+        group = group_for[os.path.dirname(path)]
+        relative = os.path.relpath(group, base) if base else group
         if relative in (".", "", os.sep):
-            relative = os.path.basename(parent) or "(root)"
+            relative = os.path.basename(group) or "(root)"
         labels[path] = relative
     return labels
 

@@ -480,6 +480,17 @@ def main() -> int:
         ["/m/A/B/C/a.mp3", "/m/A/b.mp3"],
         # Files sitting directly in the common root.
         ["/m/a.mp3", "/m/b.mp3"],
+        # Four discs of one release, nothing measured directly in the
+        # release folder: one label, not four.
+        ["/m/Now Yearbook 99 (2026)/CD1/a.mp3",
+         "/m/Now Yearbook 99 (2026)/CD2/b.mp3",
+         "/m/Now Yearbook 99 (2026)/CD3/c.mp3",
+         "/m/Now Yearbook 99 (2026)/CD4/d.mp3"],
+        # A bonus track sitting directly in the release folder blocks the
+        # collapse -- the folder is not a pure disc container.
+        ["/m/Now Yearbook 99 (2026)/CD1/a.mp3",
+         "/m/Now Yearbook 99 (2026)/CD2/b.mp3",
+         "/m/Now Yearbook 99 (2026)/bonus.mp3"],
         [],
     ):
         golden["folderLabels"].append(

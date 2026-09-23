@@ -7,17 +7,24 @@
 # and no identity for macOS to hang file-access permissions on. A folder
 # with an Info.plist in it is all a Mac app actually is, so this makes one.
 #
-# Usage:  sh macapp/make-app.sh [--open]
+# Usage:  sh macapp/make-app.sh [--debug] [--open]
+#
+# `--debug` builds the Debug configuration instead of Release. Xcode's own
+# Run button needs this: it wants the icon and the identity a bundle gives
+# it too, and re-optimizing at -O on every keystroke-to-Cmd-R loop would
+# make that the slow way to see a change rather than the fast one.
 set -eu
 
 cd "$(dirname "$0")"
 
 VERSION="0.1.0"
 APP="LoudnessLab.app"
+CONFIG="release"
+if [ "${1:-}" = "--debug" ]; then CONFIG="debug"; shift; fi
 
-echo "Building release…"
-swift build -c release --product LoudnessLabUI
-BIN="$(swift build -c release --show-bin-path)/LoudnessLabUI"
+echo "Building $CONFIG…"
+swift build -c "$CONFIG" --product LoudnessLabUI
+BIN="$(swift build -c "$CONFIG" --show-bin-path)/LoudnessLabUI"
 [ -x "$BIN" ] || { echo "no executable at $BIN" >&2; exit 1; }
 
 rm -rf "$APP"

@@ -1,18 +1,14 @@
 import Foundation
+import LoudnessKit
 
 /// Running the command-line tool, and reading what it says back.
-///
-/// In the kit rather than the app because more than one app drives this
-/// tool now -- Loudness Lab itself and the DiscoTags Loudness tab -- and
-/// two copies of the locating, the PATH repair and the line reassembly
-/// would drift, which is the same reason `Tools` already lives here.
 ///
 /// The measuring and the processing are the Python's job. It is the
 /// implementation that was validated against ffmpeg, tuned by measuring
 /// rather than guessing, and does its arithmetic in numpy's C rather than
 /// in a loop somebody wrote twice. This is the app asking it to work and
 /// showing what it reports.
-public enum CLI {
+enum CLI {
 
     /// One line of `--porcelain` output.
     ///
@@ -21,23 +17,23 @@ public enum CLI {
     /// carry counts, `error` carries a message. Decoding them into one type
     /// keeps the reader a switch rather than five parsers, and an event
     /// this app does not know about decodes rather than failing the line.
-    public struct Event: Decodable {
-        public let event: String
+    struct Event: Decodable {
+        let event: String
         /// Which half of a processing run: "measure" or "process". Absent
         /// on a plain `analyze`, where there is only one.
-        public var phase: String?
-        public var done: Int?, total: Int?
-        public var name: String?, path: String?, status: String?, error: String?
-        public var reason: String?
-        public var found: Int?, analysed: Int?, skipped: Int?, errors: Int?
-        public var seconds: Double?
+        var phase: String?
+        var done: Int?, total: Int?
+        var name: String?, path: String?, status: String?, error: String?
+        var reason: String?
+        var found: Int?, analysed: Int?, skipped: Int?, errors: Int?
+        var seconds: Double?
         // `selected`, `done` and `error`.
-        public var selected: Int?, duplicates: Int?, written: Int?
-        public var reference: String?, format: String?, out: String?
-        public var manifest: String?, message: String?
-        public var dryRun: Bool?
-        public var lraBefore: Double?, lraAfter: Double?
-        public var crestBefore: Double?, crestAfter: Double?
+        var selected: Int?, duplicates: Int?, written: Int?
+        var reference: String?, format: String?, out: String?
+        var manifest: String?, message: String?
+        var dryRun: Bool?
+        var lraBefore: Double?, lraAfter: Double?
+        var crestBefore: Double?, crestAfter: Double?
 
         enum CodingKeys: String, CodingKey {
             case event, phase, done, total, name, path, status, error, reason
@@ -51,7 +47,7 @@ public enum CLI {
             case crestAfter = "crest_after"
         }
 
-        public init?(_ line: String) {
+        init?(_ line: String) {
             guard let data = line.data(using: .utf8),
                   let decoded = try? JSONDecoder().decode(Event.self, from: data)
             else { return nil }
@@ -59,12 +55,12 @@ public enum CLI {
         }
     }
 
-    public struct Failure: LocalizedError {
-        public let errorDescription: String?
-        public init(_ message: String) { errorDescription = message }
+    struct Failure: LocalizedError {
+        let errorDescription: String?
+        init(_ message: String) { errorDescription = message }
     }
 
-    public static let missing = """
+    static let missing = """
         Could not find the loudness-lab command. It is the file of that \
         name in the project folder, beside macapp. Choose it below, or run \
         setup.sh there once if this is a fresh checkout.
@@ -84,7 +80,7 @@ public enum CLI {
     /// straight into it, DerivedData or not. If the app is ever moved to a
     /// machine without the sources that goes stale -- hence the others, and
     /// hence a settable override for when none of them is right.
-    public static func locate() -> URL? {
+    static func locate() -> URL? {
         if let override = UserDefaults.standard.string(forKey: overrideKey),
            !override.isEmpty, isRunnable(URL(fileURLWithPath: override)) {
             return URL(fileURLWithPath: override)
@@ -101,7 +97,7 @@ public enum CLI {
         return nil
     }
 
-    public static let overrideKey = "loudnessLabCLI"
+    static let overrideKey = "loudnessLabCLI"
 
     private static func walkUp(from start: URL) -> URL? {
         var directory = start
@@ -128,7 +124,7 @@ public enum CLI {
     /// A line at a time rather than all at the end, because the whole point
     /// is a progress bar that moves while the work happens.
     @discardableResult
-    public static func run(_ tool: URL, _ arguments: [String],
+    static func run(_ tool: URL, _ arguments: [String],
                     isCancelled: @escaping @Sendable () -> Bool = { false },
                     onLine: @escaping @Sendable (String) -> Void) async throws -> Int32 {
         // Boxed, so the watchdog below can hold it without Process itself
@@ -217,9 +213,10 @@ public enum CLI {
     ///
     /// `Tools` owns the PATH repair -- a GUI app inherits roughly
     /// /usr/bin:/bin and nothing a .zprofile added, so a Homebrew ffmpeg is
-    /// visible in Terminal and invisible here. This used to carry its own
-    /// copy of that list; the copies are exactly what `Tools` was extracted
-    /// to prevent, so there is now one.
+    /// visible in Terminal and invisible here. This file used to carry its
+    /// own copy of that list and its own `find`; two copies are exactly
+    /// what the comment on `Tools` says it was moved into the kit to
+    /// prevent, so there is now one.
     static func environment() -> [String: String] { Tools.environment() }
 
     /// Holds the process so a watchdog can signal it.

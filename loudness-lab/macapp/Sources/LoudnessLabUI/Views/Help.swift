@@ -657,7 +657,8 @@ struct HelpView: View {
     @State private var query = ""
     /// Read once. It is a file on disk and the window is reopened often.
     private static let document = HelpDocument.bundled("loudness-lab",
-                                                       subdirectory: "Help")
+                                                       subdirectory: "Help",
+                                                       in: .module)
 
     private var matches: [HelpSection] {
         let needle = query.trimmingCharacters(in: .whitespaces).lowercased()

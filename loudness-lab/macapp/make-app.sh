@@ -23,8 +23,8 @@ CONFIG="release"
 if [ "${1:-}" = "--debug" ]; then CONFIG="debug"; shift; fi
 
 echo "Building $CONFIG…"
-swift build -c "$CONFIG" --product LoudnessLabUI
-BIN="$(swift build -c "$CONFIG" --show-bin-path)/LoudnessLabUI"
+swift build -c "$CONFIG" --product LoudnessLabApp
+BIN="$(swift build -c "$CONFIG" --show-bin-path)/LoudnessLabApp"
 [ -x "$BIN" ] || { echo "no executable at $BIN" >&2; exit 1; }
 
 rm -rf "$APP"

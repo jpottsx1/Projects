@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import LoudnessLabUI
 
 /// Without this the window does not come to the front, and may not appear
 /// at all.
@@ -24,24 +25,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
+/// The standalone app: a window, a menu bar, and `LoudnessLabView`.
+///
+/// Everything that used to be here is in the LoudnessLabUI library now, so
+/// that DiscoTags' Loudness tab runs the same interface rather than a
+/// second one built against the same kit. What is left is the part that is
+/// genuinely about being an app — the activation policy, the window, and
+/// the menu commands.
 @main
-struct LoudnessLabUIApp: App {
+struct LoudnessLabApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
-    @State private var showingSplash = true
 
     var body: some Scene {
         WindowGroup("Loudness Lab") {
-            ZStack {
-                ContentView()
-                    // Three panes: what to do, what to do it to, what came out.
-                    .frame(minWidth: 1120, minHeight: 640)
-
-                if showingSplash {
-                    SplashView { showingSplash = false }
-                        .transition(.opacity)
-                }
-            }
-            .animation(.easeOut(duration: 0.4), value: showingSplash)
+            LoudnessLabView(showsSplash: true)
+                // Three panes: what to do, what to do it to, what came out.
+                .frame(minWidth: 1120, minHeight: 640)
         }
         .windowResizability(.contentMinSize)
         .commands {
@@ -67,13 +66,8 @@ struct LoudnessLabUIApp: App {
         // A window rather than a sheet: the whole point is to read it WHILE
         // setting something, which a modal would prevent.
         Window("Loudness Lab Help", id: "help") {
-            HelpView()
+            LoudnessLabHelpView()
         }
         .defaultSize(width: 560, height: 680)
     }
-}
-
-extension Notification.Name {
-    static let switchVersion = Notification.Name("loudnesslab.switchVersion")
-    static let showHelp = Notification.Name("loudnesslab.showHelp")
 }

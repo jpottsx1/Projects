@@ -152,7 +152,10 @@ tests/           its tests
 tools/           make_golden.py and the five checkers
 macapp/
   Sources/LoudnessKit/    the port: DSP, Loudness, Process, IO, Library
-  Sources/LoudnessLabUI/  the app: Engine, ABPlayer, Views
+  Sources/LoudnessLabUI/   the interface, as a LIBRARY: Engine, ABPlayer, Views.
+                          DiscoTags embeds it as its Loudness tab, so this
+                          is shared code, not this app's alone.
+  Sources/LoudnessLabApp/  just the window and the menu bar
   Tests/                  the golden tests and their fixtures
 ```
 

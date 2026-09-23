@@ -9,7 +9,12 @@ let package = Package(
     // Test menu -- which is exactly the command that matters most here.
     products: [
         .library(name: "LoudnessKit", targets: ["LoudnessKit"]),
-        .executable(name: "LoudnessLabUI", targets: ["LoudnessLabUI"]),
+        // The interface as a LIBRARY, so it can be embedded rather than
+        // reimplemented -- DiscoTags' Loudness tab renders
+        // `LoudnessLabView` and gets the same three panes, queue, survey
+        // and A/B player this app has, from these same sources.
+        .library(name: "LoudnessLabUI", targets: ["LoudnessLabUI"]),
+        .executable(name: "LoudnessLabApp", targets: ["LoudnessLabApp"]),
     ],
     targets: [
         // The measurement and processing, with no UI in it, so it can be
@@ -23,7 +28,7 @@ let package = Package(
         .target(name: "LoudnessKit", path: "Sources/LoudnessKit",
                swiftSettings: [.unsafeFlags(["-O"], .when(configuration: .debug))]),
 
-        .executableTarget(name: "LoudnessLabUI",
+        .target(name: "LoudnessLabUI",
                           dependencies: ["LoudnessKit"],
                           path: "Sources/LoudnessLabUI",
                           resources: [.copy("Resources/SplashLogo.png")],
@@ -34,6 +39,12 @@ let package = Package(
                           // this just brings Cmd-R's everyday debug build
                           // in line with it.
                           swiftSettings: [.unsafeFlags(["-O"], .when(configuration: .debug))]),
+
+        // Just the window and the menu bar. Everything it shows lives in
+        // LoudnessLabUI, which is the library DiscoTags embeds.
+        .executableTarget(name: "LoudnessLabApp",
+                          dependencies: ["LoudnessLabUI"],
+                          path: "Sources/LoudnessLabApp"),
 
         .testTarget(name: "LoudnessKitTests",
                     dependencies: ["LoudnessKit"],

@@ -3,6 +3,24 @@ import AppKit
 import LoudnessKit
 
 struct ContentView: View {
+    /// Paths a host asked to be ticked once the queue has scanned, and the
+    /// flag that makes that happen once rather than on every refresh — a
+    /// run measures tracks and refreshes the queue, and re-imposing the
+    /// host's original selection there would silently undo whatever the
+    /// person had ticked since.
+    private let initialInclude: Set<String>?
+    @State private var didSeedSelection = false
+
+    /// - Parameters:
+    ///   - initialFolders: folders to scan on appear, for a host that
+    ///     already knows what it wants worked on.
+    ///   - initialInclude: paths to tick once that scan lands. Nil keeps
+    ///     the queue's own default of everything it found.
+    init(initialFolders: [URL] = [], initialInclude: Set<String>? = nil) {
+        self.initialInclude = initialInclude
+        _folders = State(initialValue: initialFolders)
+    }
+
     @Environment(\.openWindow) private var openWindow
     @StateObject private var engine = Engine()
     @StateObject private var player = ABPlayer()
@@ -144,8 +162,16 @@ struct ContentView: View {
         .onChange(of: chosen) { _, track in loadIntoPlayer(track) }
         // The queue follows the folders, and refreshes after a run because
         // a run measures tracks that had no numbers before.
-        .task(id: folders) { await queue.refresh(folders: folders,
-                                                 databaseURL: databaseURL) }
+        .task(id: folders) {
+            await queue.refresh(folders: folders, databaseURL: databaseURL)
+            // Once, after the first scan: the host's selection can only be
+            // applied to items that exist, and refresh is what creates them.
+            if !didSeedSelection, let initialInclude {
+                didSeedSelection = true
+                queue.setAll(false)
+                for path in initialInclude { queue.setIncluded(true, for: path) }
+            }
+        }
         // Reads the library the moment a folder is added, rather than
         // waiting for Measure -- the reference picker's list is every
         // folder ever measured, and a brand new folder (with nothing of

@@ -14,3 +14,25 @@ __pycache__/
 .venv/
 scans/
 profiles.json
+
+# Audio this tool WROTE. Every one of these folders is output: the files
+# in them are copies the run produced and can be produced again, and they
+# are enormous -- 598 MB of them reached the repository once, which is a
+# clone every contributor pays for forever, because git keeps deleted
+# files as well as live ones.
+#
+# The Golden fixtures below are the exception and are deliberately kept:
+# five MP3s totalling 400 kB that the Swift tests decode, including the
+# one carrying a GEOB frame that proves ffmpeg drops Serato's markers.
+disco-final/
+gained/
+subbass-preview/
+*.flac
+*.mp3
+*.m4a
+*.wav
+*.aiff
+!macapp/Tests/LoudnessKitTests/Golden/**
+
+# Renamed to macapp/ long ago; only Xcode's per-user state was left.
+ui/

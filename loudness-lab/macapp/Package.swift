@@ -23,10 +23,15 @@ let package = Package(
         .target(name: "LoudnessKit", path: "Sources/LoudnessKit",
                swiftSettings: [.unsafeFlags(["-O"], .when(configuration: .debug))]),
 
+        // The help document ships with the app: the window renders the
+        // markdown and the Help menu opens the page. Generated from
+        // docs/help/guide.md and Help.swift by tools/build_help.py, and
+        // committed, so a checkout builds without running anything.
         .executableTarget(name: "LoudnessLabUI",
                           dependencies: ["LoudnessKit"],
                           path: "Sources/LoudnessLabUI",
-                          resources: [.copy("Resources/SplashLogo.png")],
+                          resources: [.copy("Resources/SplashLogo.png"),
+                                      .copy("Resources/Help")],
                           // Debug's -Onone leaves bounds-checking in the
                           // waveform's sample-by-sample filtering, which is
                           // the difference between 9s and 0.4s over a

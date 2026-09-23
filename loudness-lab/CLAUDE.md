@@ -42,6 +42,7 @@ python3 tools/check_golden.py                # vectors vs the Swift structs
 python3 tools/check_manifest.py              # manifest vs the Swift structs
 python3 tools/check_help.py                  # every setting has help text
 python3 tools/check_profiles.py              # the two profile lists agree
+python3 tools/build_help.py --check          # the help document is current
 find macapp -name '*.swift' | xargs python3 tools/check_braces.py
 ```
 
@@ -98,6 +99,56 @@ hand-written decoder.
 fixture that `.gitignore` would swallow -- `library.db` was invisible to
 every machine but the one that made it for a while.
 
+## The help document
+
+Two halves, because they answer different questions.
+
+`docs/help/guide.md` is written by hand: what the app is for, what order
+to do things in, how to read the survey, what the stages do and in what
+order, and what to do when something goes wrong. Nobody reading a
+per-control tooltip learns any of that.
+
+The settings reference is GENERATED from `Help.swift`, so it cannot drift:
+add a control, write its help, rebuild. `tools/build_help.py` joins the
+two and writes both halves into the app's own resources --
+
+```
+macapp/Sources/LoudnessLabUI/Resources/Help/loudness-lab.md    the window renders this
+macapp/Sources/LoudnessLabUI/Resources/Help/loudness-lab.html  the menu opens this
+```
+
+-- both committed, so a fresh checkout builds without running anything,
+and `build_help.py --check` fails if they are stale.
+
+`HelpDocument.swift` renders the markdown. It knows a small subset --
+headings, paragraphs, bullets, numbered lists, tables, indented blocks,
+and inline `code`, **bold** and *dim* -- and nothing about this app.
+SwiftUI's own markdown support does inline styling inside one `Text` and
+stops there, which leaves out headings, lists and tables, and those are
+most of a help document.
+
+**Nothing here is specific to Loudness Lab.** The Swift path, the guide
+and the output stem are all arguments, so another app with a `HelpEntry`
+of the same shape uses the tool unchanged:
+
+```sh
+python3 tools/build_help.py --swift path/to/Help.swift \
+    --guide docs/help/its-guide.md --out path/to/Resources/Help/its-name
+```
+
+Copy `HelpDocument.swift` beside it and that app has the same window.
+
+`--check` does two things, and the second is the one worth having. The
+first is staleness. The second runs the Swift renderer's grammar --
+mirrored in Python, because the Swift cannot be run here -- over the real
+document and compares the blocks it finds against the tags in the HTML,
+which a different converter produced. Two implementations agreeing is the
+only evidence either is right. It found a block the app would have
+dropped, and then, under mutation, an infinite loop in the generator: the
+heading regex and the paragraph loop's stopping rule could disagree, and
+when they did the paragraph loop consumed nothing forever. Both parsers
+now always advance.
+
 ## Things that have bitten
 
 - **`sosfilt` vs `sosfiltfilt`.** Zero-phase and causal are different code
@@ -149,7 +200,8 @@ every machine but the one that made it for a while.
 loudnesslab/     the Python: bs1770, spectrum, subbass, declip, expand,
                  air, mp3gain, decode, db, report, render, write, cli
 tests/           its tests
-tools/           make_golden.py and the five checkers
+tools/           make_golden.py, build_help.py, and the five checkers
+docs/help/       guide.md, the hand-written half of the help
 macapp/
   Sources/LoudnessKit/    the port: DSP, Loudness, Process, IO, Library
   Sources/LoudnessLabUI/  the app: Engine, ABPlayer, Views

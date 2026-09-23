@@ -644,7 +644,20 @@ struct HelpSection: Identifiable {
 // MARK: - The window
 
 struct HelpView: View {
+    /// Two halves, because they answer different questions. The guide is
+    /// for someone who has not used this before: what it is for, what
+    /// order to do things in, how to read the survey. The reference is for
+    /// someone standing at a control wanting to know what it does.
+    private enum Half: String, CaseIterable, Identifiable {
+        case guide = "Guide", settings = "Every setting"
+        var id: String { rawValue }
+    }
+
+    @State private var half: Half = .guide
     @State private var query = ""
+    /// Read once. It is a file on disk and the window is reopened often.
+    private static let document = HelpDocument.bundled("loudness-lab",
+                                                       subdirectory: "Help")
 
     private var matches: [HelpSection] {
         let needle = query.trimmingCharacters(in: .whitespaces).lowercased()
@@ -661,17 +674,61 @@ struct HelpView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
-                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                TextField("Search", text: $query).textFieldStyle(.plain)
-                if !query.isEmpty {
-                    Button(action: { query = "" }) { Image(systemName: "xmark.circle.fill") }
-                        .buttonStyle(.borderless).foregroundStyle(.secondary)
-                }
+            Picker("", selection: $half) {
+                ForEach(Half.allCases) { Text($0.rawValue).tag($0) }
             }
-            .padding(10)
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .padding(.horizontal, 10)
+            .padding(.top, 10)
+
+            if half == .settings {
+                HStack {
+                    Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                    TextField("Search", text: $query).textFieldStyle(.plain)
+                    if !query.isEmpty {
+                        Button(action: { query = "" }) { Image(systemName: "xmark.circle.fill") }
+                            .buttonStyle(.borderless).foregroundStyle(.secondary)
+                    }
+                }
+                .padding(10)
+            } else {
+                Spacer().frame(height: 10)
+            }
             Divider()
 
+            if half == .guide {
+                guidePane
+            } else {
+                settingsPane
+            }
+        }
+        .frame(minWidth: 480, idealWidth: 560, minHeight: 420, idealHeight: 680)
+    }
+
+    /// The document that ships with the app. If it failed to copy, say so
+    /// plainly and point at the half that still works, rather than showing
+    /// an empty pane that looks like a bug in the app.
+    @ViewBuilder private var guidePane: some View {
+        if let document = Self.document {
+            ScrollView {
+                HelpDocumentView(document: document)
+                    .padding(20)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        } else {
+            VStack(spacing: 8) {
+                Text("The guide did not ship with this build.")
+                    .foregroundStyle(.secondary)
+                Text("Every setting is still documented under "
+                     + "\"Every setting\".")
+                    .font(.callout).foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    private var settingsPane: some View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 22) {
                     if matches.isEmpty {
@@ -702,7 +759,5 @@ struct HelpView: View {
                 .padding(20)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
-        }
-        .frame(minWidth: 480, idealWidth: 560, minHeight: 420, idealHeight: 680)
     }
 }

@@ -1,0 +1,6 @@
+# macOS and Xcode leave these everywhere. Six .DS_Store files and one
+# xcuserstate reached the repository before this existed.
+.DS_Store
+**/.DS_Store
+**/xcuserdata/
+*.xcuserstate

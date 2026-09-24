@@ -147,9 +147,10 @@ every machine but the one that made it for a while.
 
 ```
 loudnesslab/     the Python: bs1770, spectrum, subbass, declip, expand,
-                 air, mp3gain, decode, db, report, render, write, cli
+                 air, mp3gain, decode, db, report, render, write, cli,
+                 stems (prototype: a drum stem for kick detection)
 tests/           its tests
-tools/           make_golden.py and the five checkers
+tools/           make_golden.py, the five checkers, measure_stem_kicks.py
 macapp/
   Sources/LoudnessKit/    the port: DSP, Loudness, Process, IO, Library
   Sources/LoudnessLabUI/   the interface, as a LIBRARY: Engine, ABPlayer, Views.
@@ -514,6 +515,53 @@ the record never had.
 So `wants` now needs BOTH to be low: **low LRA with crest intact is the
 arrangement; low LRA with crest gone is the mastering.** The disco discs
 now read `declip`, which is what is actually wrong with them.
+
+## Stems: a prototype, for finding kicks
+
+The sub stage finds kicks in 30-100 Hz of the full mix, which is where the
+bassline is too. `stems.py` separates a drum part and `detect_kicks(...,
+drums=)` reads that instead. **Only the detection moves**: the sub is
+still added to the untouched original, so a separation artifact can shift
+a kick marker and nothing else. `TestTheStemNeverReachesTheAudio` hands
+`enhance` a stem full of hiss and checks none of it arrives.
+
+`tools/measure_stem_kicks.py` scores it on synthetic tracks with known kick
+times. With the TRUE drum part (a perfect separator) against the mix:
+
+| scenario | mix recall / precision | true drums |
+|---|---|---|
+| groove (the existing fixture) | 0.94 / 0.91 | 1.00 / 1.00 |
+| disco octave bass on the eighths | 1.00 / **0.44** | 1.00 / 1.00 |
+| quiet kick under a loud sustained bass | **0.14** / 1.00 | 1.00 / 1.00 |
+| plucked bass on the sixteenths | 1.00 / **0.30** | 1.00 / 1.00 |
+
+The octave line is the one that matters for this library: on the mix,
+every off-beat bass pluck reads as a kick, 117 onsets for 51 kicks, and
+the sub stage lays a burst under each of them.
+
+**A real separator has not been measured properly yet.** Demucs is the
+intended one, and its weights could not be downloaded where this was
+written. Spleeter could, and on these synthetic tracks it failed: it put
+80% of the plucked bassline in its DRUM stem and the buried kick in its
+bass stem. But changing only how fast the bass's upper harmonics die away
+moved its octave precision from 0.44 to 0.85 -- so the synthetic tracks
+say what a stem can do and not what a separator will do on a record.
+
+Hence `--files`: on four-on-the-floor, the tempo implied by the median gap
+between detected kicks should equal the BPM tag, and a detector firing on
+an octave bass reads double. The next step is that, with Demucs, over a
+disco folder and the 1999 discs:
+
+```sh
+.venv/bin/pip install demucs     # PyTorch too; about 1-2 GB
+.venv/bin/python tools/measure_stem_kicks.py --files <folder> --backend demucs
+```
+
+Not in `requirements.txt` and not wired into the CLI or the app until
+that says it earns its gigabyte. Separation is also the slowest thing the
+tool would do (Spleeter took 8 s per 30 s on four CPU cores), so if it
+goes in, stems want caching by checksum and one process of their own, not
+a copy of the model per pool worker.
 
 ## Open
 

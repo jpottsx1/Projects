@@ -90,8 +90,13 @@ def _envelope(signal: np.ndarray, rate: int, hz: float) -> np.ndarray:
                        np.abs(signal))
 
 
-def detect_kicks(x: np.ndarray, rate: int) -> tuple[np.ndarray, np.ndarray]:
+def detect_kicks(x: np.ndarray, rate: int,
+                 drums: np.ndarray | None = None) -> tuple[np.ndarray, np.ndarray]:
     """(sample offsets, relative strengths) of kick onsets.
+
+    `drums` is a separated drum stem (see `stems.py`), the same length as
+    `x`. Given one, the detector reads it instead of the mix: the bassline
+    shares this band with the kick, and on the stem it has been taken out.
 
     The discriminator is attack sharpness, not level: a fast envelope rising
     well above a slow one. A bass note that merely changes pitch does not do
@@ -101,7 +106,8 @@ def detect_kicks(x: np.ndarray, rate: int) -> tuple[np.ndarray, np.ndarray]:
     recall and precision around 0.9-1.0 from 96 to 174 BPM; the rising-edge
     version managed 0.52 recall and 0.30 precision on the same material.
     """
-    mono = x.mean(axis=1).astype(np.float64)
+    source = x if drums is None else drums
+    mono = source.mean(axis=1).astype(np.float64)
     band = sosfiltfilt(butter(4, [KICK_LOW_HZ, KICK_HIGH_HZ], btype="band",
                               fs=rate, output="sos"), mono)
     fast = _envelope(band, rate, 60.0)
@@ -293,8 +299,13 @@ def enhance(x: np.ndarray, rate: int, amount_db: float = 5.0,
             freq: float = DEFAULT_FREQ_HZ,
             decay_s: float = DEFAULT_DECAY_S,
             punch_db: float = 0.0,
-            punch_decay_ms: float = DEFAULT_PUNCH_DECAY_MS) -> tuple[np.ndarray, dict]:
+            punch_decay_ms: float = DEFAULT_PUNCH_DECAY_MS,
+            drums: np.ndarray | None = None) -> tuple[np.ndarray, dict]:
     """Add `amount_db` of energy to the 31.5-63 Hz octave, under the kicks.
+
+    `drums`, if given, is where the kicks are found -- see `detect_kicks`.
+    Only the detection moves: the sub is still added to `x`, never to the
+    stem, so nothing the separator got wrong reaches the audio.
 
     Returns the new audio and a report of what was actually done, because the
     point of a prototype is to be checked rather than believed.
@@ -306,7 +317,7 @@ def enhance(x: np.ndarray, rate: int, amount_db: float = 5.0,
         report["note"] = "no spectral change asked for"
         return x, report
 
-    kicks, strengths = detect_kicks(x, rate)
+    kicks, strengths = detect_kicks(x, rate, drums)
     report = _blank_report(amount_db)
     report["kicks"] = int(kicks.size)
     report["kicks_per_minute"] = (kicks.size / (x.shape[0] / rate / 60)

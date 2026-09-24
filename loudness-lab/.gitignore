@@ -1,0 +1,38 @@
+__pycache__/
+*.pyc
+*.db
+# ...except the one the Swift tests open. Everything else matching *.db in
+# this project is a scan of somebody's music library -- machine-specific,
+# large, and nobody else's business. This one is a FIXTURE: a few rows
+# written by the Python so the Swift can prove it reads the same file.
+# It is 57 kB, it regenerates byte-identically, and without it in the repo
+# the compatibility claim is untested on every machine but this one.
+!macapp/Tests/LoudnessKitTests/Golden/library.db
+*.db-wal
+*.db-shm
+*.csv
+.venv/
+scans/
+profiles.json
+
+# Audio this tool WROTE. Every one of these folders is output: the files
+# in them are copies the run produced and can be produced again, and they
+# are enormous -- 598 MB of them reached the repository once, which is a
+# clone every contributor pays for forever, because git keeps deleted
+# files as well as live ones.
+#
+# The Golden fixtures below are the exception and are deliberately kept:
+# five MP3s totalling 400 kB that the Swift tests decode, including the
+# one carrying a GEOB frame that proves ffmpeg drops Serato's markers.
+disco-final/
+gained/
+subbass-preview/
+*.flac
+*.mp3
+*.m4a
+*.wav
+*.aiff
+!macapp/Tests/LoudnessKitTests/Golden/**
+
+# Renamed to macapp/ long ago; only Xcode's per-user state was left.
+ui/

@@ -1,0 +1,640 @@
+"""Text reports over an analysed library.
+
+These are built to test the claims the project rests on, not to confirm them:
+
+  * `loudness` measures how much the choice of estimator actually changes the
+    gain decision, and whether that disagreement really does grow with
+    loudness range. If it turns out to be a few tenths of a dB across your
+    records, the integrated-vs-short-term argument is moot and you should
+    just run mp3gain.
+
+  * `lowend` prints the median 1/3-octave shape per era against a modern
+    reference, which is the candidate EQ curve for stage 2. It also separates
+    "no sub" from "congested low-mid", which are different problems with
+    different fixes, and flags bands where the content does not modulate
+    enough to be music.
+"""
+
+from __future__ import annotations
+
+import re
+import sqlite3
+
+import numpy as np
+
+from .spectrum import (BAND_CENTRES, LOW_BAND_MAX_HZ,
+                       MIN_SHAPE_FOR_WIDTH_DB)
+
+ERAS = (
+    ("pre-1980", 0, 1979),
+    ("1980s", 1980, 1989),
+    ("1990s", 1990, 1999),
+    ("2000s", 2000, 2009),
+    ("2010s", 2010, 2019),
+    ("2020s", 2020, 9999),
+)
+REFERENCE_ERA = "2010s"
+ESTIMATORS = ("lufs_i", "s_p50", "s_p90", "s_p95", "s_max")
+# Aim here rather than at -0.1: 4x oversampling is only good to about 0.5 dB,
+# and an MP3 re-encode moves peaks around on top of that.
+TRUE_PEAK_CEILING = -1.0
+
+
+def _era(year: int | None) -> str:
+    if year is None:
+        return "unknown"
+    for name, lo, hi in ERAS:
+        if lo <= year <= hi:
+            return name
+    return "unknown"
+
+
+def _era_order(name: str) -> int:
+    names = [e[0] for e in ERAS]
+    return names.index(name) if name in names else len(names)
+
+
+# Real music spans several dB of integrated loudness. Anything under this is
+# not a library, it is the output of a loudness normaliser.
+NORMALISED_SD_DB = 0.30
+NORMALISED_MIN_TRACKS = 20
+
+
+def normalisation_warning(conn: sqlite3.Connection) -> str | None:
+    """Flag a library that has already been loudness-normalised.
+
+    Such a library is fine to level -- you level what you have -- but it is
+    useless as a reference for what records of an era actually sound like,
+    because a limiter has been through it. Getting that backwards produces
+    measurements of the processing tool rather than of the music.
+    """
+    values = [row[0] for row in conn.execute(
+        "SELECT l.lufs_i FROM loudness l JOIN tracks t ON t.id = l.track_id "
+        "WHERE t.status = 'ok' AND l.lufs_i IS NOT NULL")]
+    if len(values) < NORMALISED_MIN_TRACKS:
+        return None
+    spread = float(np.std(values))
+    if spread >= NORMALISED_SD_DB:
+        return None
+    return (f"  ALREADY NORMALISED: {len(values)} tracks sit within "
+            f"{spread:.2f} dB of {np.median(values):.2f} LUFS-I.\n"
+            f"  Real music does not do that, so these files have been through "
+            f"a loudness\n"
+            f"  normaliser. Levelling them is still fine -- you level what you "
+            f"have -- but do\n"
+            f"  NOT use this library as a reference for how an era sounds: its "
+            f"crest, LRA\n"
+            f"  and true peak are the normaliser's limiter, not the records. "
+            f"Any spectral\n"
+            f"  shaping it applied is baked into the band figures too.")
+
+
+def _fetch_loudness(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    return conn.execute(
+        "SELECT t.id, t.artist, t.title, t.year, t.genre, t.source_channels, "
+        "       l.* FROM tracks t JOIN loudness l ON l.track_id = t.id "
+        "WHERE t.status = 'ok' AND l.lufs_i IS NOT NULL"
+    ).fetchall()
+
+
+def _spread(values: np.ndarray) -> str:
+    if values.size == 0:
+        return "n/a"
+    return (f"sd {values.std():5.2f}   "
+            f"p10 {np.percentile(values, 10):7.2f}   "
+            f"med {np.median(values):7.2f}   "
+            f"p90 {np.percentile(values, 90):7.2f}   "
+            f"span {np.percentile(values, 90) - np.percentile(values, 10):5.2f}")
+
+
+def loudness_report(conn: sqlite3.Connection) -> str:
+    rows = _fetch_loudness(conn)
+    if not rows:
+        return "No analysed tracks with loudness results yet."
+
+    out = [f"LOUDNESS  ({len(rows)} tracks)", "=" * 78, ""]
+    warning = normalisation_warning(conn)
+    if warning:
+        out += [warning, ""]
+    out += ["Where the library sits now", "-" * 78]
+    columns = {}
+    for name in ESTIMATORS + ("lra", "true_peak_dbtp", "crest_db"):
+        values = np.array([r[name] for r in rows if r[name] is not None], dtype=float)
+        columns[name] = values
+        out.append(f"  {name:16s} {_spread(values)}")
+
+    out += ["", "How much the estimator choice changes the gain decision", "-" * 78,
+            "  Each row is (estimator - LUFS-I) per track: the dB by which normalising",
+            "  on that estimator differs from normalising on integrated loudness.",
+            "  If these are near zero the whole argument is academic.", ""]
+    base = np.array([r["lufs_i"] for r in rows], dtype=float)
+    for name in ESTIMATORS:
+        if name == "lufs_i":
+            continue
+        pairs = np.array([[r[name], r["lufs_i"]] for r in rows
+                          if r[name] is not None], dtype=float)
+        if pairs.size:
+            out.append(f"  {name:16s} {_spread(pairs[:, 0] - pairs[:, 1])}")
+
+    out += ["", "  ...broken down by loudness range (the prediction being tested is that",
+            "  the disagreement grows with LRA):", "",
+            f"  {'LRA band':>12s} {'n':>6s} {'median s_p95 - lufs_i':>24s} {'p90':>8s}"]
+    lra = np.array([r["lra"] if r["lra"] is not None else np.nan for r in rows])
+    delta = np.array([r["s_p95"] - r["lufs_i"] if r["s_p95"] is not None else np.nan
+                      for r in rows])
+    for lo, hi in ((0, 3), (3, 6), (6, 9), (9, 12), (12, 99)):
+        mask = (lra >= lo) & (lra < hi) & np.isfinite(delta)
+        if mask.sum() == 0:
+            continue
+        label = f"{lo}-{hi} LU" if hi < 99 else f"{lo}+ LU"
+        out.append(f"  {label:>12s} {mask.sum():6d} {np.median(delta[mask]):24.2f} "
+                   f"{np.percentile(delta[mask], 90):8.2f}")
+
+    out += ["", "Choosing a target: how many tracks would need a BOOST", "-" * 78,
+            "  A negative gain is free. A positive gain eventually needs a limiter,",
+            "  which is the one thing this project is trying to avoid, so the useful",
+            "  target is the one where almost nothing gets turned up.", "",
+            f"  {'target':>8s}  {'estimator':>10s}  {'need boost':>11s}  "
+            f"{'> +3 dB':>8s}  {'clip -1 dBTP':>13s}"]
+    peak = np.array([r["true_peak_dbtp"] if r["true_peak_dbtp"] is not None else np.nan
+                     for r in rows])
+    for name in ("lufs_i", "s_p95"):
+        values = np.array([r[name] if r[name] is not None else np.nan for r in rows])
+        for target in (-10, -12, -14, -16, -18):
+            gain = target - values
+            ok = np.isfinite(gain)
+            if ok.sum() == 0:
+                continue
+            boosted = (gain[ok] > 0).mean() * 100
+            big = (gain[ok] > 3).mean() * 100
+            over = np.isfinite(peak) & ok & ((peak + gain) > TRUE_PEAK_CEILING)
+            out.append(f"  {target:8d}  {name:>10s}  {boosted:10.1f}%  "
+                       f"{big:7.1f}%  {over.mean() * 100:12.1f}%")
+
+    out += ["", "Masters that were already clipped", "-" * 78]
+    runs = np.array([r["clip_runs"] or 0 for r in rows])
+    out.append(f"  tracks with runs of consecutive full-scale samples: "
+               f"{(runs > 0).sum()} of {len(rows)} ({(runs > 0).mean() * 100:.1f}%)")
+    out.append(f"  tracks with more than 100 such runs:                "
+               f"{(runs > 100).sum()} ({(runs > 100).mean() * 100:.1f}%)")
+    return "\n".join(out)
+
+
+def _band_matrix(conn: sqlite3.Connection, field: str,
+                 group_by: str = "era") -> tuple[list[float], dict]:
+    """{group: {band_hz: [values]}} for one bands column.
+
+    Grouping by folder exists because a library of compilations has useless
+    year tags -- every track carries the reissue date -- while the folders
+    are exactly the corpora you meant to compare.
+    """
+    rows = conn.execute(
+        f"SELECT t.year, t.path, b.band_hz, b.{field} AS value FROM bands b "
+        "JOIN tracks t ON t.id = b.track_id "
+        f"WHERE t.status = 'ok' AND b.{field} IS NOT NULL"
+    ).fetchall()
+    labels = (_folder_labels([row["path"] for row in rows])
+              if group_by == "folder" else None)
+    bands, grouped = set(), {}
+    for row in rows:
+        key = (labels.get(row["path"], "(root)") if labels is not None
+               else _era(row["year"]))
+        bands.add(row["band_hz"])
+        grouped.setdefault(key, {}).setdefault(row["band_hz"], []).append(row["value"])
+    return sorted(bands), grouped
+
+
+def _group_counts(conn: sqlite3.Connection, group_by: str = "era") -> dict:
+    rows = conn.execute(
+        "SELECT year, path FROM tracks WHERE status = 'ok'").fetchall()
+    labels = (_folder_labels([row["path"] for row in rows])
+              if group_by == "folder" else None)
+    counts: dict = {}
+    for row in rows:
+        key = (labels.get(row["path"], "(root)") if labels is not None
+               else _era(row["year"]))
+        counts[key] = counts.get(key, 0) + 1
+    return counts
+
+
+def resolve_reference(groups, wanted: str) -> str | None:
+    """Match a reference group exactly, else by unique case-insensitive substring."""
+    if wanted in groups:
+        return wanted
+    matches = [g for g in groups if wanted.lower() in g.lower()]
+    return matches[0] if len(matches) == 1 else None
+
+
+def _year_provenance(conn: sqlite3.Connection) -> str | None:
+    """Warn when the era grouping is built on release rather than recording dates.
+
+    A compilation tags every track with the reissue year, so early-eighties
+    records land in the 2010s and the era curves become meaningless. NULL
+    means the database predates this check, not that the year is original.
+    """
+    row = conn.execute(
+        "SELECT COUNT(*) AS total, "
+        "  SUM(CASE WHEN year_is_original = 0 THEN 1 ELSE 0 END) AS release_dated, "
+        "  SUM(CASE WHEN year_is_original IS NULL THEN 1 ELSE 0 END) AS unknown "
+        "FROM tracks WHERE status = 'ok' AND year IS NOT NULL"
+    ).fetchone()
+    if not row or not row["total"]:
+        return None
+    total = row["total"]
+    release_dated = row["release_dated"] or 0
+    unknown = row["unknown"] or 0
+    if unknown == total:
+        return ("  NOTE: this database predates the original-year check, so the "
+                "years below\n  may be reissue dates. Re-run analyze --force to "
+                "resolve them.")
+    if release_dated / total > 0.2:
+        return (f"  WARNING: {release_dated} of {total} tracks ({release_dated / total:.0%}) "
+                f"have no original-recording\n  date, so their year is the RELEASE "
+                f"date. On a compilation or remaster that is\n  the reissue year, and "
+                f"these era rows describe when the disc was sold, not\n  when the music "
+                f"was mastered. Group by folder instead: report folders.")
+    return None
+
+
+def lowend_report(conn: sqlite3.Connection, reference: str = REFERENCE_ERA,
+                  group_by: str = "era") -> str:
+    bands, shape = _band_matrix(conn, "shape_db", group_by)
+    if not bands:
+        return "No analysed tracks with band results yet."
+    low = [b for b in bands if b <= LOW_BAND_MAX_HZ]
+    counts = _group_counts(conn, group_by)
+    by_folder = group_by == "folder"
+    eras = sorted(shape) if by_folder else sorted(shape, key=_era_order)
+    width = max(10, min(38, max((len(g) for g in eras), default=10)))
+    heading = "folder" if by_folder else "era"
+    if by_folder:
+        matched = resolve_reference(shape, reference)
+        reference = matched if matched else "\x00none"
+
+    def median_curve(era: str, table: dict) -> dict:
+        return {b: float(np.median(table[era][b])) for b in table.get(era, {})}
+
+    def is_empty(era: str, band: float) -> bool:
+        """True where this era's median band level is too low to interpret."""
+        values = shape.get(era, {}).get(band)
+        return values is None or float(np.median(values)) < MIN_SHAPE_FOR_WIDTH_DB
+
+    provenance = None if by_folder else _year_provenance(conn)
+    normalised = normalisation_warning(conn)
+    out = ["LOW END  (1/3-octave, relative to each track's own broadband level)",
+           "=" * 78, ""]
+    if normalised:
+        out += [normalised, ""]
+    if provenance:
+        out += [provenance, ""]
+    out += [
+           f"Median shape per {heading}, in dB relative to broadband", "-" * 78,
+           "  A number here is level-independent: it says what fraction of the",
+           "  track's energy sits in that band, not how loud the track is.", "",
+           "  " + heading.ljust(width) + "n".rjust(6)
+           + "".join(f"{b:>8.0f}" for b in low)]
+    for era in eras:
+        curve = median_curve(era, shape)
+        cells = "".join(f"{curve[b]:8.1f}" if b in curve else "       -" for b in low)
+        out.append(f"  {era[-width:]:<{width}s}{counts.get(era, 0):6d}{cells}")
+
+    if by_folder and reference not in shape:
+        out += ["", "  No reference chosen, so no correction curve below. Pick one",
+                "  of the folders above with --reference, naming the corpus the",
+                "  others should be measured against:", "",
+                f'    report lowend --by folder --reference "{eras[-1]}"']
+
+    if reference in shape:
+        ref = median_curve(reference, shape)
+        out += ["", f"Difference from the {reference} reference "
+                    f"(positive = this row has LESS energy here)", "-" * 78,
+                "  This is the candidate stage-2 correction curve. Values are",
+                "  deliberately un-smoothed; stage 2 should fit 3-4 gentle filters to",
+                "  them and cap the result at about 5 dB.", "",
+                "  " + heading.ljust(width) + "n".rjust(6)
+                + "".join(f"{b:>8.0f}" for b in low)]
+        for era in eras:
+            if era == reference:
+                continue
+            curve = median_curve(era, shape)
+            cells = "".join(
+                f"{ref[b] - curve[b]:8.1f}" if b in curve and b in ref else "       -"
+                for b in low)
+            out.append(f"  {era[-width:]:<{width}s}{counts.get(era, 0):6d}{cells}")
+        out += ["",
+                "  Read the two halves separately: a positive number at 25-50 Hz means",
+                "  missing sub, which EQ can only fix if the content is actually there",
+                "  (check the modulation table below). A NEGATIVE number at 200-315 Hz",
+                "  means this era has MORE low-mid than modern masters -- that is",
+                "  congestion, and cutting it is cheap, safe and often does more for",
+                "  perceived weight than any sub boost."]
+
+    out += ["", "How consistent is the low end BETWEEN tracks? "
+                "(p90 - p10 of shape, dB)", "-" * 78,
+            "  The rows above are medians, which say nothing about whether the",
+            "  tracks agree with each other. This is the spread across tracks",
+            "  within each era, and it is the figure that decides whether",
+            "  levelling alone is enough.", "",
+            "  A tight spread (roughly 3 dB or less) means the records share a",
+            "  low-end balance, so once they sit at the same loudness they sit",
+            "  together full stop -- any correction would be one curve for the",
+            "  whole group, or none. A wide spread means some tracks are much",
+            "  thinner than their neighbours and no single gain will reconcile",
+            "  them; those need treating individually or not at all.", "",
+            "  " + heading.ljust(width) + "n".rjust(6)
+            + "".join(f"{b:>8.0f}" for b in low)]
+    for era in eras:
+        values = shape.get(era, {})
+        cells = "".join(
+            "       ." if is_empty(era, b)
+            else (f"{np.percentile(values[b], 90) - np.percentile(values[b], 10):8.1f}"
+                  if values.get(b) else "       -")
+            for b in low)
+        out.append(f"  {era[-width:]:<{width}s}{counts.get(era, 0):6d}{cells}")
+    out.append("  '.' = the band is more than 40 dB down; there is nothing to compare.")
+
+    _, modulation_hi = _band_matrix(conn, "p90_db", group_by)
+    _, modulation_lo = _band_matrix(conn, "p10_db", group_by)
+    out += ["", "How much does each band vary ACROSS the track? "
+                "(median p90 - p10, dB)", "-" * 78,
+            "  Measured over 0.68 s windows, so this reports arrangement dynamics:",
+            "  intros, breakdowns, drops. It does NOT report whether a band holds",
+            "  music or noise, and reading it that way is a mistake -- a window that",
+            "  long averages over several bars, so a relentless groove, which is the",
+            "  most musical low end there is, scores LOW. Measured this way a",
+            "  wall-to-wall funk record read 10.9 dB against 6.2 for static rumble.",
+            "  To tell content from a noise floor, use the sub octave's own envelope",
+            "  instead, which separates the same two cases 43.7 against 11.3; that is",
+            "  what subbass --auto gates on.",
+            "  Also: the narrow low bands show 8-9 dB here on noise alone, so compare",
+            f"  across {heading}s rather than against an absolute threshold.", "",
+            "  " + heading.ljust(width) + "n".rjust(6)
+            + "".join(f"{b:>8.0f}" for b in low)]
+    for era in eras:
+        hi_curve = median_curve(era, modulation_hi)
+        lo_curve = median_curve(era, modulation_lo)
+        cells = "".join(
+            "       ." if is_empty(era, b)
+            else (f"{hi_curve[b] - lo_curve[b]:8.1f}"
+                  if b in hi_curve and b in lo_curve else "       -")
+            for b in low)
+        out.append(f"  {era[-width:]:<{width}s}{counts.get(era, 0):6d}{cells}")
+    out.append("  '.' = the band is more than 40 dB down, so there is nothing "
+               "there to measure.")
+
+    _, side = _band_matrix(conn, "side_mid_db", group_by)
+    if side:
+        out += ["", "Stereo width in the low end (median side/mid, dB)", "-" * 78,
+                "  Strongly negative values low down mean the bass is effectively mono:",
+                "  the signature of a record cut for vinyl. Those tracks have a hard",
+                "  floor on how much genuine sub can be recovered.", "",
+                "  " + heading.ljust(width) + "n".rjust(6)
+                + "".join(f"{b:>8.0f}" for b in low)]
+        for era in (sorted(side) if by_folder else sorted(side, key=_era_order)):
+            curve = median_curve(era, side)
+            cells = "".join(
+                "       ." if is_empty(era, b)
+                else (f"{curve[b]:8.1f}" if b in curve else "       -")
+                for b in low)
+            out.append(f"  {era[-width:]:<{width}s}{counts.get(era, 0):6d}{cells}")
+        out.append("  '.' = the band is more than 40 dB down; width there is "
+                   "filter residue, not music.")
+    return "\n".join(out)
+
+
+# The bands where restoring an old record's low end is actually feasible:
+# above the vinyl-era roll-off, below where it stops being sub. Derived from
+# BAND_CENTRES rather than written out, because the nominal centre is 31.5 Hz
+# and a hardcoded 32.0 silently matches nothing.
+LOW_SHAPE_BANDS = tuple(b for b in BAND_CENTRES if 31.0 <= b <= 63.0)
+
+# The band `air.excite` is measured in -- matches air.BAND_LOW_HZ/HIGH_HZ,
+# so the deficit this sizes the stage from is the same deficit its own
+# report checks the result against.
+TOP_SHAPE_BANDS = tuple(b for b in BAND_CENTRES if 8000.0 <= b <= 20000.0)
+
+
+# CD1, Disc 2, disc-3, DVD4, Vol. 5, Part6, or that same token as a SUFFIX
+# after the release's own name repeated in full -- "NOW - 100 HITS -
+# PARTY - CD4" is the ordinary way ripping software names a disc, not the
+# rare case, so anchoring to the whole name would miss the real thing this
+# is for. Case insensitive, and the number has to be the last thing in the
+# name either way. Deliberately narrow otherwise: the collapse in
+# `_folder_labels` trusts this to mean "a disc of ONE release", and a
+# structural rule alone cannot tell that apart from "several different
+# releases that happen to share a parent folder" -- which is the ordinary
+# shape of a music library, not a rare edge case, so a false positive here
+# is not a corner case either.
+_DISC_LIKE = re.compile(r"(?:^|[\s\-_])(?:cd|dvd|disc|disk|vol\.?|part)"
+                        r"[\s\-_]*\d+$", re.IGNORECASE)
+
+
+def _folder_labels(paths) -> dict:
+    """Map each track path to a folder label that is actually distinctive.
+
+    Grouping on the immediate parent name alone merges unrelated folders:
+    two different compilations each with a CD1 would land in one row. Labels
+    are taken relative to the common prefix of every path in the database, so
+    "Now Yearbook 99 (2026)/CD1" stays separate from "NOW 100 Hits Party/CD1".
+
+    A folder holding nothing but disc-numbered subfolders, and no track of
+    its own, is one release rather than one row per disc: its children
+    collapse to it, so four discs of the same compilation read as one
+    folder, not four. Gated on the sibling names actually looking like
+    discs (see `_DISC_LIKE`) -- "nothing but subfolders, none of them
+    holding a loose track" is also just what a folder of several DIFFERENT
+    albums looks like, and collapsing that would be the exact merge this
+    function exists to prevent, one level up.
+    """
+    import os
+
+    unique = sorted(set(paths))
+    if not unique:
+        return {}
+    parents = [os.path.dirname(path) for path in unique]
+    distinct_parents = set(parents)
+    try:
+        base = os.path.commonpath(parents) if len(distinct_parents) > 1 else \
+            os.path.dirname(parents[0])
+    except ValueError:            # different drives, or relative vs absolute
+        base = ""
+
+    group_for = {}
+    for leaf in distinct_parents:
+        grandparent = os.path.dirname(leaf)
+        siblings = [p for p in distinct_parents
+                    if os.path.dirname(p) == grandparent]
+        collapses = (len(siblings) > 1
+                     and grandparent not in distinct_parents
+                     and all(_DISC_LIKE.search(os.path.basename(p))
+                             for p in siblings))
+        group_for[leaf] = grandparent if collapses else leaf
+
+    labels = {}
+    for path in unique:
+        group = group_for[os.path.dirname(path)]
+        relative = os.path.relpath(group, base) if base else group
+        if relative in (".", "", os.sep):
+            relative = os.path.basename(group) or "(root)"
+        labels[path] = relative
+    return labels
+
+
+def folders_report(conn: sqlite3.Connection) -> str:
+    """Loudness and low-end shape grouped by the folder each track sits in.
+
+    Useful whenever a library is sorted into folders that mean something. If
+    those folders are Camelot keys, this is the direct test of whether
+    1/3-octave shape tracks the KEY of the music rather than its mastering --
+    which is the thing that would make spectral matching dangerous, because
+    an EQ fitted to it would be 'correcting' tracks for being in F.
+    """
+    rows = conn.execute(
+        "SELECT t.path, t.year, l.lufs_i, l.s_p95, l.lra, l.true_peak_dbtp "
+        "FROM tracks t JOIN loudness l ON l.track_id = t.id "
+        "WHERE t.status = 'ok' AND l.lufs_i IS NOT NULL"
+    ).fetchall()
+    if not rows:
+        return "No analysed tracks with loudness results yet."
+
+    labels = _folder_labels([row["path"] for row in rows])
+
+    grouped: dict[str, dict[str, list]] = {}
+    for row in rows:
+        folder = labels.get(row["path"], "(root)")
+        bucket = grouped.setdefault(folder, {"lufs_i": [], "s_p95": [],
+                                             "lra": [], "tp": [], "year": []})
+        for key, column in (("lufs_i", "lufs_i"), ("s_p95", "s_p95"),
+                            ("lra", "lra"), ("tp", "true_peak_dbtp")):
+            if row[column] is not None:
+                bucket[key].append(row[column])
+        if row["year"] is not None:
+            bucket["year"].append(row["year"])
+
+    band_rows = conn.execute(
+        "SELECT t.path, b.band_hz, b.shape_db FROM bands b "
+        "JOIN tracks t ON t.id = b.track_id "
+        "WHERE t.status = 'ok' AND b.shape_db IS NOT NULL "
+        f"AND b.band_hz IN ({', '.join(str(b) for b in LOW_SHAPE_BANDS)})"
+    ).fetchall()
+    shapes: dict[str, dict[float, list]] = {}
+    for row in band_rows:
+        folder = labels.get(row["path"], "(root)")
+        shapes.setdefault(folder, {}).setdefault(row["band_hz"], []).append(
+            row["shape_db"])
+
+    out = [f"FOLDERS  ({len(rows)} tracks in {len(grouped)} folders)", "=" * 112,
+           "  Medians per folder. The last four columns are 1/3-octave shape,",
+           "  in dB relative to each track's own broadband level.", "",
+           f"  {'folder':<38s}{'n':>5s}{'yr':>6s}{'LUFS-I':>9s}{'sd':>6s}"
+           f"{'s_p95':>8s}{'LRA':>7s}{'dBTP':>7s}"
+           + "".join(f"{band:>8.0f}" for band in LOW_SHAPE_BANDS)]
+
+    def median(values: list) -> float | None:
+        return float(np.median(values)) if values else None
+
+    normalised_folders: list[str] = []
+    for folder in sorted(grouped):
+        bucket = grouped[folder]
+        curve = shapes.get(folder, {})
+        cells = "".join(
+            f"{median(curve[band]):8.1f}" if curve.get(band) else "       -"
+            for band in LOW_SHAPE_BANDS)
+        year = median(bucket["year"])
+        # Spread of integrated loudness WITHIN the folder. The database-wide
+        # check cannot answer "is this corpus clean" once several corpora
+        # share a database, and that is exactly when the question is asked.
+        levels = bucket["lufs_i"]
+        spread = float(np.std(levels)) if len(levels) >= 2 else None
+        flagged = (spread is not None and len(levels) >= NORMALISED_MIN_TRACKS
+                   and spread < NORMALISED_SD_DB)
+        marker = "*" if flagged else " "
+        out.append(
+            f"  {folder[-37:]:<38s}{len(levels):5d}"
+            f"{('' if year is None else f'{year:.0f}'):>6s}"
+            f"{_fmt(median(levels)):>9s}"
+            f"{('-' if spread is None else f'{spread:.2f}{marker}'):>6s}"
+            f"{_fmt(median(bucket['s_p95'])):>8s}"
+            f"{_fmt(median(bucket['lra'])):>7s}{_fmt(median(bucket['tp'])):>7s}{cells}")
+        if flagged:
+            normalised_folders.append(folder)
+
+    if normalised_folders:
+        out += ["",
+                f"  * ALREADY NORMALISED: {', '.join(normalised_folders)}",
+                f"    Integrated loudness there varies by under "
+                f"{NORMALISED_SD_DB:.1f} dB, which real music does not do.",
+                "    Fine to level; useless as a reference for how an era sounds,",
+                "    because its crest, loudness range and true peak are a",
+                "    normaliser's limiter rather than the records."]
+
+    spread = {}
+    for band in LOW_SHAPE_BANDS:
+        per_folder = [median(shapes[f][band]) for f in shapes
+                      if shapes[f].get(band)]
+        if len(per_folder) > 1:
+            spread[band] = max(per_folder) - min(per_folder)
+    if spread:
+        out += ["",
+                "  Spread of the folder medians in each band (max - min):",
+                "    " + "   ".join(f"{band:.0f} Hz: {value:.1f} dB"
+                                    for band, value in spread.items()),
+                "",
+                "  If these folders are musical keys and this spread is large,",
+                "  low-end shape is tracking the key, not the mastering -- and a",
+                "  spectral match fitted to it would 'correct' tracks for the key",
+                "  they are in. Broad smoothing is what protects against that.",
+                "  A small spread means the risk is not real in this library."]
+    return "\n".join(out)
+
+
+def tracks_report(conn: sqlite3.Connection, estimator: str = "s_p95",
+                  target: float = -14.0, limit: int = 40) -> str:
+    if estimator not in ESTIMATORS:
+        raise ValueError(f"estimator must be one of {', '.join(ESTIMATORS)}")
+    rows = _fetch_loudness(conn)
+    if not rows:
+        return "No analysed tracks with loudness results yet."
+
+    out = [f"DRY RUN  estimator={estimator}  target={target:+.1f}  "
+           f"ceiling={TRUE_PEAK_CEILING:+.1f} dBTP", "=" * 108,
+           "  'limit' marks tracks where the gain would push true peak past the",
+           "  ceiling, so a limiter would have to engage. Nothing is written.", "",
+           f"  {'artist / title':<46s}{'yr':>5s}{'LUFS-I':>8s}{'s_p95':>7s}"
+           f"{'LRA':>6s}{'dBTP':>7s}{'gain':>7s}  {'result':<9s}"]
+    scored = []
+    for row in rows:
+        value = row[estimator]
+        if value is None:
+            continue
+        gain = target - value
+        peak_after = (row["true_peak_dbtp"] + gain
+                      if row["true_peak_dbtp"] is not None else None)
+        scored.append((abs(gain), row, gain, peak_after))
+    scored.sort(key=lambda item: -item[0])
+
+    for _, row, gain, peak_after in scored[:limit]:
+        name = " - ".join(p for p in (row["artist"], row["title"]) if p) or "(untagged)"
+        flag = "limit" if peak_after is not None and peak_after > TRUE_PEAK_CEILING else "gain only"
+        out.append(
+            f"  {name[:45]:<46s}{row['year'] or '':>5}{row['lufs_i']:8.1f}"
+            f"{_fmt(row['s_p95']):>7s}{_fmt(row['lra']):>6s}"
+            f"{_fmt(row['true_peak_dbtp']):>7s}{gain:+7.1f}  {flag:<9s}")
+    if len(scored) > limit:
+        out.append(f"  ... {len(scored) - limit} more (sorted by largest gain first)")
+    return "\n".join(out)
+
+
+def _fmt(value) -> str:
+    return "-" if value is None else f"{value:.1f}"
+
+
+def errors_report(conn: sqlite3.Connection) -> str:
+    rows = conn.execute(
+        "SELECT path, error FROM tracks WHERE status = 'error' ORDER BY path"
+    ).fetchall()
+    if not rows:
+        return "No failures."
+    out = [f"FAILURES ({len(rows)})", "=" * 78]
+    out += [f"  {r['path']}\n      {r['error']}" for r in rows]
+    return "\n".join(out)

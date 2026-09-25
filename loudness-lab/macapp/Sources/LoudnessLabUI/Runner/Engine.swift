@@ -361,6 +361,7 @@ final class Engine: ObservableObject {
                 "--peak-ceiling", String(profile.peakCeiling),
                 "--amount", String(profile.amount),
                 "--max-amount", String(profile.maxAmount),
+                "--sub-offset", String(profile.subOffset),
                 "--min-activity", String(profile.minActivity),
                 "--punch", String(profile.punch),
                 "--punch-decay", String(profile.punchDecay),

@@ -33,6 +33,7 @@ FIELDS = {
     "reference": None,      # the corpus --auto measures against
     "amount": 5.0,          # fixed sub, when auto is off. level-only zeroes it
     "max_amount": 6.0,      # cap on the per-track sub
+    "sub_offset": 0.0,      # dB more (or less) than matching the reference
     "min_activity": 20.0,   # below this the sub octave is a floor, not a bassline
     "punch": 0.0,
     "punch_decay": 8.0,

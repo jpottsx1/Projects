@@ -421,6 +421,21 @@ enum Help {
         measured at 6 to 9 dB.
         """)
 
+    static let subOffset = HelpEntry(
+        title: "More or less than the reference",
+        summary: "Added to each track's measured shortfall. Zero matches the reference.",
+        detail: """
+        Sizing per track gives each track what it measures short of the \
+        reference folder. That is a match, not a taste -- and by ear a record \
+        can want a little more (Blue Monday: "more like +3 dB") or less.
+
+        This is added to every track's measured amount before the cap, so \
+        +3 gives each track 3 dB more than matching the reference would, and \
+        the cap still bounds it: a track already at the cap gets no more \
+        unless the cap is raised too. A track the reference says needs \
+        nothing gets this much, when it is positive.
+        """)
+
     static let minActivity = HelpEntry(
         title: "Gate",
         summary: "Skip tracks whose sub octave barely moves. Rumble ~11 dB, a groove ~44.",
@@ -704,7 +719,8 @@ enum Help {
         HelpSection("Choosing music", [folders, queue, survey]),
         HelpSection("Policy", [profile]),
         HelpSection("Clipped peaks", [declip, declipMax]),
-        HelpSection("Sub bass", [amount, auto, reference, maxAmount, minActivity,
+        HelpSection("Sub bass", [amount, auto, reference, maxAmount, subOffset,
+                                 minActivity,
                                  stemKicks]),
         HelpSection("Attack", [punch, punchDecay]),
         HelpSection("Dynamics", [targetLRA, maxAttenuation, transient, minCrest]),

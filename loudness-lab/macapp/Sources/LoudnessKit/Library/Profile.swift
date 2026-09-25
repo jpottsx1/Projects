@@ -23,6 +23,7 @@ public struct Profile: Codable, Equatable, Sendable {
     public var reference: String?            // the corpus --auto measures against
     public var amount: Double = 5.0          // fixed sub, when auto is off
     public var maxAmount: Double = 6.0
+    public var subOffset: Double = 0.0       // dB more or less than the reference
     public var minActivity: Double = 20.0    // below this the sub octave is a floor
     public var punch: Double = 0.0
     public var punchDecay: Double = 8.0
@@ -55,6 +56,7 @@ public struct Profile: Codable, Equatable, Sendable {
         case description, target, estimator, auto, reference, amount, punch, declip
         case peakCeiling = "peak_ceiling"
         case maxAmount = "max_amount"
+        case subOffset = "sub_offset"
         case minActivity = "min_activity"
         case punchDecay = "punch_decay"
         case declipMax = "declip_max"
@@ -96,6 +98,7 @@ public struct Profile: Codable, Equatable, Sendable {
         reference = try values.decodeIfPresent(String.self, forKey: .reference)
         amount = try number(.amount, fallback.amount)
         maxAmount = try number(.maxAmount, fallback.maxAmount)
+        subOffset = try number(.subOffset, fallback.subOffset)
         minActivity = try number(.minActivity, fallback.minActivity)
         punch = try number(.punch, fallback.punch)
         punchDecay = try number(.punchDecay, fallback.punchDecay)

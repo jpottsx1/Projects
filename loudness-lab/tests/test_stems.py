@@ -280,9 +280,16 @@ class TestTuningTheSub(unittest.TestCase):
     def test_the_burst_goes_an_octave_under_or_onto_the_kick(self):
         self.assertAlmostEqual(subbass.tuned_burst(70.0, 0.127)[0], 35.0)
         self.assertAlmostEqual(subbass.tuned_burst(84.0, 0.115)[0], 42.0)
-        # An octave under 58 is 29 Hz, below the band: the kick's own pitch.
-        self.assertAlmostEqual(subbass.tuned_burst(58.0, 0.1)[0], 58.0)
+        # An octave under 58 is 29 Hz: above the floor, raised to the band.
+        self.assertAlmostEqual(subbass.tuned_burst(58.0, 0.1)[0], 31.5)
+        # Under 56 Hz an octave down is below the floor: the kick's own pitch.
         self.assertAlmostEqual(subbass.tuned_burst(45.0, 0.1)[0], 45.0)
+        self.assertAlmostEqual(subbass.tuned_burst(55.0, 0.1)[0], 55.0)
+
+    def test_a_hertz_either_side_does_not_double_the_sub(self):
+        # Maniac: 63 Hz one run, 62 the next. Both an octave-ish under.
+        for pitch in (61.0, 62.0, 63.0, 64.0):
+            self.assertLessEqual(subbass.tuned_burst(pitch, 0.07)[0], 32.0, pitch)
 
     def test_the_burst_is_gone_when_the_kick_is(self):
         freq, decay = subbass.tuned_burst(70.0, 0.127)
@@ -439,6 +446,35 @@ class TestTheStageUsesTheStem(unittest.TestCase):
         result = self.run_one(self.job(stem_kicks=False))
         self.assertEqual(result["sub_hz"], 45.0)
         self.assertAlmostEqual(result["sub_decay_ms"], 120.0)
+
+    def test_every_kick_gets_the_same_burst(self):
+        """Bursts scaled by each hit on the drum stem followed the
+        separation: Maniac's sub faded out and roared back though the drum
+        machine never changes, and on Flashdance four hard hits mid-song
+        got full bursts over a fraction for the rest. Now every kept kick
+        gets the same."""
+        drums, onsets = _kicks_at(70.0, 0.127, seconds=20.0)
+        wobble = np.ones(drums.shape[0])
+        wobble[: drums.shape[0] // 2] = 10 ** (-9 / 20)       # a drift of 9 dB
+        for k in onsets[20:24]:                                # four hard hits
+            wobble[k:k + RATE // 4] = 2.0
+        drums = (drums * wobble[:, None]).astype(np.float32)
+        rng = np.random.default_rng(5)
+        self.mix = (drums + 0.02 * rng.standard_normal(drums.shape)).astype(np.float32)
+        stems.store_kick_source(self.cache, self.mix, RATE, drums)
+        kicks, strengths = subbass.detect_kicks(self.mix, RATE, drums)
+        kept, weights, report = subbass.select_kicks(drums, RATE, kicks, strengths, 120.0)
+        self.assertTrue(np.all(weights == 1.0))
+        self.assertGreater(report["strength_spread_db"], 6.0)
+        out, info = subbass.enhance(self.mix, RATE, amount_db=5.0, freq=35.0,
+                                    decay_s=0.055, kicks=(kept, weights))
+        # Undo the safety trim, which scales the whole track, then look at
+        # what was added.
+        trim = 10 ** (info["safety_trim_db"] / 20)
+        added = (out.astype(np.float64) / trim - self.mix)[:, 0]
+        span = int(0.1 * RATE)
+        per_kick = np.array([np.sqrt(np.mean(added[k:k + span] ** 2)) for k in kept])
+        self.assertLess(per_kick.max() / per_kick.min(), 1.15)
 
     def test_no_kept_stem_means_no_sub_and_says_why(self):
         result = self.run_one(self.job(stem_error="RuntimeError: out of memory"))
@@ -642,10 +678,32 @@ class TestFixedAir(unittest.TestCase):
     def test_without_auto_air_is_always_as_set(self):
         self.assertEqual(self.air_for(self.args(auto=False), shortfall=-4.56), 3.0)
 
+    def test_the_sub_offset_is_added_before_the_cap(self):
+        """Blue Monday, by ear: "more like +3 dB" than matching the
+        reference. The offset rides on the measured shortfall."""
+        class Rows:
+            def __init__(self, shapes):
+                self.shapes = shapes
+            def execute(self, *_):
+                return self
+            def fetchall(self):
+                return [{"band_hz": b, "shape_db": v} for b, v in self.shapes.items()]
+        curve = {40: -10.0, 50: -10.0}
+        def amount(shape, offset, cap=11.0):
+            return cli._auto_amount(Rows({40: shape, 50: shape}), "t.mp3",
+                                    curve, cap, bands=(40, 50), offset=offset)
+        self.assertAlmostEqual(amount(-12.0, 0.0)[0], 2.0)     # 2 dB short
+        self.assertAlmostEqual(amount(-12.0, 3.0)[0], 5.0)     # ...and +3
+        self.assertAlmostEqual(amount(-19.0, 3.0)[0], 11.0)    # capped
+        self.assertAlmostEqual(amount(-10.0, 3.0)[0], 3.0)     # at the reference
+        self.assertEqual(amount(-10.0, 0.0)[0], 0.0)           # matched: nothing
+        self.assertEqual(amount(-12.0, -3.0)[0], 0.0)          # less: nothing left
+
     def test_it_is_a_profile_setting(self):
         from loudnesslab import profiles
         self.assertIs(profiles.FIELDS["air_fixed"], False)
         self.assertIs(profiles.FIELDS["air_stems"], False)
+        self.assertEqual(profiles.FIELDS["sub_offset"], 0.0)
 
 
 if __name__ == "__main__":

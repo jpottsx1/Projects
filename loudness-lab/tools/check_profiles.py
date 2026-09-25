@@ -29,6 +29,7 @@ NAMES = {
     "target": "target", "estimator": "estimator", "peakCeiling": "peak_ceiling",
     "auto": "auto", "reference": "reference", "amount": "amount",
     "maxAmount": "max_amount", "minActivity": "min_activity",
+    "subOffset": "sub_offset",
     "punch": "punch", "punchDecay": "punch_decay",
     "declip": "declip", "declipMax": "declip_max",
 }

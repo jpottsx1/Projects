@@ -35,6 +35,7 @@ DOCUMENTED_BY = {
     "reference": "reference",
     "amount": "amount",
     "maxAmount": "maxAmount",
+    "subOffset": "subOffset",
     "minActivity": "minActivity",
     "punch": "punch",
     "punchDecay": "punchDecay",

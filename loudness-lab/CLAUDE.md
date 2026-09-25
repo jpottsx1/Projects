@@ -587,6 +587,20 @@ Love Missile F1-11 have no steady kick at all. Fascist Groove Thang reads
 Chameleon (1.87x), Imagination (1.65x) and Turn Back The Clock (0.72x) are
 unexplained and want listening to, not a theory.
 
+**And on disco, fifteen tagged tracks** (ABBA, Bee Gees, Cerrone, Donna
+Summer, Chic-era soul and funk): the stem matches the tag on 9, the mix
+on 2. Kicks per tagged beat is the plainer number -- the mix finds 1.26 to
+1.85 on EVERY track, including the two whose median tempo came out right,
+so it has been adding bursts to the whole disco library, not some of it.
+I Feel Love, the octave-bass record, is 1.33 on the mix and 1.00 on the
+stem. The stem reads 0.97-1.10 on the nine it gets right.
+
+Its misses: The Name of the Game reads 77.9 against a tag of 154 -- a
+slow song, so the tag is probably the doubled one, unverified. How Deep Is
+Your Love has no kick on every beat. Boogie Nights, Brick House, Best of
+My Love and Hot Line read 1.7-2x on both detectors: funk, with kick
+patterns busier than one per beat. Over both discs: stem 20 of 35, mix 3.
+
 That suggests the shape of the real stage: detect on the stem, and use the
 BPM tag as a gate -- where the kicks found do not agree with the tag, skip
 the sub for that track and say so. The misses above then become tracks

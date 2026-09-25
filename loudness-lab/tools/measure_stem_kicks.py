@@ -394,7 +394,9 @@ def measure_files(paths: list[Path], backends: list[str]) -> int:
                 report["grid_step"], "none fitted")
             notes.append(f"dropped {report['not_kick_shaped']} light, "
                          f"{report['off_grid']} off the grid; grid: {step} "
-                         f"(fit {report['grid_coherence']})")
+                         f"(fit {report['grid_coherence']}); kept kicks vary "
+                         f"{report['strength_spread_db']} dB on the drum stem "
+                         f"(10th to 90th percentile) -- the bursts no longer do")
             share, pitch, tail = kick_profile(drums, parts["bass"], kept, RATE)
             notes.append(f"kick low end {share:.0%} in the bass stem; "
                          f"drums and bass together ~{pitch}, tail {tail}")

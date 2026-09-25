@@ -251,6 +251,10 @@ struct SettingsPanel: View {
                            // disco-70s caps at 8, eighties at 11, both
                            // just above their measured worst.
                            sweet: 8...11)
+                    slider(Help.subOffset, $profile.subOffset, -6...6, "dB",
+                           // Zero is "match the reference". Jeff's first
+                           // ask was Blue Monday "more like +3".
+                           sweet: -1...3)
                 }
                 slider(Help.minActivity, $profile.minActivity, 8...30, "dB",
                          // Static rumble swings about 11 dB, a real

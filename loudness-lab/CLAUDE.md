@@ -761,6 +761,28 @@ Not yet done: the bassline. On She Blinded Me With Science and Blue
 Monday the low end is carried by the bass, and a sub laid only under
 kicks cannot follow it.
 
+### Every kick the same burst, and more or less than the reference
+
+After the fixes above, by ear: Maniac's sub "drops out and comes roaring
+back in, and fades out and back in over the song, although the rhythm
+section never changes"; Flashdance got "four overdrive bass beats" mid-
+song; Blue Monday "still a little light, more like +3 dB".
+
+The first two were one flaw. Each burst was scaled by how hard its hit
+was on the drum stem, against the hardest hit in the track. That followed
+the separation, not the drummer: a drum machine that never changes read
+as drifting, and a few hard hits (a fill, most likely, and one the local
+weighting now lets through when no kick is near) set the scale, got full
+bursts, and left the rest a fraction. Every kept kick now gets the same
+burst. The cost is that a softer passage no longer gets a softer sub; the
+report prints how much the kept kicks vary on the stem, 10th to 90th
+percentile, since that is what this decision rests on.
+
+Blue Monday is `sub_offset` ("More or less than the reference", -6 to +6
+dB): added to each track's measured shortfall before the cap, so +3 is 3
+dB more than matching the reference, and a track at the cap needs the cap
+raised too.
+
 ### Air: why none arrived, and air that follows the stems
 
 The 1988 folder got no air on any track, and not by accident: with `auto`

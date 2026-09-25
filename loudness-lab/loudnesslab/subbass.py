@@ -265,7 +265,8 @@ def select_kicks(drums: np.ndarray, rate: int, kicks: np.ndarray,
     MIN_GRID_COHERENCE); if none fits, the weight filter works alone.
     """
     report = {"found": int(kicks.size), "not_kick_shaped": 0, "off_grid": 0,
-              "grid_bpm": None, "grid_step": None, "grid_coherence": None}
+              "grid_bpm": None, "grid_step": None, "grid_coherence": None,
+              "strength_spread_db": None}
     if kicks.size == 0:
         return kicks, strengths, report
     shaped = _kick_level_db(drums, rate, kicks) >= MIN_KICK_LEVEL_DB
@@ -285,8 +286,20 @@ def select_kicks(drums: np.ndarray, rate: int, kicks: np.ndarray,
             report["grid_step"] = step
             report["off_grid"] = int((~grid).sum())
             kicks, strengths = kicks[grid], strengths[grid]
-    if strengths.size and strengths.max() > 0:
-        strengths = strengths / strengths.max()
+    # Every kept kick gets the same burst. They were scaled by how hard
+    # each hit on the drum stem was against the hardest one, and that
+    # followed the separation rather than the drummer: on Maniac, a drum
+    # machine that never changes, the sub faded out and roared back in over
+    # the song; on Flashdance a few hits in the middle -- a fill, most
+    # likely -- set the scale, got full bursts while everything else got a
+    # fraction, and were heard as four overdriven beats. The spread is kept
+    # in the report, since it is what that decision rests on.
+    if strengths.size:
+        positive = strengths[strengths > 0]
+        if positive.size:
+            spread = 20 * np.log10(np.percentile(positive, [10, 90]))
+            report["strength_spread_db"] = round(float(spread[1] - spread[0]), 1)
+        strengths = np.ones_like(strengths)
     return kicks, strengths, report
 
 

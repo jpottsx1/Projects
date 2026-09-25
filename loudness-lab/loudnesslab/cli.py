@@ -113,9 +113,15 @@ def _reference_curve(conn, wanted: str,
 
 
 def _auto_amount(conn, path: str, curve: dict, cap: float,
-                 bands=report.LOW_SHAPE_BANDS) -> tuple[float, str | None]:
+                 bands=report.LOW_SHAPE_BANDS,
+                 offset: float = 0.0) -> tuple[float, str | None]:
     """How much this track is short of the reference over `bands`, and
-    whether it can take it."""
+    whether it can take it.
+
+    `offset` is added to the shortfall before anything else: the
+    "More or less than the reference" control, for a record that by ear
+    wants a little more than matching the reference gives it (Blue Monday,
+    "more like +3 dB"). Still capped at `cap`."""
     rows = conn.execute(
         "SELECT b.band_hz, b.shape_db FROM bands b "
         "JOIN tracks t ON t.id = b.track_id WHERE t.path = ? "
@@ -129,7 +135,7 @@ def _auto_amount(conn, path: str, curve: dict, cap: float,
         deficits.append(target - row["shape_db"])
     if not deficits:
         return 0.0, "no band data"
-    shortfall = float(np.mean(deficits))
+    shortfall = float(np.mean(deficits)) + offset
     if shortfall <= 0.5:
         return 0.0, f"already within {shortfall:.1f} dB of the reference"
     return min(shortfall, cap), None
@@ -542,7 +548,8 @@ def cmd_subbass(args: argparse.Namespace) -> int:
         if args.auto:
             for row in rows:
                 amounts[row["path"]] = _auto_amount(conn, row["path"], curve,
-                                                    args.max_amount)
+                                                    args.max_amount,
+                                                    offset=args.sub_offset)
                 air_amounts[row["path"]] = (
                     _air_for(args, conn, row["path"], top_curve), None)
     finally:
@@ -627,7 +634,9 @@ def cmd_subbass(args: argparse.Namespace) -> int:
         out_dir.mkdir(parents=True, exist_ok=True)
     if args.profile:
         out(f"profile: {args.profile}")
-    heading = ("sub=auto (per track)" if args.auto
+    heading = ((f"sub=auto (per track"
+                + (f", {args.sub_offset:+.1f} dB over the reference"
+                   if args.sub_offset else "") + ")") if args.auto
                else f"sub={args.amount:+.1f} dB")
     air_heading = ((f"air<=+{args.air:.0f} dB (per track)"
                     if args.auto and not args.air_fixed
@@ -1354,6 +1363,11 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_argument("--stem-cache", type=Path, default=None, metavar="DIR",
                      help="--stem-kicks: where separated drum parts are kept "
                           "(default: stem-cache/ beside the database)")
+    sub.add_argument("--sub-offset", type=float, default=None, metavar="DB",
+                     help="--auto: dB added to each track's measured "
+                          "shortfall, for more (or, negative, less) sub "
+                          "than matching the reference gives. Still capped "
+                          "at --max-amount")
     sub.add_argument("--air-fixed", action="store_true", default=None,
                      help="--auto: give every track the --air amount rather "
                           "than sizing it against the reference. Without "

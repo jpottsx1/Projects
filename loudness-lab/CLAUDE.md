@@ -778,6 +778,16 @@ burst. The cost is that a softer passage no longer gets a softer sub; the
 report prints how much the kept kicks vary on the stem, 10th to 90th
 percentile, since that is what this decision rests on.
 
+A rerun of the report after the 1983 fixes showed Flashdance's only
+stretch without kicks is its drumless intro (0:00-0:47), so its mid-song
+"overdrive" was the burst scaling above and not a gap. It also showed the
+octave rule's edge: Maniac's kick read 63 Hz one run and 62 the next, and
+"an octave down only if that reaches 31.5 Hz" turned that into a sub of
+31.5 one time and 62 the other. The octave down is now taken whenever it
+is at least 28 Hz (`SUB_FLOOR_HZ`), raised to 31.5 if under -- so the edge
+sits at 56 Hz, below where these kicks cluster (61-66), and disco's 45 Hz
+kicks still keep the sub on their own pitch.
+
 Blue Monday is `sub_offset` ("More or less than the reference", -6 to +6
 dB): added to each track's measured shortfall before the cap, so +3 is 3
 dB more than matching the reference, and a track at the cap needs the cap

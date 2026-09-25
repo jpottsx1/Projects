@@ -280,9 +280,16 @@ class TestTuningTheSub(unittest.TestCase):
     def test_the_burst_goes_an_octave_under_or_onto_the_kick(self):
         self.assertAlmostEqual(subbass.tuned_burst(70.0, 0.127)[0], 35.0)
         self.assertAlmostEqual(subbass.tuned_burst(84.0, 0.115)[0], 42.0)
-        # An octave under 58 is 29 Hz, below the band: the kick's own pitch.
-        self.assertAlmostEqual(subbass.tuned_burst(58.0, 0.1)[0], 58.0)
+        # An octave under 58 is 29 Hz: above the floor, raised to the band.
+        self.assertAlmostEqual(subbass.tuned_burst(58.0, 0.1)[0], 31.5)
+        # Under 56 Hz an octave down is below the floor: the kick's own pitch.
         self.assertAlmostEqual(subbass.tuned_burst(45.0, 0.1)[0], 45.0)
+        self.assertAlmostEqual(subbass.tuned_burst(55.0, 0.1)[0], 55.0)
+
+    def test_a_hertz_either_side_does_not_double_the_sub(self):
+        # Maniac: 63 Hz one run, 62 the next. Both an octave-ish under.
+        for pitch in (61.0, 62.0, 63.0, 64.0):
+            self.assertLessEqual(subbass.tuned_burst(pitch, 0.07)[0], 32.0, pitch)
 
     def test_the_burst_is_gone_when_the_kick_is(self):
         freq, decay = subbass.tuned_burst(70.0, 0.127)

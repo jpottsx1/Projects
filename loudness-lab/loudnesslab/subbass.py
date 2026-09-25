@@ -412,7 +412,13 @@ def tuned_burst(pitch_hz: float, tail_s: float) -> tuple[float, float]:
     an octave down, or at the kick's own pitch when an octave down would
     fall under the band, and gone 20 dB when the kick is -- but never in
     fewer than TUNED_MIN_CYCLES of its own pitch."""
-    freq = pitch_hz / 2 if pitch_hz / 2 >= TUNED_MIN_HZ else pitch_hz
+    # The octave down whenever it is at least SUB_FLOOR_HZ, raised to the
+    # band's floor if it falls just under it. The rule was "an octave down
+    # only if that reaches 31.5 Hz", and the 1983 records sit right on its
+    # edge: Maniac's kick read 63 Hz one run (sub 31.5) and 62 the next
+    # (sub 62, on the kick itself) -- a hertz of measurement doubling the
+    # sub. Now anything from 56 Hz up goes to about an octave under.
+    freq = pitch_hz / 2 if pitch_hz / 2 >= SUB_FLOOR_HZ else pitch_hz
     freq = float(min(max(freq, TUNED_MIN_HZ), TUNED_MAX_HZ))
     floor = max(TUNED_DECAY_S[0], TUNED_MIN_CYCLES / (freq * np.log(10)))
     decay = float(np.clip(tail_s / np.log(10), floor, TUNED_DECAY_S[1]))

@@ -31,8 +31,9 @@ Separating is by far the slowest thing the tool does, so what it produced
 is kept (`store_kick_source` / `load_kick_source`). Not the stems: only
 what kick detection reads, which is the drum part's mono sum below a few
 hundred hertz. Four full stereo stems of a five-minute track are about
-450 MB; this is about 2 MB, and a second run over the same folder with
-different settings separates nothing.
+450 MB; this is at most 2.2 MB (five minutes of noise, the worst case for
+the compression), and a second run over the same folder with different
+settings separates nothing.
 """
 
 from __future__ import annotations
@@ -52,7 +53,10 @@ MODEL_RATE = 44100
 
 # What the kick source is kept at. `detect_kicks` reads 30-100 Hz and an
 # envelope smoothed at 60 Hz, so a few kilohertz holds everything it looks
-# at; 8 kHz leaves the anti-alias filter well clear of that band.
+# at. Measured over the eight synthetic scenarios in
+# tools/measure_stem_kicks.py, reading back from 2 kHz found the same kicks
+# as the stem itself, every one within 0.42 ms. 8 kHz did too, at four
+# times the size.
 KICK_SOURCE_RATE = 2000
 
 _loaded: dict[str, object] = {}

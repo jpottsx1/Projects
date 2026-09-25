@@ -615,8 +615,9 @@ first time. What it does:
   runs Demucs one track at a time -- a model per pool worker would multiply
   a gigabyte of memory by the worker count -- and emits `phase: "separate"`
   progress, which the app shows as "Separated n of m".
-- **Keeps only what detection reads**: the drum stem's mono sum at 8 kHz,
-  about 2 MB a track, in `stem-cache/` beside the database. Filed under a
+- **Keeps only what detection reads**: the drum stem's mono sum at 2 kHz,
+  at most 2.2 MB for five minutes, in `stem-cache/` beside the database.
+  Read back, it finds the same kicks as the stem, within 0.42 ms. Filed under a
   hash of the DECODED audio, not the file, because Serato rewrites a file
   every time a cue point moves and a file hash would throw the separation
   away with it. A second run separates nothing.

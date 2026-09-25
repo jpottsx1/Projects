@@ -681,12 +681,48 @@ not yet told apart:
    under a kick tuned to 50-60 Hz that rings for half a second, and an
    `auto` amount sized small because the 808 already fills the band.
 
+**Measured, and it was suspect 2.** Twelve 1988 dance records (Pet Shop
+Boys, Salt-N-Pepa, Rick Astley, Yazz, M/A/R/R/S...), through Demucs:
+
+- Bass-stem share of the kick's low end: 1-18% on eleven, 49% on one
+  (Straight Up). Demucs keeps these kicks in the drum stem. Suspect 1 out.
+- Kick pitch 58-84 Hz, most 61-74. Tail to -20 dB 74-252 ms, most
+  100-130. The burst was 45 Hz ringing to -20 dB at about 280 ms: a
+  second, lower note under every kick, outlasting it. Suspect 2.
+- After the filters the tempo matched the tag on 10 of 12 (mix: 0).
+
+So with `--stem-kicks` the burst is now TUNED per track
+(`subbass.kick_voice`, `tuned_burst`): the kick's pitch and tail measured
+on the drum stem at the kept kicks (a sample of 64), then the burst an
+octave under the kick -- or at the kick's own pitch when an octave down
+falls under 31.5 Hz, which keeps 45 Hz disco kicks at 45 -- decaying to
+fall 20 dB when the kick does (decay 30-200 ms). Measured on synthetic
+kicks at 55-84 Hz: pitch within 0.5 Hz, tail within 15 ms. Without the
+stem the fixed 45 Hz, 0.12 s burst is unchanged.
+
+The grid is the other finding: Domino Dancing, Buffalo Stance and Push It
+lost 224-420 hits each as off-beat, most likely real syncopated kicks (an
+808 tresillo puts them between beats). `--files` now prints what a grid
+of quarters, eighths and sixteenths each keeps a minute, and how firmly
+the kicks sit on it; the stage stays on quarters until that is read.
+
 `--files` now prints, per track, the share of the kick-band energy at the
 kept kicks that sits in the bass stem, and the pitch and tail of the
 kick's low end measured on drums and bass together (the tail up to the
 next kick at most, marked ">" when still ringing). Checked on a synthetic
 808: 100% vs 0% by which stem holds the boom, 55 Hz exactly, tail 784 ms
 against a true 806.
+
+### Punch put high-frequency artifacts on late-80s pop
+
+Confirmed by ear on a Paula Abdul track processed with Punch at +3.5 dB:
+audible high-frequency artifacts, gone with Punch at 0 and everything else
+the same. `shape_attacks` lifts 2-6 kHz at each kick with a 1 ms rise and
+an 8 ms fall. On disco that band at a kick is mostly beater click; on
+late-80s pop it is hi-hats, snare rattle, claps and vocal sibilance, and
+a gain moving that fast over them is heard as tick and grit. No built-in
+profile turns Punch on, and on this material it should stay off until
+the shaping is made slower or band-aware.
 
 ## Open
 

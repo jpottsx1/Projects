@@ -472,6 +472,15 @@ enum Help {
         works alone. The log says what was kept and dropped, and which grid \
         was used. A track gets no sub only if too few kicks are left.
 
+        The sub is also tuned to each track's own kick, measured on the drum \
+        track: an octave below the kick's pitch (or at the kick's pitch, if \
+        an octave down would be below 31.5 Hz), and fading when the kick \
+        does. Measured on 1988 dance records, kicks sat at 58-84 Hz and \
+        faded in 74-252 ms, under a fixed burst of 45 Hz that rang for about \
+        280 ms -- a second, lower note after every kick, which added no drum \
+        depth and sounded like part of the bass line. The log says what each \
+        track was tuned to.
+
         Separating is the slowest thing a run does, the first time. What it \
         finds is kept, so running the same folder again with \
         different settings separates nothing. Needs Demucs installed; \

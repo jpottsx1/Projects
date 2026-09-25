@@ -267,59 +267,53 @@ def implied_bpm(kicks: np.ndarray, rate: int) -> float:
 
 
 def kick_profile(drums: np.ndarray, bass: np.ndarray, kicks: np.ndarray,
-                 rate: int) -> tuple[float, float, str]:
-    """(bass share, pitch Hz, tail) of the low end at the kicks.
+                 rate: int) -> tuple[float, str, str]:
+    """(bass share, pitch, tail) of the low end at the kicks.
 
     Bass share: of the 30-90 Hz energy in the 60 ms after each kick, the
     part the separator put in the BASS stem. An 808 kick is a tuned, slowly
     decaying sine -- to a separator much like a bass note -- so a high
-    share says the drum stem holds only its click.
+    share says the drum stem holds only its click. Measured on 1988 dance
+    records it was 1-18% on eleven of twelve: Demucs keeps them in drums.
 
-    Pitch and tail are of drums and bass together, where the whole kick is:
-    the strongest frequency from 30 to 120 Hz, and how long the 30-120 Hz
-    envelope takes to fall 20 dB. The sub's burst is 45 Hz and 0.12 s; a
-    kick far from that is one the burst will not sit under. The tail is
-    measured up to the next kick at most, and says ">" when the kick was
-    still ringing there -- an 808 often is.
+    Pitch and tail are `subbass.kick_voice` on drums and bass together,
+    where the whole kick is -- what the sub stage tunes its burst to,
+    measured there on the drum stem alone.
     """
     if kicks.size == 0:
-        return float("nan"), float("nan"), "-"
+        return float("nan"), "-", "-"
+    from scipy.signal import sosfiltfilt
     d = drums.mean(axis=1).astype(np.float64)
     b = bass.mean(axis=1).astype(np.float64)
     low = butter(4, [30, 90], btype="band", fs=rate, output="sos")
-    from scipy.signal import sosfiltfilt
     dl, bl = sosfiltfilt(low, d) ** 2, sosfiltfilt(low, b) ** 2
     span = int(0.06 * rate)
     e_d = sum(float(dl[k:k + span].sum()) for k in kicks)
     e_b = sum(float(bl[k:k + span].sum()) for k in kicks)
     share = e_b / (e_b + e_d) if e_b + e_d > 0 else float("nan")
+    voice = subbass.kick_voice(d + b, rate, kicks)
+    if voice is None:
+        return share, "-", "-"
+    return share, f"{voice[0]:.0f} Hz", f"{voice[1] * 1000:.0f} ms"
 
-    both = sosfiltfilt(butter(4, [30, 120], btype="band", fs=rate, output="sos"),
-                       d + b)
-    env = sosfiltfilt(butter(2, 40, btype="low", fs=rate, output="sos"),
-                      np.abs(both))
-    n = int(0.5 * rate)
-    pitches, tails, rang = [], [], 0
-    gaps = np.diff(np.append(kicks, both.size))
-    for k, gap in zip(kicks, gaps):
-        seg = both[k:k + n]
-        if seg.size < n // 2:
-            continue
-        spec = np.abs(np.fft.rfft(seg * np.hanning(seg.size), 8 * rate))
-        freqs = np.fft.rfftfreq(8 * rate, 1 / rate)
-        band = (freqs >= 30) & (freqs <= 120)
-        pitches.append(float(freqs[band][np.argmax(spec[band])]))
-        e = env[k:k + min(int(1.5 * rate), int(gap))]
-        peak = int(np.argmax(e[: int(0.05 * rate)]))
-        below = np.flatnonzero(e[peak:] <= e[peak] * 0.1)
-        if not below.size:
-            rang += 1
-        tails.append((below[0] if below.size else e.size - peak) / rate * 1000)
-    if not tails:
-        return share, float("nan"), "-"
-    tail = f"{np.median(tails):.0f} ms"
-    return (share, float(np.median(pitches)),
-            (">" + tail) if rang > len(tails) / 2 else tail)
+
+def grid_counts(drums: np.ndarray, kicks: np.ndarray, rate: int,
+                bpm: float | None, minutes: float) -> str:
+    """Kicks a minute that a grid of quarters, eighths and sixteenths would
+    keep, after the weight filter. Syncopated grooves -- an 808 tresillo,
+    hip-hop -- put real kicks between the beats, which the quarter grid
+    drops; finer grids keep them and let more fill notes through."""
+    if not bpm or kicks.size < 8:
+        return "grid -"
+    heavy = kicks[subbass._kick_level_db(drums, rate, kicks)
+                  >= subbass.MIN_KICK_LEVEL_DB]
+    if heavy.size < 8:
+        return "grid -"
+    cells = []
+    for sub, name in ((1, "1/4"), (2, "1/8"), (4, "1/16")):
+        keep, firm = subbass._on_grid(heavy, rate, bpm, sub)
+        cells.append(f"{name} {keep.sum() / minutes:.0f}/min ({firm:.2f})")
+    return f"heavy hits {heavy.size / minutes:.0f}/min; on a grid of " + ", ".join(cells)
 
 
 def measure_files(paths: list[Path], backends: list[str]) -> int:
@@ -363,7 +357,15 @@ def measure_files(paths: list[Path], backends: list[str]) -> int:
                             if report["grid_bpm"] else " (none fitted)"))
             share, pitch, tail = kick_profile(drums, parts["bass"], kept, RATE)
             notes.append(f"kick low end {share:.0%} in the bass stem, "
-                         f"~{pitch:.0f} Hz, tail {tail}")
+                         f"~{pitch}, tail {tail}")
+            voice = subbass.kick_voice(drums, RATE, kept)
+            if voice is not None:
+                freq, decay = subbass.tuned_burst(*voice)
+                notes.append(f"sub would be {freq:.0f} Hz, {decay * 1000:.0f} ms "
+                             f"(was {subbass.DEFAULT_FREQ_HZ:.0f} Hz, "
+                             f"{subbass.DEFAULT_DECAY_S * 1000:.0f} ms)")
+            notes.append(grid_counts(drums, kicks, RATE,
+                                     report["grid_bpm"] or tagged, minutes))
         cells = []
         for name in columns:
             kicks = found[name]
@@ -377,7 +379,8 @@ def measure_files(paths: list[Path], backends: list[str]) -> int:
                 agree.setdefault(name, []).append(ok)
         label = f"{tagged:>6.1f}" if tagged else f"{'-':>6}"
         print(f"{label}  " + "  ".join(f"{c:>14}" for c in cells)
-              + f"   {path.name}" + (f"\n        [{'; '.join(notes)}]" if notes else ""))
+              + f"   {path.name}"
+              + "".join(f"\n        {note}" for note in notes))
     if agree:
         print("\nimplied tempo within 3% of the tag (after the filter: of "
               "the grid it used, 1x, 1/2 or 1/4 -- kicks on 1 and 3, or once "

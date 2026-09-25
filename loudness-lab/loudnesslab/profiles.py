@@ -49,6 +49,10 @@ FIELDS = {
     # default and a taste control rather than a repair.
     "air": 0.0,             # dB added to 8-20 kHz as generated harmonics
     "air_tune": 3500.0,     # Hz the harmonics are generated from, upward
+    # Find the kicks on a Demucs drum stem instead of the full mix, and
+    # skip the sub where they disagree with the BPM tag. Off by default:
+    # it needs Demucs installed, and separating is slow the first time.
+    "stem_kicks": False,
 }
 
 BUILT_IN = {

@@ -1,7 +1,7 @@
 """Stems: a separated drum part to detect kicks on.
 
-A PROTOTYPE, and deliberately narrow. The first use of a separator here is
-to FIND things, not to process them: `subbass.detect_kicks` looks for kick
+Deliberately narrow. The use of a separator here is to FIND things, not
+to process them (`subbass --stem-kicks`): `subbass.detect_kicks` looks for kick
 onsets in 30-100 Hz of the full mix, which is exactly where the bassline
 lives too. A disco octave bass plucks a sharp attack on every off-beat in
 that band, and a detector keyed on attack sharpness cannot tell it from a
@@ -23,14 +23,23 @@ Two backends:
   release. If the drum stem helps with Spleeter's separation, it will not
   help less with a better one.
 
-Neither is in requirements.txt: PyTorch (or TensorFlow) is a gigabyte or
-two, and nothing uses a stem yet outside this prototype. `available()`
-says which backends can run, rather than failing halfway through a batch.
+Neither is in requirements.txt: PyTorch (or TensorFlow) is a large
+install, and only `subbass --stem-kicks` uses a stem. `available()` says
+which backends can run, rather than failing halfway through a batch.
+
+Separating is by far the slowest thing the tool does, so what it produced
+is kept (`store_kick_source` / `load_kick_source`). Not the stems: only
+what kick detection reads, which is the drum part's mono sum below a few
+hundred hertz. Four full stereo stems of a five-minute track are about
+450 MB; this is about 2 MB, and a second run over the same folder with
+different settings separates nothing.
 """
 
 from __future__ import annotations
 
+import hashlib
 import importlib.util
+from pathlib import Path
 
 import numpy as np
 import soxr
@@ -40,6 +49,11 @@ BACKENDS = ("demucs", "spleeter")
 # Both models were trained at 44.1 kHz. Feeding them anything else is not
 # an error they report -- it is just a worse separation.
 MODEL_RATE = 44100
+
+# What the kick source is kept at. `detect_kicks` reads 30-100 Hz and an
+# envelope smoothed at 60 Hz, so a few kilohertz holds everything it looks
+# at; 8 kHz leaves the anti-alias filter well clear of that band.
+KICK_SOURCE_RATE = 8000
 
 _loaded: dict[str, object] = {}
 
@@ -133,3 +147,54 @@ def separate(x: np.ndarray, rate: int, backend: str = "demucs",
             stem = np.pad(stem, ((0, n - stem.shape[0]), (0, 0)))
         out[name] = stem[:n].astype(np.float32)
     return out
+
+
+def audio_key(x: np.ndarray) -> str:
+    """What a stored kick source is filed under: a hash of the decoded audio.
+
+    Of the audio and not of the file, because Serato rewrites a file's tags
+    whenever a cue point moves. A key over the file's bytes would throw
+    the separation away every time that happened, for audio that had not
+    changed at all.
+    """
+    return hashlib.sha1(np.ascontiguousarray(x, dtype=np.float32).tobytes()).hexdigest()
+
+
+def _cache_path(cache_dir: Path, key: str) -> Path:
+    return Path(cache_dir) / key[:2] / f"{key}.npz"
+
+
+def store_kick_source(cache_dir: Path, x: np.ndarray, rate: int,
+                      drums: np.ndarray) -> Path:
+    """Keep what `detect_kicks` needs from a drum stem of `x`."""
+    mono = np.asarray(drums, dtype=np.float64)
+    mono = mono.mean(axis=1) if mono.ndim == 2 else mono
+    small = soxr.resample(mono, rate, KICK_SOURCE_RATE, quality="VHQ")
+    path = _cache_path(cache_dir, audio_key(x))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    # Written aside and renamed, so a run stopped mid-write cannot leave a
+    # truncated file that the next run reads as a stem.
+    partial = path.with_name(path.stem + ".partial.npz")
+    np.savez_compressed(partial, drums=small.astype(np.float32),
+                        length=np.int64(x.shape[0]), rate=np.int64(rate))
+    partial.replace(path)
+    return path
+
+
+def load_kick_source(cache_dir: Path, x: np.ndarray,
+                     rate: int) -> np.ndarray | None:
+    """The stored drum source for `x`, as a (n, 2) array at `rate` exactly
+    as long as `x`, or None if this audio was never separated."""
+    path = _cache_path(cache_dir, audio_key(x))
+    if not path.exists():
+        return None
+    with np.load(path) as stored:
+        small = stored["drums"].astype(np.float64)
+    mono = soxr.resample(small, KICK_SOURCE_RATE, rate, quality="VHQ")
+    n = x.shape[0]
+    mono = np.pad(mono, (0, max(0, n - mono.size)))[:n]
+    return np.column_stack([mono, mono]).astype(np.float32)
+
+
+def has_kick_source(cache_dir: Path, x: np.ndarray) -> bool:
+    return _cache_path(cache_dir, audio_key(x)).exists()

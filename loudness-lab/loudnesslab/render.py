@@ -19,8 +19,8 @@ from pathlib import Path
 
 import numpy as np
 
-from . import (air, bs1770, declip, decode, expand, spectrum, subbass,
-               write)
+from . import (air, bs1770, declip, decode, expand, spectrum, stems,
+               subbass, write)
 
 
 def default_jobs() -> int:
@@ -112,9 +112,23 @@ def one(job: dict) -> dict:
         if job["declip"]:
             audio, clip = declip.restore(audio, decode.TARGET_RATE,
                                          max_restore_db=job["declip_max"])
+        # Where the kicks are found. On the mix unless asked otherwise; on a
+        # drum stem the parent separated before the pool started, keyed by
+        # the audio as it ARRIVED -- before de-clipping, which is what the
+        # parent had in hand when it separated.
+        drums = None
+        if job.get("stem_kicks"):
+            drums = stems.load_kick_source(Path(job["stem_cache"]), original,
+                                           decode.TARGET_RATE)
+            if drums is None and amount > 0:
+                skip = ("no drum stem to find kicks on"
+                        + (f" ({job['stem_error']})" if job.get("stem_error") else ""))
+            elif amount > 0:
+                kicks, _ = subbass.detect_kicks(audio, decode.TARGET_RATE, drums)
+                skip = subbass.tempo_check(kicks, decode.TARGET_RATE, job.get("bpm"))
         # The content check needs the audio, not the per-frame band
         # statistics, so it happens here rather than in the query.
-        if amount > 0:
+        if amount > 0 and skip is None:
             activity = subbass.low_band_activity(audio, decode.TARGET_RATE)
             if np.isfinite(activity) and activity < job["min_activity"]:
                 skip = (f"sub octave barely moves ({activity:.0f} dB) -- "
@@ -157,7 +171,8 @@ def one(job: dict) -> dict:
                                       amount_db=amount,
                                       freq=job["freq"], decay_s=job["decay"],
                                       punch_db=job["punch"],
-                                      punch_decay_ms=job["punch_decay"])
+                                      punch_decay_ms=job["punch_decay"],
+                                      drums=drums)
         # Air last of the spectral stages, because it generates from what
         # is there and by this point what is there is finished. It is also
         # the only one that can push the file above full scale on its own,
@@ -169,7 +184,7 @@ def one(job: dict) -> dict:
                                       tune_hz=job.get("air_tune",
                                                       air.DEFAULT_TUNE_HZ))
 
-        kicks, _ = subbass.detect_kicks(audio, decode.TARGET_RATE)
+        kicks, _ = subbass.detect_kicks(audio, decode.TARGET_RATE, drums)
         # Against the ORIGINAL, not against the de-clipped intermediate: the
         # columns say "was", and what the track was is what arrived.
         # Restored transients belong in the snap figure, not hidden in a

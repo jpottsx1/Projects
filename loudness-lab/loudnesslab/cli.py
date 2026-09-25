@@ -16,8 +16,8 @@ import time
 from pathlib import Path
 
 from . import (__version__, analyze, apply_gain, bs1770, db, declip, decode,
-               air, expand, mp3gain, profiles, render, report, subbass,
-               write)
+               air, expand, mp3gain, profiles, render, report, stems,
+               subbass, write)
 
 
 def _progress_printer(start: float):
@@ -164,6 +164,49 @@ def _variant(kind: str, path: Path, label: str, audio) -> dict:
         "lufs_i": measured["lufs_i"], "s_p95": measured["s_p95"],
         "true_peak_dbtp": measured["true_peak_dbtp"],
     }
+
+
+def _separate_for_kicks(jobs: list[dict], cache_dir: Path, porcelain: bool,
+                        quiet: bool) -> None:
+    """Split every track that will get a sub, once, before the pool starts.
+
+    Here in the parent, one track at a time, rather than in the workers:
+    each worker would load its own copy of the model, and Demucs on a
+    twelve-minute extended mix holds a gigabyte or so while it works. What
+    is kept is only what kick detection reads (see `stems.py`), filed
+    under the decoded audio, so a second run over the same folder finds
+    every track already done.
+
+    A track that cannot be separated is not failed here. The job carries
+    the reason, and the worker skips the sub on it and says why -- the
+    de-clipping and dynamics it may also want still happen.
+    """
+    wanted = [job for job in jobs
+              if job.get("skip") is None and float(job["amount"]) > 0]
+    for done, job in enumerate(wanted, 1):
+        status, reason = "ok", None
+        try:
+            audio = decode.decode(Path(job["path"]))
+            if stems.has_kick_source(cache_dir, audio):
+                reason = "already separated"
+            else:
+                parts = stems.separate(audio, decode.TARGET_RATE, "demucs")
+                stems.store_kick_source(cache_dir, audio, decode.TARGET_RATE,
+                                        parts["drums"])
+        except Exception as exc:  # per track, like every other stage
+            status = "error"
+            reason = f"{type(exc).__name__}: {exc}"[:300]
+            job["stem_error"] = reason
+        if porcelain:
+            _emit({"event": "progress", "phase": "separate", "done": done,
+                   "total": len(wanted), "name": job["name"],
+                   "path": job["path"], "status": status, "reason": reason})
+        elif not quiet:
+            sys.stderr.write(f"\r  separating {done}/{len(wanted)}  "
+                             f"{job['name'][:50]:<50s}")
+            sys.stderr.flush()
+    if wanted and not porcelain and not quiet:
+        sys.stderr.write("\n")
 
 
 def _write_manifest(path: Path, args: argparse.Namespace,
@@ -364,6 +407,11 @@ def cmd_subbass(args: argparse.Namespace) -> int:
     if args.auto and not args.reference:
         return fail("error: --auto needs a reference corpus. Give --reference, "
                     "or set it in the profile.")
+    if args.stem_kicks and "demucs" not in stems.available():
+        return fail("error: finding kicks on the drum stem needs Demucs, which "
+                    "is not installed here.\nDouble-click "
+                    "'Measure Kick Detection.command' once to install it, or "
+                    "run: .venv/bin/pip install demucs")
     if args.format not in write.FORMATS:
         # argparse already restricts this. The guard is for a caller that
         # built the namespace itself: without it the first worker raises,
@@ -434,7 +482,7 @@ def cmd_subbass(args: argparse.Namespace) -> int:
                              [(p,) for p in selected])
             clause += " AND t.path IN (SELECT path FROM chosen)"
         rows = conn.execute(
-            f"SELECT t.path, t.artist, t.title, AVG(b.shape_db) AS low "
+            f"SELECT t.path, t.artist, t.title, t.bpm, AVG(b.shape_db) AS low "
             f"FROM tracks t JOIN bands b ON b.track_id = t.id "
             f"WHERE t.status = 'ok' AND b.band_hz IN ({bands}) "
             f"AND b.shape_db IS NOT NULL{clause} "
@@ -524,6 +572,8 @@ def cmd_subbass(args: argparse.Namespace) -> int:
             "max_attenuation": args.max_attenuation,
             "transient": args.transient, "min_crest": args.min_crest,
             "air": air_amount, "air_tune": args.air_tune,
+            "stem_kicks": bool(args.stem_kicks), "bpm": row["bpm"],
+            "stem_cache": str(args.stem_cache or database.parent / "stem-cache"),
             "target": args.target, "estimator": args.estimator,
             "peak_ceiling": args.peak_ceiling,
             "compare": not args.no_compare, "dry_run": bool(args.dry_run),
@@ -560,7 +610,8 @@ def cmd_subbass(args: argparse.Namespace) -> int:
         + (f"  range->{args.target_lra:.0f} LU" if args.target_lra > 0 else "")
         + (f"  attack+{args.transient:.0f} dB" if args.transient > 0 else "")
         + (f"  {air_heading} from {args.air_tune / 1000:.1f}k"
-           if args.air > 0 else ""))
+           if args.air > 0 else "")
+        + ("  kicks from the drum stem" if args.stem_kicks else ""))
     out("=" * 104)
     out("  Lossy and irreversible, unlike the gain pass. Originals are never")
     out(f"  touched; these are new {write.label(args.format)} files to "
@@ -642,6 +693,9 @@ def cmd_subbass(args: argparse.Namespace) -> int:
                      if args.air > 0 else "")
                   + note)
 
+    if args.stem_kicks:
+        _separate_for_kicks(jobs, Path(jobs[0]["stem_cache"]), porcelain,
+                            args.quiet)
     results = render.run(jobs, workers=workers, progress=report_one)
 
     written = sum(1 for r in results if r["status"] == "ok")
@@ -1260,6 +1314,15 @@ def build_parser() -> argparse.ArgumentParser:
                           f"{profiles.FIELDS['air_tune'] / 1000:.1f} kHz). "
                           "Lower is fuller and costs less peak; higher is "
                           "more sizzle and costs a great deal more")
+    sub.add_argument("--stem-kicks", action="store_true", default=None,
+                     help="find the kicks on a Demucs drum stem instead of "
+                          "the full mix, where the bassline sets them off "
+                          "too, and skip the sub on a track whose kicks do "
+                          "not agree with its BPM tag. Needs Demucs. Each "
+                          "track is separated once and kept")
+    sub.add_argument("--stem-cache", type=Path, default=None, metavar="DIR",
+                     help="--stem-kicks: where separated drum parts are kept "
+                          "(default: stem-cache/ beside the database)")
     sub.add_argument("--summary-only", action="store_true",
                      help="print only the policy preview, not a row per track")
     sub.add_argument("--dry-run", action="store_true",

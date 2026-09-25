@@ -153,7 +153,7 @@ every machine but the one that made it for a while.
 ```
 loudnesslab/     the Python: bs1770, spectrum, subbass, declip, expand,
                  air, mp3gain, decode, db, report, render, write, cli,
-                 stems (prototype: a drum stem for kick detection)
+                 stems (a Demucs drum stem, for finding kicks)
 tests/           its tests
 tools/           make_golden.py, the five checkers, measure_stem_kicks.py
 macapp/
@@ -521,7 +521,7 @@ So `wants` now needs BOTH to be low: **low LRA with crest intact is the
 arrangement; low LRA with crest gone is the mastering.** The disco discs
 now read `declip`, which is what is actually wrong with them.
 
-## Stems: a prototype, for finding kicks
+## Stems: finding kicks on the drums
 
 The sub stage finds kicks in 30-100 Hz of the full mix, which is where the
 bassline is too. `stems.py` separates a drum part and `detect_kicks(...,
@@ -606,11 +606,34 @@ BPM tag as a gate -- where the kicks found do not agree with the tag, skip
 the sub for that track and say so. The misses above then become tracks
 left alone rather than tracks processed wrongly.
 
-Not in `requirements.txt` and not wired into the CLI or the app until
-that says it earns its install. Separation is also the slowest thing the
-tool would do (Spleeter took 8 s per 30 s on four CPU cores), so if it
-goes in, stems want caching by checksum and one process of their own, not
-a copy of the model per pool worker.
+### Built: `subbass --stem-kicks`, "Find kicks on the drum track" in the app
+
+Off by default, in every profile, because it needs Demucs and is slow the
+first time. What it does:
+
+- **Separates in the parent, once, before the pool.** `cli._separate_for_kicks`
+  runs Demucs one track at a time -- a model per pool worker would multiply
+  a gigabyte of memory by the worker count -- and emits `phase: "separate"`
+  progress, which the app shows as "Separated n of m".
+- **Keeps only what detection reads**: the drum stem's mono sum at 8 kHz,
+  about 2 MB a track, in `stem-cache/` beside the database. Filed under a
+  hash of the DECODED audio, not the file, because Serato rewrites a file
+  every time a cue point moves and a file hash would throw the separation
+  away with it. A second run separates nothing.
+- **Gates on the BPM tag** (`subbass.tempo_check`): kicks implying 1x or
+  0.5x the tag, within 5%, are trusted; anything else skips the sub on
+  that track and says why. 5% is from the measurement above -- right
+  answers sat within 0.98-1.03, the nearest wrong one at 1.25. Half is
+  accepted because fewer kicks than beats cannot put a burst anywhere it
+  does not belong; double is refused because it can. No tag, no check.
+- **A track that fails to separate** is not a failed run: the reason rides
+  on the job and the worker skips only the sub, saying so.
+
+Demucs is still not in `requirements.txt`; `Measure Kick Detection.command`
+installs it, and the command refuses `--stem-kicks` with that instruction
+when it is missing. Not yet confirmed on the Mac: the Swift has not been
+compiled with these changes, and no processing run has used the stem yet.
+The first one wants an A/B by ear against the same tracks from the mix.
 
 ## Open
 

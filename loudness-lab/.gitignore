@@ -14,6 +14,8 @@ __pycache__/
 .venv/
 scans/
 profiles.json
+# Separated drum parts, kept so a track is split once. Machine-specific.
+stem-cache/
 
 # Audio this tool WROTE. Every one of these folders is output: the files
 # in them are copies the run produced and can be produced again, and they

@@ -46,6 +46,7 @@ DOCUMENTED_BY = {
     "minCrest": "minCrest",
     "air": "air",
     "airTune": "airTune",
+    "stemKicks": "stemKicks",
 }
 
 

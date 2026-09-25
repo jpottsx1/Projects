@@ -130,6 +130,39 @@ def detect_kicks(x: np.ndarray, rate: int,
     return peaks, (strengths / loudest if loudest > 0 else strengths)
 
 
+# How far the tempo the kicks imply may sit from the BPM tag. Measured on
+# 35 tagged tracks, detecting on a Demucs drum stem: where the kicks were
+# right, the implied tempo came within 0.98-1.03 of the tag; the nearest
+# wrong one was 1.25 away. 5% sits in that gap with room on both sides.
+TEMPO_TOLERANCE = 0.05
+
+
+def tempo_check(kicks: np.ndarray, rate: int,
+                tagged_bpm: float | None) -> str | None:
+    """Why the kicks found should NOT be trusted, or None if they can be.
+
+    One kick per beat is what four-on-the-floor has, so the median gap
+    between the kicks found should be one beat of the tagged tempo. Double
+    means something between the beats is being read as a kick -- an octave
+    bassline on the mix, or on a stem a funk pattern busier than one per
+    beat -- and a burst under each would put sub on the off-beat.
+
+    Half the tag is accepted: the kicks are real, one every other tagged
+    beat, which is a half-time groove or a tag Serato doubled. Fewer
+    detections than beats cannot put a burst anywhere it does not belong.
+    """
+    if tagged_bpm is None or not np.isfinite(tagged_bpm) or tagged_bpm <= 0:
+        return None
+    if kicks.size < 8:
+        return None             # enhance() declines this itself, and says so
+    implied = 60.0 / float(np.median(np.diff(kicks) / rate))
+    for multiple in (1.0, 0.5):
+        if abs(implied / (tagged_bpm * multiple) - 1.0) <= TEMPO_TOLERANCE:
+            return None
+    return (f"kicks imply {implied:.0f} BPM against a tag of "
+            f"{tagged_bpm:.0f} -- not one kick per beat, so no sub")
+
+
 def _backtrack(peaks: np.ndarray, fast: np.ndarray, rate: int) -> np.ndarray:
     """Move each onset from the peak of the ratio back to the attack's start.
 

@@ -438,6 +438,36 @@ enum Help {
         than silently dropped.
         """)
 
+    static let stemKicks = HelpEntry(
+        title: "Find kicks on the drum track",
+        summary: "Separate the drums with Demucs and find the kicks there, not in the full mix.",
+        detail: """
+        The sub is laid under each kick, so where it goes depends on finding \
+        the kicks. In the full mix they share 30-100 Hz with the bassline, \
+        and a bass note with a sharp attack reads as a kick. Measured against \
+        Serato's BPM tags, the full mix found 1.26 to 1.85 "kicks" per beat on \
+        every one of fifteen disco tracks, so a burst was going under \
+        off-beat bass notes as well as under the kicks.
+
+        With this on, each track is separated with Demucs first and the kicks \
+        are found on the drums alone. Over 35 tagged tracks, the tempo the \
+        kicks imply matched the tag on 20 this way and on 3 from the mix. The \
+        separated drums only decide WHERE the sub goes; it is still added to \
+        the untouched original, so nothing the separation got wrong can be \
+        heard.
+
+        It also checks the kicks against the BPM tag. Where they do not \
+        agree -- a ballad with no kick on every beat, a funk pattern busier \
+        than one per beat -- the track gets no sub, and the log says why. \
+        That turns a wrong guess into a track left alone. A track with no \
+        BPM tag is not checked.
+
+        Separating is the slowest thing a run does, the first time. What it \
+        finds is kept, so running the same folder again with \
+        different settings separates nothing. Needs Demucs installed; \
+        Measure Kick Detection.command installs it.
+        """)
+
     // MARK: - Punch
 
     static let punch = HelpEntry(
@@ -618,7 +648,8 @@ enum Help {
         HelpSection("Choosing music", [folders, queue, survey]),
         HelpSection("Policy", [profile]),
         HelpSection("Clipped peaks", [declip, declipMax]),
-        HelpSection("Sub bass", [amount, auto, reference, maxAmount, minActivity]),
+        HelpSection("Sub bass", [amount, auto, reference, maxAmount, minActivity,
+                                 stemKicks]),
         HelpSection("Attack", [punch, punchDecay]),
         HelpSection("Dynamics", [targetLRA, maxAttenuation, transient, minCrest]),
         HelpSection("Air", [air, airTune]),

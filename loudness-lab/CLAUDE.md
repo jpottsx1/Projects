@@ -701,10 +701,21 @@ kicks at 55-84 Hz: pitch within 0.5 Hz, tail within 15 ms. Without the
 stem the fixed 45 Hz, 0.12 s burst is unchanged.
 
 The grid is the other finding: Domino Dancing, Buffalo Stance and Push It
-lost 224-420 hits each as off-beat, most likely real syncopated kicks (an
-808 tresillo puts them between beats). `--files` now prints what a grid
-of quarters, eighths and sixteenths each keeps a minute, and how firmly
-the kicks sit on it; the stage stays on quarters until that is read.
+lost 224-420 hits each as off-beat, most likely real syncopated kicks.
+`--files` printed how firmly the kicks sit on quarters, eighths and
+sixteenths, and each record has a grid it plainly follows: straight ones
+quarters (0.95-1.00), Bananarama and Kylie eighths (1.00, against 0.87
+and 0.79 on quarters), Buffalo Stance sixteenths (0.96, against 0.37).
+
+So the grid is now picked per track: the tag's quarters, eighths or
+sixteenths, whichever the kicks sit on most firmly, the coarser of two
+within 0.05. A tag at half the tempo is simply the eighth grid, so the
+"try double the tag" step is gone. And a grid is used only at a fit of
+0.5 or better -- good fits read 0.79 and up, poor ones 0.11-0.37, and
+Domino Dancing's 0.32 had been dropping most of its kicks -- otherwise the
+weight filter works alone. On the synthetic backbeat that takes recall
+from 0.79 to 1.00 (the syncopated kicks) and precision from 0.88 to
+0.76-0.91: low floor toms in fills sit on a sixteenth grid too.
 
 `--files` now prints, per track, the share of the kick-band energy at the
 kept kicks that sits in the bass stem, and the pitch and tail of the

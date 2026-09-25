@@ -349,23 +349,24 @@ def measure_files(paths: list[Path], backends: list[str]) -> int:
                                                    tagged)
             found[backend + "+filter"] = kept
             if report["grid_bpm"]:
-                against[backend + "+filter"] = report["grid_bpm"]
+                against[backend + "+filter"] = report["grid_bpm"] * report["grid_step"]
+            step = {1: "quarters", 2: "eighths", 4: "sixteenths"}.get(
+                report["grid_step"], "none fitted")
             notes.append(f"dropped {report['not_kick_shaped']} light, "
-                         f"{report['off_grid']} off-beat, grid "
-                         f"{report['grid_coherence']}"
-                         + (f" at {report['grid_bpm']:.0f}"
-                            if report["grid_bpm"] else " (none fitted)"))
+                         f"{report['off_grid']} off the grid; grid: {step} "
+                         f"(fit {report['grid_coherence']})")
             share, pitch, tail = kick_profile(drums, parts["bass"], kept, RATE)
-            notes.append(f"kick low end {share:.0%} in the bass stem, "
-                         f"~{pitch}, tail {tail}")
+            notes.append(f"kick low end {share:.0%} in the bass stem; "
+                         f"drums and bass together ~{pitch}, tail {tail}")
             voice = subbass.kick_voice(drums, RATE, kept)
             if voice is not None:
                 freq, decay = subbass.tuned_burst(*voice)
-                notes.append(f"sub would be {freq:.0f} Hz, {decay * 1000:.0f} ms "
-                             f"(was {subbass.DEFAULT_FREQ_HZ:.0f} Hz, "
+                notes.append(f"on the drum stem the kick is {voice[0]:.0f} Hz, "
+                             f"{voice[1] * 1000:.0f} ms, so the sub is "
+                             f"{freq:.0f} Hz, {decay * 1000:.0f} ms (was "
+                             f"{subbass.DEFAULT_FREQ_HZ:.0f} Hz, "
                              f"{subbass.DEFAULT_DECAY_S * 1000:.0f} ms)")
-            notes.append(grid_counts(drums, kicks, RATE,
-                                     report["grid_bpm"] or tagged, minutes))
+            notes.append(grid_counts(drums, kicks, RATE, tagged, minutes))
         cells = []
         for name in columns:
             kicks = found[name]

@@ -136,21 +136,39 @@ class TestSelectingTheKicks(unittest.TestCase):
             found, kept, report = self.select(drums, 104.0)
             self.assertLess(fixtures.score(found, truth)[1], 0.5, drift)
             recall, precision, _ = fixtures.score(kept, truth)
-            self.assertGreaterEqual(precision, 0.85, drift)
-            # What is lost is the syncopated kick, off the beat: 6 of 29.
-            self.assertGreaterEqual(recall, 0.75, drift)
-            self.assertEqual(report["grid_bpm"], 104.0)
+            # Every kick, the syncopated one included: the grid is picked to
+            # fit the kicks, so a kick between beats is kept. What gets in
+            # with it is the low floor toms of the fills, which are kick
+            # weight and on a sixteenth grid -- the trade, measured.
+            self.assertEqual(recall, 1.0, drift)
+            self.assertGreaterEqual(precision, 0.75, drift)
 
-    def test_what_survives_agrees_with_the_tag(self):
+    def test_what_survives_is_close_to_the_kicks(self):
         # Before: more than two hits for every kick -- snares, claps, toms
-        # and scratches as well. After: kicks on 1 and 3, reading half the
-        # tag, which is one kick every other beat.
+        # and scratches as well. After: within a third of the real count.
         drums, truth, _ = fixtures.backbeat(seed=0, drift=0.015)
         found, kept, _ = self.select(drums, 104.0)
         self.assertGreater(found.size, 2 * truth.size)
-        self.assertLessEqual(kept.size, truth.size)
-        self.assertAlmostEqual(fixtures.implied_bpm(kept, RATE) / 104.0, 0.5,
-                               delta=0.03)
+        self.assertLessEqual(kept.size, 1.35 * truth.size)
+
+    def test_the_grid_is_the_one_the_kicks_sit_on(self):
+        # Four-on-the-floor sits on quarters. Kicks on every eighth -- a
+        # SAW-style record, or a tag at half the tempo -- on eighths.
+        _, drums, truth = fixtures.programme("groove", seed=0)
+        bpm = 60 / float(np.median(np.diff(truth)))
+        self.assertEqual(self.select(drums, bpm)[2]["grid_step"], 1)
+        self.assertEqual(self.select(drums, bpm / 2)[2]["grid_step"], 2)
+        self.assertEqual(self.select(drums, bpm / 4)[2]["grid_step"], 4)
+
+    def test_a_loose_fit_is_no_grid_at_all(self):
+        # Domino Dancing's best fit was 0.32: a grid that loose drops most
+        # of the kicks. Under MIN_GRID_COHERENCE the weight filter works
+        # alone rather than trusting it.
+        drums, _, _ = fixtures.backbeat(seed=0, drift=0.03)
+        _, _, report = self.select(drums, 104.0)
+        self.assertLess(report["grid_coherence"], subbass.MIN_GRID_COHERENCE)
+        self.assertIsNone(report["grid_step"])
+        self.assertEqual(report["off_grid"], 0)
 
     def test_a_kick_under_a_snare_is_kept(self):
         # On 2 and 4 the kick and the snare land together. A filter asking
@@ -172,16 +190,15 @@ class TestSelectingTheKicks(unittest.TestCase):
             hits = [h for h in alone if np.min(np.abs(kept / RATE - h)) <= 0.03]
             self.assertEqual(hits, [], kind)
 
-    def test_a_tag_at_half_the_tempo_moves_to_double_not_to_every_other_kick(self):
+    def test_a_tag_at_half_the_tempo_keeps_every_kick(self):
         # Four-on-the-floor on a half-speed grid lands alternately on and
-        # exactly between its beats. Fitting that grid would keep every
-        # other kick; the grid at double the tag keeps them all.
+        # exactly between its beats. Quarters of that tag would keep every
+        # other kick; its eighths keep them all.
         _, drums, truth = fixtures.programme("groove", seed=0)
         bpm = 60 / float(np.median(np.diff(truth)))
         _, kept, report = self.select(drums, bpm / 2)
-        self.assertAlmostEqual(report["grid_bpm"], bpm, places=6)
+        self.assertEqual(report["grid_step"], 2)
         self.assertEqual(fixtures.score(kept, truth)[:2], (1.0, 1.0))
-        self.assertAlmostEqual(self.select(drums, bpm)[2]["grid_bpm"], bpm, places=6)
 
     def test_a_tag_that_fits_no_grid_falls_back_to_weight_alone(self):
         # Not refused: the kicks that are heavy enough still get their sub.
@@ -326,7 +343,7 @@ class TestTheStageUsesTheStem(unittest.TestCase):
         self.assertGreater(on_stem["applied_db"], 1.0)
 
     def test_a_tag_at_half_the_tempo_still_gets_a_sub_on_every_kick(self):
-        # Refused, once. Now the grid moves to double the tag and every kick
+        # Refused, once. Now the grid is the tag's eighths and every kick
         # keeps its burst, and the log says which grid it used.
         stems.store_kick_source(self.cache, self.mix, RATE, self.drums)
         result = self.run_one(self.job(bpm=self.bpm / 2))
@@ -334,7 +351,7 @@ class TestTheStageUsesTheStem(unittest.TestCase):
         seconds = self.mix.shape[0] / RATE
         self.assertAlmostEqual(result["kicks_per_minute"] * seconds / 60,
                                self.truth.size, delta=1)
-        self.assertIn("double", result["reason"])
+        self.assertIn("eighths", result["reason"])
 
     def test_a_backbeat_track_gets_its_sub(self):
         """The four tracks the first real run skipped: snare thump, fills

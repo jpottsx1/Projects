@@ -266,6 +266,62 @@ def implied_bpm(kicks: np.ndarray, rate: int) -> float:
     return 60.0 / float(np.median(np.diff(kicks) / rate))
 
 
+def kick_profile(drums: np.ndarray, bass: np.ndarray, kicks: np.ndarray,
+                 rate: int) -> tuple[float, float, str]:
+    """(bass share, pitch Hz, tail) of the low end at the kicks.
+
+    Bass share: of the 30-90 Hz energy in the 60 ms after each kick, the
+    part the separator put in the BASS stem. An 808 kick is a tuned, slowly
+    decaying sine -- to a separator much like a bass note -- so a high
+    share says the drum stem holds only its click.
+
+    Pitch and tail are of drums and bass together, where the whole kick is:
+    the strongest frequency from 30 to 120 Hz, and how long the 30-120 Hz
+    envelope takes to fall 20 dB. The sub's burst is 45 Hz and 0.12 s; a
+    kick far from that is one the burst will not sit under. The tail is
+    measured up to the next kick at most, and says ">" when the kick was
+    still ringing there -- an 808 often is.
+    """
+    if kicks.size == 0:
+        return float("nan"), float("nan"), "-"
+    d = drums.mean(axis=1).astype(np.float64)
+    b = bass.mean(axis=1).astype(np.float64)
+    low = butter(4, [30, 90], btype="band", fs=rate, output="sos")
+    from scipy.signal import sosfiltfilt
+    dl, bl = sosfiltfilt(low, d) ** 2, sosfiltfilt(low, b) ** 2
+    span = int(0.06 * rate)
+    e_d = sum(float(dl[k:k + span].sum()) for k in kicks)
+    e_b = sum(float(bl[k:k + span].sum()) for k in kicks)
+    share = e_b / (e_b + e_d) if e_b + e_d > 0 else float("nan")
+
+    both = sosfiltfilt(butter(4, [30, 120], btype="band", fs=rate, output="sos"),
+                       d + b)
+    env = sosfiltfilt(butter(2, 40, btype="low", fs=rate, output="sos"),
+                      np.abs(both))
+    n = int(0.5 * rate)
+    pitches, tails, rang = [], [], 0
+    gaps = np.diff(np.append(kicks, both.size))
+    for k, gap in zip(kicks, gaps):
+        seg = both[k:k + n]
+        if seg.size < n // 2:
+            continue
+        spec = np.abs(np.fft.rfft(seg * np.hanning(seg.size), 8 * rate))
+        freqs = np.fft.rfftfreq(8 * rate, 1 / rate)
+        band = (freqs >= 30) & (freqs <= 120)
+        pitches.append(float(freqs[band][np.argmax(spec[band])]))
+        e = env[k:k + min(int(1.5 * rate), int(gap))]
+        peak = int(np.argmax(e[: int(0.05 * rate)]))
+        below = np.flatnonzero(e[peak:] <= e[peak] * 0.1)
+        if not below.size:
+            rang += 1
+        tails.append((below[0] if below.size else e.size - peak) / rate * 1000)
+    if not tails:
+        return share, float("nan"), "-"
+    tail = f"{np.median(tails):.0f} ms"
+    return (share, float(np.median(pitches)),
+            (">" + tail) if rang > len(tails) / 2 else tail)
+
+
 def measure_files(paths: list[Path], backends: list[str]) -> int:
     """Each real track, scored against its BPM tag. For every separator two
     columns: the stem as detected, and after `select_kicks` has dropped the
@@ -291,7 +347,8 @@ def measure_files(paths: list[Path], backends: list[str]) -> int:
         against = {name: tagged for name in columns}
         notes = []
         for backend in backends:
-            drums = stems.separate(x, RATE, backend)["drums"]
+            parts = stems.separate(x, RATE, backend)
+            drums = parts["drums"]
             kicks, strengths = subbass.detect_kicks(x, RATE, drums)
             found[backend] = kicks
             kept, _, report = subbass.select_kicks(drums, RATE, kicks, strengths,
@@ -299,11 +356,14 @@ def measure_files(paths: list[Path], backends: list[str]) -> int:
             found[backend + "+filter"] = kept
             if report["grid_bpm"]:
                 against[backend + "+filter"] = report["grid_bpm"]
-            notes.append(f"{report['not_kick_shaped']} light, "
+            notes.append(f"dropped {report['not_kick_shaped']} light, "
                          f"{report['off_grid']} off-beat, grid "
                          f"{report['grid_coherence']}"
                          + (f" at {report['grid_bpm']:.0f}"
                             if report["grid_bpm"] else " (none fitted)"))
+            share, pitch, tail = kick_profile(drums, parts["bass"], kept, RATE)
+            notes.append(f"kick low end {share:.0%} in the bass stem, "
+                         f"~{pitch:.0f} Hz, tail {tail}")
         cells = []
         for name in columns:
             kicks = found[name]
@@ -317,7 +377,7 @@ def measure_files(paths: list[Path], backends: list[str]) -> int:
                 agree.setdefault(name, []).append(ok)
         label = f"{tagged:>6.1f}" if tagged else f"{'-':>6}"
         print(f"{label}  " + "  ".join(f"{c:>14}" for c in cells)
-              + f"   {path.name}" + (f"  [dropped {'; '.join(notes)}]" if notes else ""))
+              + f"   {path.name}" + (f"\n        [{'; '.join(notes)}]" if notes else ""))
     if agree:
         print("\nimplied tempo within 3% of the tag (after the filter: of "
               "the grid it used, 1x, 1/2 or 1/4 -- kicks on 1 and 3, or once "

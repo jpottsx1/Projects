@@ -668,6 +668,26 @@ when it is missing. Not yet confirmed on the Mac: the Swift has not been
 compiled with these changes, and no processing run has used the stem yet.
 The first one wants an A/B by ear against the same tracks from the mix.
 
+### 808s: a question the report now asks
+
+After the filters, Pet Shop Boys (an 808 record) processed but by ear got
+little drum depth, and "caught a little of the bass line". Two suspects,
+not yet told apart:
+
+1. Demucs puts an 808's boom in the BASS stem -- it is a tuned, slowly
+   decaying sine, which to a separator looks like a bass note -- leaving
+   the drum stem only the click.
+2. The kicks are found, but the burst is wrong for them: 45 Hz and 0.12 s
+   under a kick tuned to 50-60 Hz that rings for half a second, and an
+   `auto` amount sized small because the 808 already fills the band.
+
+`--files` now prints, per track, the share of the kick-band energy at the
+kept kicks that sits in the bass stem, and the pitch and tail of the
+kick's low end measured on drums and bass together (the tail up to the
+next kick at most, marked ">" when still ringing). Checked on a synthetic
+808: 100% vs 0% by which stem holds the boom, 55 Hz exactly, tail 784 ms
+against a true 806.
+
 ## Open
 
 1. **`Disco Music` is 51 files that want re-ripping, not processing.** A

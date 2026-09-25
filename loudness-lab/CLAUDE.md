@@ -565,6 +565,33 @@ hand:
 .venv/bin/python tools/measure_stem_kicks.py --files <folder> --backend demucs
 ```
 
+**Measured on a real disc: 100 Hits - The New Romantics, Disc 1.** Twenty
+tracks, every one with a Serato BPM tag, Demucs on an Apple Silicon Mac.
+Implied tempo against the tag, within 5%:
+
+| | full mix | Demucs drum stem |
+|---|---|---|
+| matches the tag | 1 of 20 | 11 of 20 |
+| exactly double the tag | 9 of 20 | 1 of 20 |
+| anything else | 10 | 8 |
+
+The mix detector fires on the off-beat as well as the beat -- nine tracks
+at 1.91-2.06x, the eighth-note synth basslines this era is built on -- so
+the sub stage has been laying half its bursts under bass notes on this
+material. On the eleven the stem gets right it finds 0.85-1.02 kicks per
+tagged beat: nearly every kick, almost nothing else.
+
+Where the stem misses, the record is mostly why: Ghosts, 19, Vienna and
+Love Missile F1-11 have no steady kick at all. Fascist Groove Thang reads
+2x on both (a busy kick pattern, probably). Is It A Dream (1.45x), Karma
+Chameleon (1.87x), Imagination (1.65x) and Turn Back The Clock (0.72x) are
+unexplained and want listening to, not a theory.
+
+That suggests the shape of the real stage: detect on the stem, and use the
+BPM tag as a gate -- where the kicks found do not agree with the tag, skip
+the sub for that track and say so. The misses above then become tracks
+left alone rather than tracks processed wrongly.
+
 Not in `requirements.txt` and not wired into the CLI or the app until
 that says it earns its install. Separation is also the slowest thing the
 tool would do (Spleeter took 8 s per 30 s on four CPU cores), so if it

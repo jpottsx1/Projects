@@ -556,8 +556,8 @@ Hence `--files`: on four-on-the-floor, the tempo implied by the median gap
 between detected kicks should equal the BPM tag, and a detector firing on
 an octave bass reads double. The next step is that, with Demucs, over a
 disco folder and the 1999 discs. `Measure Kick Detection.command` does it
-from Finder: it installs Demucs into `.venv` on first use (PyTorch too,
-about 1-2 GB), asks for a folder, and saves the report in `scans/`. By
+from Finder: it installs Demucs into `.venv` on first use (PyTorch too;
+the model is about 80 MB), asks for a folder, and saves the report in `scans/`. By
 hand:
 
 ```sh
@@ -566,7 +566,7 @@ hand:
 ```
 
 Not in `requirements.txt` and not wired into the CLI or the app until
-that says it earns its gigabyte. Separation is also the slowest thing the
+that says it earns its install. Separation is also the slowest thing the
 tool would do (Spleeter took 8 s per 30 s on four CPU cores), so if it
 goes in, stems want caching by checksum and one process of their own, not
 a copy of the model per pool worker.

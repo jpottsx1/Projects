@@ -16,6 +16,14 @@ struct SurveyPanel: View {
     let progressNote: String?
     @Binding var reference: String
     let onMeasure: () -> Void
+    let onForget: (String) -> Void
+    let onForgetAll: () -> Void
+
+    /// The folder a "Clear history" click is asking to confirm. A row's own
+    /// identity, not a Bool, because a plain `isPresented` binding shared
+    /// across every row in the table cannot tell which one was clicked.
+    @State private var pendingForget: Survey.FolderLowEnd?
+    @State private var confirmingForgetAll = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -50,6 +58,34 @@ struct SurveyPanel: View {
                 empty
             }
         }
+        .confirmationDialog(
+            pendingForget.map { "Clear history for \u{201c}\($0.folder)\u{201d}?" } ?? "",
+            isPresented: Binding(get: { pendingForget != nil },
+                                 set: { if !$0 { pendingForget = nil } }),
+            presenting: pendingForget
+        ) { row in
+            Button("Clear \(row.tracks) Track(s)", role: .destructive) {
+                onForget(row.folder)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { row in
+            Text("Removes \(row.tracks) track(s) from the database so this "
+                 + "folder can be measured again from scratch. The files "
+                 + "themselves are never touched.")
+        }
+        .confirmationDialog(
+            "Clear all measured history?",
+            isPresented: $confirmingForgetAll
+        ) {
+            Button("Clear Everything", role: .destructive) { onForgetAll() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Removes every folder's measurements from the database, "
+                 + "not only the ones selected here -- for ingesting a new "
+                 + "set of reference standards without the old ones still "
+                 + "counting toward a median or a corpus curve. The files "
+                 + "themselves are never touched.")
+        }
     }
 
     private var header: some View {
@@ -64,6 +100,13 @@ struct SurveyPanel: View {
                 }
                 .buttonStyle(.link)
                 .help("The whole survey as text")
+                Button("Clear All…") { confirmingForgetAll = true }
+                    .buttonStyle(.link)
+                    .foregroundStyle(.red)
+                    .help("Clear every folder's measured history, so a new "
+                          + "set of reference standards can be ingested "
+                          + "without the old ones still counting. Nothing "
+                          + "on disk is touched.")
             }
             Button("Measure") { onMeasure() }
                 .disabled(isMeasuring)
@@ -273,6 +316,16 @@ struct SurveyPanel: View {
                         .foregroundStyle(row.folder == survey.reference
                                          ? .secondary : .primary)
                         .frame(width: 52, alignment: .trailing)
+                    Button {
+                        pendingForget = row
+                    } label: {
+                        Image(systemName: "trash")
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+                    .help("Clear this folder's measurement history, so it "
+                          + "can be re-measured or left out of the library. "
+                          + "Nothing on disk is touched.")
                 }
                 .font(.callout)
             }

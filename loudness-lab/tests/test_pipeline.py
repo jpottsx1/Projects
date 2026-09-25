@@ -44,17 +44,54 @@ def write_wav(path: Path, x: np.ndarray) -> None:
 
 
 class TestFolderLabels(unittest.TestCase):
-    """Two compilations each containing a CD1 must not merge into one row."""
+    """Two compilations each containing a CD1 must not merge into one row --
+    but one compilation's own discs are the opposite case, and must."""
 
-    def test_same_named_subfolders_stay_separate(self):
+    def test_a_multi_disc_release_collapses_to_one_row(self):
+        """Four discs of the same release, nothing measured directly in the
+        release folder itself: one label, not four."""
+        labels = report._folder_labels([
+            f"/music/Now Yearbook 99 (2026)/CD{n}/track.mp3" for n in range(1, 5)
+        ])
+        self.assertEqual(set(labels.values()), {"Now Yearbook 99 (2026)"})
+
+    def test_a_different_compilations_cd1_stays_separate(self):
+        """The collapse is structural, not a name match -- so it must not
+        let two DIFFERENT releases' identically-named discs merge."""
         labels = report._folder_labels([
             "/music/Now Yearbook 99 (2026)/CD1/a.mp3",
             "/music/Now Yearbook 99 (2026)/CD2/b.mp3",
             "/music/NOW 100 Hits Party/CD1/c.mp3",
         ])
-        self.assertEqual(len(set(labels.values())), 3)
-        self.assertIn("Now Yearbook 99 (2026)/CD1", labels.values())
+        self.assertEqual(len(set(labels.values())), 2)
+        self.assertEqual(labels["/music/Now Yearbook 99 (2026)/CD1/a.mp3"],
+                         labels["/music/Now Yearbook 99 (2026)/CD2/b.mp3"])
+        self.assertIn("Now Yearbook 99 (2026)", labels.values())
         self.assertIn("NOW 100 Hits Party/CD1", labels.values())
+
+    def test_a_disc_suffix_after_the_repeated_album_name_still_collapses(self):
+        """Ripping software's ordinary naming: the disc folder repeats the
+        release name in full and puts the disc number on the end, not a
+        bare "CD4". Anchoring to the whole name would miss this -- which
+        is the common case, not the rare one."""
+        labels = report._folder_labels([
+            "/music/NOW 100 Hits Party/NOW - 100 HITS - PARTY - CD1/a.mp3",
+            "/music/NOW 100 Hits Party/NOW - 100 HITS - PARTY - CD2/b.mp3",
+            "/music/NOW 100 Hits Party/NOW - 100 HITS - PARTY - CD3/c.mp3",
+            "/music/NOW 100 Hits Party/NOW - 100 HITS - PARTY - CD4/d.mp3",
+        ])
+        self.assertEqual(set(labels.values()), {"NOW 100 Hits Party"})
+
+    def test_a_track_alongside_the_discs_blocks_the_collapse(self):
+        """A bonus track sitting directly in the release folder means the
+        folder is not a pure disc container -- collapsing it would conflate
+        "in the folder itself" with "in one of its discs"."""
+        labels = report._folder_labels([
+            "/music/Now Yearbook 99 (2026)/CD1/a.mp3",
+            "/music/Now Yearbook 99 (2026)/CD2/b.mp3",
+            "/music/Now Yearbook 99 (2026)/bonus.mp3",
+        ])
+        self.assertEqual(len(set(labels.values())), 3)
 
     def test_a_flat_folder_keeps_its_own_name(self):
         labels = report._folder_labels(["/music/Party/a.mp3",

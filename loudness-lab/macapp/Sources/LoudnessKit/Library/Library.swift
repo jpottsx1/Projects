@@ -384,7 +384,29 @@ public final class Library {
     /// is where an MP3's low-pass usually shows itself -- which is a thing
     /// worth seeing, not hiding.
     public static let topShapeBands = Spectrum.bandCentres.filter {
-        (8000.0...16000.0).contains($0)
+        (8000.0...20000.0).contains($0)
+    }
+
+    /// CD1, Disc 2, disc-3, DVD4, Vol. 5, Part6, or that same token as a
+    /// SUFFIX after the release's own name repeated in full -- "NOW - 100
+    /// HITS - PARTY - CD4" is the ordinary way ripping software names a
+    /// disc, not the rare case, so anchoring to the whole name would miss
+    /// the real thing this is for. Case insensitive, and the number has
+    /// to be the last thing in the name either way. Deliberately narrow
+    /// otherwise: `folderLabels`'s collapse trusts this to mean "a disc
+    /// of ONE release", and a structural rule alone cannot tell that
+    /// apart from "several different releases that happen to share a
+    /// parent folder" -- which is the ordinary shape of a music library,
+    /// not a rare edge case, so a false positive here is not a corner
+    /// case either.
+    static let discLike = try! NSRegularExpression(
+        pattern: "(?:^|[\\s\\-_])(?:cd|dvd|disc|disk|vol\\.?|part)"
+            + "[\\s\\-_]*\\d+$",
+        options: [.caseInsensitive])
+
+    static func looksLikeADisc(_ name: String) -> Bool {
+        let range = NSRange(name.startIndex..<name.endIndex, in: name)
+        return discLike.firstMatch(in: name, range: range) != nil
     }
 
     /// A folder label for each track that is actually distinctive.
@@ -394,6 +416,12 @@ public final class Library {
     /// averaged with another corpus is worse than no answer. Labels are
     /// taken relative to the common prefix of every path, so
     /// "Now Yearbook 99 (2026)/CD1" stays apart from "NOW 100 Hits/CD1".
+    ///
+    /// A folder holding nothing but disc-numbered subfolders, and no
+    /// track of its own, is one release rather than one row per disc: its
+    /// children collapse to it, so four discs of the same compilation
+    /// read as one folder, not four. Gated on `looksLikeADisc` -- see
+    /// there for why a structural rule alone is not enough.
     ///
     /// A port of `report._folder_labels`, held to it by golden vectors.
     public static func folderLabels(_ paths: [String]) -> [String: String] {
@@ -405,19 +433,34 @@ public final class Library {
             ? commonDirectory(Array(distinct))
             : (parents[0] as NSString).deletingLastPathComponent
 
+        var groupFor: [String: String] = [:]
+        for leaf in distinct {
+            let grandparent = (leaf as NSString).deletingLastPathComponent
+            let siblings = distinct.filter {
+                ($0 as NSString).deletingLastPathComponent == grandparent
+            }
+            let collapses = siblings.count > 1
+                && !distinct.contains(grandparent)
+                && siblings.allSatisfy {
+                    looksLikeADisc(($0 as NSString).lastPathComponent)
+                }
+            groupFor[leaf] = collapses ? grandparent : leaf
+        }
+
         var labels: [String: String] = [:]
         for path in unique {
             let parent = (path as NSString).deletingLastPathComponent
-            var relative = parent
+            let group = groupFor[parent] ?? parent
+            var relative = group
             if !base.isEmpty {
-                if parent == base {
+                if group == base {
                     relative = ""
-                } else if parent.hasPrefix(base + "/") {
-                    relative = String(parent.dropFirst(base.count + 1))
+                } else if group.hasPrefix(base + "/") {
+                    relative = String(group.dropFirst(base.count + 1))
                 }
             }
             if relative.isEmpty || relative == "." || relative == "/" {
-                let name = (parent as NSString).lastPathComponent
+                let name = (group as NSString).lastPathComponent
                 relative = name.isEmpty ? "(root)" : name
             }
             labels[path] = relative
@@ -514,6 +557,63 @@ public final class Library {
             return (0, String(format: "already within %.1f dB of the reference", mean))
         }
         return (min(mean, cap), nil)
+    }
+
+    /// Remove every track under a Survey folder label, along with its
+    /// `loudness`/`bands` rows (`ON DELETE CASCADE`).
+    ///
+    /// Scoped to a label rather than a root URL because that is what the
+    /// survey and the confirmation dialog show, and a label is not a path
+    /// -- it is relative to a common prefix computed across the whole
+    /// library (`folderLabels`), so recovering a root from it would mean
+    /// re-deriving the same computation twice and risking the two
+    /// disagreeing. Grouping by the identical call this ran through for
+    /// display keeps them in lockstep by construction.
+    ///
+    /// Files on disk are never touched. This only forgets that they were
+    /// measured, so a folder can be re-measured -- or left out of the
+    /// library entirely -- without deleting anything real.
+    @discardableResult
+    public func forget(folder: String) throws -> Int {
+        let all = try tracks()
+        let labels = Library.folderLabels(all.map(\.path))
+        let matching = all.map(\.path).filter { labels[$0] == folder }
+        return try forget(paths: matching)
+    }
+
+    /// `DELETE ... WHERE path IN (...)`, chunked well under SQLite's
+    /// default 999-variable limit on a bound-parameter list.
+    @discardableResult
+    public func forget(paths: [String]) throws -> Int {
+        guard !paths.isEmpty else { return 0 }
+        var removed = 0
+        var remaining = paths[...]
+        while !remaining.isEmpty {
+            let chunk = Array(remaining.prefix(500))
+            remaining = remaining.dropFirst(chunk.count)
+            let placeholders = Array(repeating: "?", count: chunk.count).joined(separator: ", ")
+            try db.run("DELETE FROM tracks WHERE path IN (\(placeholders))",
+                       chunk.map { .text($0) })
+            removed += chunk.count
+        }
+        return removed
+    }
+
+    /// Remove every measured track in the database, library-wide.
+    ///
+    /// For starting over completely -- ingesting a new set of reference
+    /// standards without yesterday's folders still counting toward a
+    /// median or a corpus curve. `forget(folder:)` clears one folder for
+    /// exactly this reason; this is the same idea with no scope at all.
+    ///
+    /// Files on disk are never touched. This only clears what
+    /// `tracks`/`loudness`/`bands` remember.
+    @discardableResult
+    public func forgetEverything() throws -> Int {
+        let count = try db.run("SELECT COUNT(*) AS n FROM tracks").first?["n"] as? Int ?? 0
+        guard count > 0 else { return 0 }
+        try db.run("DELETE FROM tracks")
+        return count
     }
 
     public func recordGain(path: String, outputPath: String, steps: Int,

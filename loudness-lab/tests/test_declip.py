@@ -506,7 +506,9 @@ class ThroughTheCommand(unittest.TestCase):
     def test_without_the_flag_it_still_declines(self):
         code, text, _ = self.run_subbass("--amount", "0")
         self.assertEqual(code, 0)
-        self.assertIn("Nothing for subbass to do", text)
+        self.assertIn("changes nothing", text)
+        # And says where the work it declined actually belongs.
+        self.assertIn("gain", text)
 
     def test_the_written_file_no_longer_clips(self):
         _, text, out_dir = self.run_subbass("--amount", "0", "--declip",

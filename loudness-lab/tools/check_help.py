@@ -40,6 +40,12 @@ DOCUMENTED_BY = {
     "punchDecay": "punchDecay",
     "declip": "declip",
     "declipMax": "declipMax",
+    "targetLRA": "targetLRA",
+    "maxAttenuation": "maxAttenuation",
+    "transient": "transient",
+    "minCrest": "minCrest",
+    "air": "air",
+    "airTune": "airTune",
 }
 
 

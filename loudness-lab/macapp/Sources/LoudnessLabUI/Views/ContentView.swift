@@ -3,10 +3,29 @@ import AppKit
 import LoudnessKit
 
 struct ContentView: View {
+    /// Paths a host asked to be ticked once the queue has scanned, and the
+    /// flag that makes that happen once rather than on every refresh — a
+    /// run measures tracks and refreshes the queue, and re-imposing the
+    /// host's original selection there would silently undo whatever the
+    /// person had ticked since.
+    private let initialInclude: Set<String>?
+    @State private var didSeedSelection = false
+
+    /// - Parameters:
+    ///   - initialFolders: folders to scan on appear, for a host that
+    ///     already knows what it wants worked on.
+    ///   - initialInclude: paths to tick once that scan lands. Nil keeps
+    ///     the queue's own default of everything it found.
+    init(initialFolders: [URL] = [], initialInclude: Set<String>? = nil) {
+        self.initialInclude = initialInclude
+        _folders = State(initialValue: initialFolders)
+    }
+
     @Environment(\.openWindow) private var openWindow
     @StateObject private var engine = Engine()
     @StateObject private var player = ABPlayer()
     @StateObject private var queue = Queue()
+    @StateObject private var personal = PersonalProfiles()
 
     @State private var folders: [URL] = []
     @State private var profile = Profile()
@@ -21,6 +40,8 @@ struct ContentView: View {
     @State private var chosen: Manifest.Track?
     @State private var blind = false
     @State private var rightTab = RightTab.survey
+    @State private var wideWaveform = false
+    @State private var confirmingClearOutput = false
     /// Set only when the search fails and the file is pointed at by hand.
     /// `@AppStorage` so the view redraws the moment it is chosen, and so
     /// the choice survives a restart -- being asked twice for the same
@@ -71,6 +92,7 @@ struct ContentView: View {
                 SettingsPanel(profile: $profile, profileName: $profileName,
                               limit: $limit, limited: $limited,
                               compare: $compare, dryRun: $dryRun,
+                              personal: personal,
                               folders: engine.survey?.folders.map(\.folder) ?? [])
                 Divider()
                 runControls
@@ -78,45 +100,86 @@ struct ContentView: View {
             .padding(16)
             .frame(minWidth: 330, idealWidth: 350, maxWidth: 420)
 
-            // What it will be done to.
-            QueuePanel(queue: queue, limit: limited ? limit : Int.max)
-                .frame(minWidth: 260, idealWidth: 320, maxWidth: 480)
-
-            // What the folders are, and what came out of them.
+            // What it will be done to, and what came out of it -- split so
+            // that widening the player below can spread under both rather
+            // than being boxed into the results column alone.
             VStack(spacing: 0) {
-                Picker("", selection: $rightTab) {
-                    ForEach(RightTab.allCases) { Text($0.rawValue).tag($0) }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .padding(.horizontal, 12).padding(.top, 8).padding(.bottom, 4)
+                HSplitView {
+                    QueuePanel(queue: queue, limit: limited ? limit : Int.max)
+                        .frame(minWidth: 260, idealWidth: 320, maxWidth: 480)
 
-                switch rightTab {
-                case .survey:
-                    SurveyPanel(
-                        survey: engine.survey,
-                        isMeasuring: engine.isRunning,
-                        progress: engine.progress,
-                        progressNote: engine.progressNote,
-                        reference: Binding(get: { profile.reference ?? "" },
-                                           set: { profile.reference = $0 }),
-                        onMeasure: measure)
-                case .results:
-                    ResultsPanel(manifest: engine.manifest, chosen: $chosen)
+                    // What the folders are, and what came out of them.
+                    VStack(spacing: 0) {
+                        Picker("", selection: $rightTab) {
+                            ForEach(RightTab.allCases) { Text($0.rawValue).tag($0) }
+                        }
+                        .pickerStyle(.segmented)
+                        .labelsHidden()
+                        .padding(.horizontal, 12).padding(.top, 8).padding(.bottom, 4)
+
+                        switch rightTab {
+                        case .survey:
+                            SurveyPanel(
+                                survey: engine.survey,
+                                isMeasuring: engine.isRunning,
+                                progress: engine.progress,
+                                progressNote: engine.progressNote,
+                                reference: Binding(get: { profile.reference ?? "" },
+                                                   set: { profile.reference = $0 }),
+                                onMeasure: measure,
+                                onForget: { label in
+                                    Task {
+                                        await engine.forget(folder: label, folders: folders,
+                                                            databaseURL: databaseURL,
+                                                            reference: profile.reference)
+                                    }
+                                },
+                                onForgetAll: {
+                                    Task { await engine.forgetEverything(databaseURL: databaseURL) }
+                                })
+                        case .results:
+                            ResultsPanel(manifest: engine.manifest, chosen: $chosen)
+                        }
+                        if !wideWaveform {
+                            Divider()
+                            ComparePanel(player: player, track: chosen, blind: $blind,
+                                         wide: $wideWaveform, estimator: profile.estimator)
+                        }
+                        Divider()
+                        LogPanel(text: engine.log, failure: engine.failure ?? player.problem,
+                                 collapsed: rightTab == .results)
+                    }
+                    .frame(minWidth: 520)
                 }
-                Divider()
-                ComparePanel(player: player, track: chosen, blind: $blind,
-                             estimator: profile.estimator)
-                Divider()
-                LogPanel(text: engine.log, failure: engine.failure ?? player.problem)
+                if wideWaveform {
+                    Divider()
+                    ComparePanel(player: player, track: chosen, blind: $blind,
+                                 wide: $wideWaveform, estimator: profile.estimator)
+                        .padding(.horizontal, 4)
+                }
             }
-            .frame(minWidth: 520)
         }
         .onChange(of: chosen) { _, track in loadIntoPlayer(track) }
         // The queue follows the folders, and refreshes after a run because
         // a run measures tracks that had no numbers before.
-        .task(id: folders) { await queue.refresh(folders: folders,
-                                                 databaseURL: databaseURL) }
+        .task(id: folders) {
+            await queue.refresh(folders: folders, databaseURL: databaseURL)
+            // Once, after the first scan: the host's selection can only be
+            // applied to items that exist, and refresh is what creates them.
+            if !didSeedSelection, let initialInclude {
+                didSeedSelection = true
+                queue.setAll(false)
+                for path in initialInclude { queue.setIncluded(true, for: path) }
+            }
+        }
+        // Reads the library the moment a folder is added, rather than
+        // waiting for Measure -- the reference picker's list is every
+        // folder ever measured, and a brand new folder (with nothing of
+        // its own yet) is exactly the case it exists to serve.
+        .task(id: folders) {
+            engine.refreshSurvey(folders: folders, databaseURL: databaseURL,
+                                 reference: profile.reference)
+        }
         // Changing the reference re-reads the library; it does not re-measure.
         .onChange(of: profile.reference) { _, name in
             engine.refreshSurvey(folders: folders, databaseURL: databaseURL,
@@ -177,20 +240,67 @@ struct ContentView: View {
             .help(Help.format.summary)
             HStack(spacing: 6) {
                 Text("To").frame(width: 24, alignment: .leading)
-                Text(outputDirectory.lastPathComponent)
-                    .lineLimit(1).truncationMode(.head)
-                    .help(outputDirectory.path)
+                Button(outputDirectory.lastPathComponent) {
+                    // Nothing has necessarily been written yet -- a first
+                    // launch with nothing processed has no folder to open
+                    // otherwise, and "take me there" should not depend on
+                    // having already run something.
+                    try? FileManager.default.createDirectory(
+                        at: outputDirectory, withIntermediateDirectories: true)
+                    NSWorkspace.shared.open(outputDirectory)
+                }
+                .buttonStyle(.link)
+                .lineLimit(1).truncationMode(.head)
+                .help("Open \(outputDirectory.path) in Finder")
                 Spacer()
                 Button("Change…") { chooseOutput() }
                     .buttonStyle(.link)
-                if !outputOverride.isEmpty {
-                    Button("Default") { outputOverride = "" }
-                        .buttonStyle(.link)
-                }
+                Button("Clear") { confirmingClearOutput = true }
+                    .buttonStyle(.link)
+                    .foregroundStyle(.red)
+                    .disabled(audioFilesInOutputDirectory.isEmpty)
+                    .help("Delete every audio file in this folder. "
+                          + "Anything else in it -- the manifest, "
+                          + "anything you put there yourself -- is left "
+                          + "alone.")
             }
             .font(.callout)
         }
         .help(Help.output.detail)
+        .confirmationDialog(
+            "Clear \(outputDirectory.lastPathComponent)?",
+            isPresented: $confirmingClearOutput
+        ) {
+            Button("Delete \(audioFilesInOutputDirectory.count) File(s)",
+                  role: .destructive) { clearOutputDirectory() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Deletes every FLAC, MP3 and M4A file directly in this "
+                 + "folder -- both sides of every A/B pair. The manifest "
+                 + "and anything else in the folder are left as they "
+                 + "are. This cannot be undone.")
+        }
+    }
+
+    /// Every audio file sitting directly in the destination -- what
+    /// `AudioWriter` itself ever writes there, both A and B of a pair,
+    /// so this is exactly what "empty of audio, nothing else touched"
+    /// needs to find.
+    private var audioFilesInOutputDirectory: [URL] {
+        let extensions = Set(AudioWriter.Format.allCases.map(\.fileExtension))
+        let contents = try? FileManager.default.contentsOfDirectory(
+            at: outputDirectory, includingPropertiesForKeys: nil)
+        return (contents ?? []).filter { extensions.contains($0.pathExtension.lowercased()) }
+    }
+
+    private func clearOutputDirectory() {
+        let files = audioFilesInOutputDirectory
+        var removed = 0
+        for file in files {
+            if (try? FileManager.default.removeItem(at: file)) != nil { removed += 1 }
+        }
+        engine.say("Cleared \(removed) audio file(s) from "
+                   + "\(outputDirectory.lastPathComponent).")
     }
 
     private func chooseOutput() {

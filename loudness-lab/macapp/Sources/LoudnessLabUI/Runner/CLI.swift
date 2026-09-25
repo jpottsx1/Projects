@@ -1,4 +1,5 @@
 import Foundation
+import LoudnessKit
 
 /// Running the command-line tool, and reading what it says back.
 ///
@@ -11,16 +12,40 @@ enum CLI {
 
     /// One line of `--porcelain` output.
     ///
-    /// Every field is optional because two different events share the
-    /// shape: `progress` carries done/total/name, `done` carries the
-    /// counts. Decoding them into one type keeps the reader a switch
-    /// rather than two parsers.
+    /// Every field is optional because several different events share the
+    /// shape: `progress` carries done/total/name, `measured` and `done`
+    /// carry counts, `error` carries a message. Decoding them into one type
+    /// keeps the reader a switch rather than five parsers, and an event
+    /// this app does not know about decodes rather than failing the line.
     struct Event: Decodable {
         let event: String
+        /// Which half of a processing run: "measure" or "process". Absent
+        /// on a plain `analyze`, where there is only one.
+        var phase: String?
         var done: Int?, total: Int?
         var name: String?, path: String?, status: String?, error: String?
+        var reason: String?
         var found: Int?, analysed: Int?, skipped: Int?, errors: Int?
         var seconds: Double?
+        // `selected`, `done` and `error`.
+        var selected: Int?, duplicates: Int?, written: Int?
+        var reference: String?, format: String?, out: String?
+        var manifest: String?, message: String?
+        var dryRun: Bool?
+        var lraBefore: Double?, lraAfter: Double?
+        var crestBefore: Double?, crestAfter: Double?
+
+        enum CodingKeys: String, CodingKey {
+            case event, phase, done, total, name, path, status, error, reason
+            case found, analysed, skipped, errors, seconds
+            case selected, duplicates, written, reference, format, out
+            case manifest, message
+            case dryRun = "dry_run"
+            case lraBefore = "lra_before"
+            case lraAfter = "lra_after"
+            case crestBefore = "crest_before"
+            case crestAfter = "crest_after"
+        }
 
         init?(_ line: String) {
             guard let data = line.data(using: .utf8),
@@ -170,7 +195,7 @@ enum CLI {
             // means something different when the tool IS installed.
             if tail.contains("ffmpeg") || tail.contains("ffprobe") {
                 let found = ["ffmpeg", "ffprobe"].compactMap { name in
-                    find(name).map { "\(name) at \($0)" }
+                    Tools.find(name).map { "\(name) at \($0.path)" }
                 }
                 message += found.isEmpty
                     ? "\n\nNeither was found anywhere this app can see. "
@@ -184,47 +209,15 @@ enum CLI {
         return status
     }
 
-    /// Where Homebrew puts things, and where a GUI app does not look.
+    /// The environment the tool runs in.
     ///
-    /// A program launched from Finder or Xcode does not inherit the shell's
-    /// PATH -- it gets roughly /usr/bin:/bin:/usr/sbin:/sbin, and nothing a
-    /// .zprofile added. So ffmpeg installed by Homebrew is on the PATH in
-    /// Terminal and invisible here, and the tool reports it missing when it
-    /// is sitting right there. Same command, same machine, different
-    /// answer, which is a confusing way to be told to install something you
-    /// already have.
-    ///
-    /// Appended rather than prepended, so a PATH that was inherited
-    /// properly still wins.
-    static let toolDirectories = [
-        "/opt/homebrew/bin",        // Apple silicon Homebrew
-        "/usr/local/bin",           // Intel Homebrew, and most installers
-        "/opt/local/bin",           // MacPorts
-        "/opt/homebrew/sbin",
-    ]
-
-    static func environment() -> [String: String] {
-        var environment = ProcessInfo.processInfo.environment
-        let existing = environment["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin"
-        let already = Set(existing.split(separator: ":").map(String.init))
-        let missing = toolDirectories.filter {
-            !already.contains($0) && FileManager.default.fileExists(atPath: $0)
-        }
-        if !missing.isEmpty {
-            environment["PATH"] = ([existing] + missing).joined(separator: ":")
-        }
-        return environment
-    }
-
-    /// Where a named tool actually is, for saying so in an error.
-    static func find(_ name: String) -> String? {
-        let paths = (environment()["PATH"] ?? "").split(separator: ":").map(String.init)
-        for directory in paths {
-            let candidate = (directory as NSString).appendingPathComponent(name)
-            if isRunnable(URL(fileURLWithPath: candidate)) { return candidate }
-        }
-        return nil
-    }
+    /// `Tools` owns the PATH repair -- a GUI app inherits roughly
+    /// /usr/bin:/bin and nothing a .zprofile added, so a Homebrew ffmpeg is
+    /// visible in Terminal and invisible here. This file used to carry its
+    /// own copy of that list and its own `find`; two copies are exactly
+    /// what the comment on `Tools` says it was moved into the kit to
+    /// prevent, so there is now one.
+    static func environment() -> [String: String] { Tools.environment() }
 
     /// Holds the process so a watchdog can signal it.
     ///

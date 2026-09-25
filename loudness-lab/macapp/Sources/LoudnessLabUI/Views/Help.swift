@@ -102,10 +102,20 @@ enum Help {
         new file. ffmpeg will not do that on its own: it carries the text \
         and drops Serato's frames, measured as two in and none out.
 
-        The cues land on the right beat because the timing survives. \
-        Measured on a real Serato file: decode, encode at 320, decode \
-        again, and the result is the same length with a maximum sample \
-        difference of 0.00003 — the codec, and no shift at all.
+        The cues land on the right beat because the timing survives: \
+        decode, encode at 320, decode again, and the result is the same \
+        length with a maximum sample difference of 0.00003 — the codec, \
+        and no shift at all. LAME writes its delay and padding into the \
+        header and the decoder gives them back.
+
+        That was measured on a file this project made, whose marker frame \
+        carries a byte ramp rather than real cues. It shows that ffmpeg \
+        drops the frames and that a copied tag arrives intact, which is \
+        what the container cares about. What it does not show is Serato \
+        reading the result — no Serato has opened one. Copying the tag \
+        whole is what makes that a reasonable bet: the bytes are never \
+        interpreted, so there is nothing to misunderstand. It is still a \
+        bet until a real library confirms it.
 
         FLAC and AAC carry artist, title, album and artwork — for now. Serato \
         does store markers in both (base64 in FLAC's Vorbis comments, \
@@ -114,6 +124,152 @@ enum Help {
         safe; going MP3 to FLAC would mean translating between two \
         formats, and that needs checking against a real Serato file \
         rather than reasoning.
+        """)
+
+    // MARK: - Dynamics
+
+    static let targetLRA = HelpEntry(
+        title: "Loudness range",
+        summary: "Widen the gap between the quiet parts and the loud ones. Off at zero.",
+        detail: """
+        What the loudness war took out over BARS, as opposed to over \
+        milliseconds: the difference between a verse and a chorus, a breakdown \
+        and a drop. Measured as LRA, the spread of a track's 3-second \
+        loudness, and this widens it to the figure you set.
+
+        It only ever turns things DOWN. A master that has been squashed to the \
+        ceiling has no headroom left -- that is what made it one -- so raising \
+        the loud parts would clip, or be trimmed straight back out. The \
+        loudest 5% is left exactly where it is and everything below it is \
+        pulled away, which costs the track some average loudness. The \
+        levelling at the end of the chain gives that back, so the drop ends up \
+        LOUDER than it started. What changed is what sits around it.
+
+        Nothing is recovered here. A compressor that took 8 dB off a chorus \
+        did not write down what it removed, so what comes back is a plausible \
+        shape rather than the original one. That is worth doing and worth \
+        being honest about.
+
+        A caution for DJ use, which is what this is for: a track that drops 8 \
+        LU in the breakdown disappears under the next record. Club masters are \
+        flat partly because of the loudness war and partly because flat works \
+        in a mix. Start low.
+        """)
+
+    static let maxAttenuation = HelpEntry(
+        title: "Pull down at most",
+        summary: "How far a quiet passage may be turned down to widen the range.",
+        detail: """
+        A cap rather than an estimate. Past a few dB the intro of a record \
+        stops being quiet and starts being missing, and there is no \
+        measurement that says where that line is -- so it is a limit you set \
+        rather than one the tool works out.
+
+        When the cap is reached before the target, the run says so instead of \
+        quietly falling short. Raising the target past what the cap allows \
+        otherwise looks like a setting that does nothing.
+        """)
+
+    static let transient = HelpEntry(
+        title: "Attack",
+        summary: "Give back the punch a fast limiter flattened. Off at zero.",
+        detail: """
+        The other half of "over-compressed", and the one that usually matters \
+        more here: what was taken out over MILLISECONDS. The front of a kick, \
+        the crack of a snare.
+
+        Two envelopes of the same signal, one fast enough to follow a beater \
+        click and one that cannot. Where the fast one stands above the slow \
+        one there is an onset, and only there is any gain applied. A sustained \
+        note gives both envelopes the same value and therefore no gain at all \
+        -- which is what separates this from an expander. It cannot turn a \
+        quiet passage down, so it cannot breathe.
+
+        The measurement is crest, the gap between a track's peak and its \
+        loudness. Measured here, about half a decibel of crest comes back per \
+        decibel asked for; the setting is a ceiling on the gain at an onset, \
+        not a promise about the statistic.
+
+        This is broadband, unlike the kick punch above, which is deliberately \
+        band-limited and deliberately does NOT move crest.
+        """)
+
+    static let minCrest = HelpEntry(
+        title: "Skip above",
+        summary: "A track already this peaky was never flattened, so leave it.",
+        detail: """
+        Crest is peak minus loudness. Above this figure the attack stage \
+        declines, on the same principle as the sub's activity gate: most of \
+        what a good policy does is decline.
+
+        Eleven, measured on this library rather than taken from a book. \
+        Sixteen folders read 9.6 to 10.7 and then 11.8 to 12.9, with a gap of \
+        just over a decibel between them — wider than any other gap in the \
+        set. The hard-limited records sit on one side of it and everything \
+        else on the other.
+
+        It was 12 to begin with, from the published range, and eleven folders \
+        appeared to confirm it. Five more landed between 11.8 and 12.2 and \
+        showed 12 cutting that upper group in half.
+
+        Measure a folder first and read the survey. Setting this from taste \
+        rather than from the numbers is how a stage ends up working on \
+        material that never needed it.
+        """)
+
+    static let air = HelpEntry(
+        title: "Air",
+        summary: "Generate a top end where a shelf has nothing to lift. Off at zero.",
+        detail: """
+        The one control here that INVENTS. Everything else restores something \
+        a measurement says was taken away; this makes harmonics that were \
+        never in the recording and mixes them in.
+
+        That is the point of it. A high shelf multiplies what is in the band, \
+        so where the band is empty — a lossy codec cut it, a tape rolled off — \
+        a shelf raises the noise under it and nothing else. A harmonic \
+        generator takes the octave below and folds its overtones upward, so 5 \
+        kHz of material becomes 10 and 15 and 20 kHz of new content. Musically \
+        related to the source, which is why it reads as detail rather than as \
+        hiss.
+
+        Measured on a track with everything above 16 kHz removed: a 3 dB shelf \
+        moved the 16–22 kHz band by 3 dB, which is 3 dB more of nothing. 3 dB \
+        of air moved it by 16.
+
+        The number is what the 8–20 kHz band actually rises by, not a mix \
+        level — the harmonics are scaled to hit it and the run reports what it \
+        got. Loudness barely moves, which is the famous thing about an \
+        exciter; peak moves a great deal, because the harmonics land on the \
+        source's own peaks. The levelling that ends the chain takes that back \
+        out, but it is why this is a small control.
+
+        Check the survey's cliff column first. A folder with a gentle roll-off \
+        already has a top end and this is taste; one with a wall has had it \
+        thrown away by an encoder, and the honest fix there is a better rip.
+
+        With "Size it per track against a reference" on, this number becomes \
+        a ceiling rather than a flat amount: each track is measured against \
+        the reference folder's own 8–20 kHz band and given air up to this \
+        much, in proportion to how much brighter the reference already is -- \
+        the same idea as the sub's cap, applied to the top end instead of \
+        the bottom.
+        """)
+
+    static let airTune = HelpEntry(
+        title: "Air from",
+        summary: "Where the harmonics are generated from, upward.",
+        detail: """
+        The exciter high-passes the track at this frequency and makes \
+        harmonics of what it finds, so the new content lands an octave above \
+        and up. 3.5 kHz feeds 7 kHz and above — presence and air.
+
+        Lower is fuller and cheaper. Higher is more sizzle and costs a great \
+        deal more headroom: asking for 3 dB of air on the same fixture cost \
+        2.2 dB of peak tuned at 2 kHz, 4.3 dB at 3.5 kHz and 7.3 dB at 5 kHz.
+
+        It does not change how much air comes out — that is set by the amount, \
+        and normalised — only what it is made of and what it costs.
         """)
 
     static let output = HelpEntry(
@@ -126,6 +282,11 @@ enum Help {
         The measurements do not follow it. They stay in one database, \
         because pointing the output somewhere else for one run should not \
         hide a folder you measured last week.
+
+        "Clear" deletes every FLAC, MP3 and M4A sitting directly in this \
+        folder -- both sides of every A/B pair -- so a new batch is not \
+        mixed in with an old one. Nothing else in the folder is touched: \
+        not the manifest, not anything put there by hand.
         """)
 
     // MARK: - Profile
@@ -156,6 +317,12 @@ enum Help {
         5 dB between one era's median and the next, so a curve fitted to the \
         era moves the median and leaves most tracks further from the target \
         than they started.
+
+        "Save…" keeps whatever is on the sliders right now under a name of \
+        your own, listed below the built-in profiles. It carries no measured \
+        claim -- unlike the profiles above it, it is not backed by a \
+        corpus -- so it cannot be saved under one of their names. "Delete" \
+        removes a saved one; the built-in profiles cannot be deleted.
         """)
 
     // MARK: - De-clipping
@@ -224,6 +391,10 @@ enum Help {
         track gets the same number of decibels whether it needs them or not. \
         With it on, each track is measured against the reference folder's low \
         end and given what it is actually short of.
+
+        Air is sized the same way, against the reference folder's top end, \
+        whenever both this and Air are on -- Air's own amount then reads as \
+        a cap rather than a flat number every track gets.
 
         This needs a reference to measure against. Without one the setting \
         cannot be honoured, and the run stops rather than quietly applying \
@@ -425,10 +596,12 @@ enum Help {
 
     static let results = HelpEntry(
         title: "Results columns",
-        summary: "Sub and Punch are what was applied. Clips and Lift are the de-clipper.",
+        summary: "Sub, Air and Punch are what was applied. Clips and Lift are the de-clipper.",
         detail: """
-        Sub and Punch are what was actually applied to that track, which with \
-        per-track sizing on is not the same as what was asked for.
+        Sub, Air and Punch are what was actually applied to that track, which \
+        with per-track sizing on is not the same as what was asked for. Air \
+        reads "—" for a manifest written before this column existed, rather \
+        than a false "+0.00 dB".
 
         Clips is the number of clipped runs restored. Lift is the median \
         amount one restored peak gained -- deliberately not the change in the \
@@ -447,6 +620,8 @@ enum Help {
         HelpSection("Clipped peaks", [declip, declipMax]),
         HelpSection("Sub bass", [amount, auto, reference, maxAmount, minActivity]),
         HelpSection("Attack", [punch, punchDecay]),
+        HelpSection("Dynamics", [targetLRA, maxAttenuation, transient, minCrest]),
+        HelpSection("Air", [air, airTune]),
         HelpSection("Level", [target, estimator, peakCeiling]),
         HelpSection("The run", [limit, format, output, compare, dryRun]),
         HelpSection("Listening", [switching, matchLoudness, blind]),

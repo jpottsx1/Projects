@@ -875,6 +875,96 @@ final class GoldenTests: XCTestCase {
                        "every track should have a low-end figure")
     }
 
+    /// A forgotten folder's tracks disappear, and so does everything that
+    /// hangs off them by `ON DELETE CASCADE` -- not just the row someone
+    /// would think to check.
+    func testForgettingAFolderRemovesItsTracksAndCascades() throws {
+        let library = try openGoldenLibrary()
+        let before = try library.tracks()
+        let labels = Library.folderLabels(before.map(\.path))
+        let label = try XCTUnwrap(labels.values.first)
+        let matching = before.filter { labels[$0.path] == label }
+        XCTAssertFalse(matching.isEmpty)
+
+        let removed = try library.forget(folder: label)
+        XCTAssertEqual(removed, matching.count)
+
+        let after = try library.tracks()
+        XCTAssertEqual(after.count, before.count - matching.count)
+        let remainingPaths = Set(after.map(\.path))
+        for row in matching {
+            XCTAssertFalse(remainingPaths.contains(row.path))
+        }
+
+        // Cascaded: no band data survives, even though nothing asked for
+        // `bands` by name -- the row simply is not there to join against.
+        let shape = try library.lowEndShape()
+        for row in matching {
+            XCTAssertNil(shape[row.path])
+        }
+
+        // Forgetting again finds nothing left to remove.
+        XCTAssertEqual(try library.forget(folder: label), 0)
+    }
+
+    /// Naming one folder leaves every other folder's numbers alone -- the
+    /// whole point of scoping by label rather than clearing the library.
+    func testForgettingOneFolderLeavesAnotherAlone() throws {
+        let library = try openGoldenLibrary()
+        var elsewhere = Library.Analysis(
+            url: URL(fileURLWithPath: "/elsewhere/other-folder/track.flac"),
+            sizeBytes: 1, mtimeNanoseconds: 1, status: "ok")
+        elsewhere.loudness = BS1770.Result(
+            lufsI: -12, lra: 5, sMax: -8, sP95: -9, sP90: -10, sP50: -11,
+            sP10: -13, truePeakDBTP: -1, samplePeakDBFS: -1,
+            clippedSamples: 0, clipRuns: 0, crestDB: 10, shortTerm: [])
+        elsewhere.bands = [Spectrum.Band(bandHz: 40, ltasDB: -20, shapeDB: -20,
+                                         p10DB: -22, p90DB: -18, sideMidDB: 0)]
+        try library.store(elsewhere)
+
+        let before = try library.tracks()
+        let labels = Library.folderLabels(before.map(\.path))
+        let goldenLabel = try XCTUnwrap(
+            labels.first { $0.key.contains("Golden/mp3") }?.value)
+
+        try library.forget(folder: goldenLabel)
+
+        let after = try library.tracks()
+        XCTAssertEqual(after.map(\.path), [elsewhere.url.path],
+                       "only the untouched folder's track should remain")
+    }
+
+    /// The library-wide reset: every folder gone, not just the ones a
+    /// survey happened to have open, so a fresh set of reference standards
+    /// can be ingested without yesterday's still counting toward a curve.
+    func testForgettingEverythingClearsTheWholeLibrary() throws {
+        let library = try openGoldenLibrary()
+        let before = try library.tracks()
+        XCTAssertFalse(before.isEmpty)
+
+        let removed = try library.forgetEverything()
+        XCTAssertEqual(removed, before.count)
+        XCTAssertTrue(try library.tracks().isEmpty)
+        XCTAssertTrue(try library.lowEndShape().isEmpty, "cascade should clear bands too")
+
+        // Nothing left to remove the second time.
+        XCTAssertEqual(try library.forgetEverything(), 0)
+    }
+
+    /// A brand new, not-yet-measured folder must still see every folder
+    /// already measured -- that reference list is what "size it per track
+    /// against a reference" needs, and it is exactly the folder with
+    /// nothing of its own yet that has to name someone else's.
+    func testSurveyOfAnUnmeasuredFolderStillListsFoldersToReferenceAgainst() throws {
+        let library = try openGoldenLibrary()
+        let unmeasured = URL(fileURLWithPath: "/never/measured/anything")
+        let survey = try Survey.of(library, under: [unmeasured])
+
+        XCTAssertEqual(survey.measured, 0, "nothing of its own was measured")
+        XCTAssertFalse(survey.folders.isEmpty,
+                       "the library's existing folders should still be listed")
+    }
+
     /// How much each track gets when the sub is sized per track rather than
     /// set by hand. This is the number that decides what actually happens to
     /// a library under the `restore` and `disco-70s` profiles, so it is
@@ -942,6 +1032,61 @@ final class GoldenTests: XCTestCase {
             "/m/NOW 100 Hits Party/CD1/b.mp3"])
         XCTAssertEqual(Set(labels.values).count, 2,
                        "two different CD1 folders were merged into one corpus")
+    }
+
+    /// Four discs of the same release, nothing measured directly in the
+    /// release folder itself: one label, not four.
+    func testAMultiDiscReleaseCollapsesToOneRow() {
+        let labels = Library.folderLabels(
+            (1...4).map { "/music/Now Yearbook 99 (2026)/CD\($0)/track.mp3" })
+        XCTAssertEqual(Set(labels.values), ["Now Yearbook 99 (2026)"])
+    }
+
+    /// Ripping software's ordinary naming: the disc folder repeats the
+    /// release name in full and puts the disc number on the end, not a
+    /// bare "CD4". Anchoring to the whole name would miss this -- which
+    /// is the common case, not the rare one.
+    func testADiscSuffixAfterTheRepeatedAlbumNameStillCollapses() {
+        let labels = Library.folderLabels((1...4).map {
+            "/music/NOW 100 Hits Party/NOW - 100 HITS - PARTY - CD\($0)/track.mp3"
+        })
+        XCTAssertEqual(Set(labels.values), ["NOW 100 Hits Party"])
+    }
+
+    /// The collapse is structural, not a name match -- so it must not let
+    /// two DIFFERENT releases' identically-named discs merge, even while
+    /// one release's own discs collapse together.
+    func testADifferentCompilationsCD1StaysSeparateFromAMultiDiscOne() {
+        let labels = Library.folderLabels([
+            "/music/Now Yearbook 99 (2026)/CD1/a.mp3",
+            "/music/Now Yearbook 99 (2026)/CD2/b.mp3",
+            "/music/NOW 100 Hits Party/CD1/c.mp3"])
+        XCTAssertEqual(Set(labels.values).count, 2)
+        XCTAssertEqual(labels["/music/Now Yearbook 99 (2026)/CD1/a.mp3"],
+                       labels["/music/Now Yearbook 99 (2026)/CD2/b.mp3"])
+        XCTAssertTrue(labels.values.contains("Now Yearbook 99 (2026)"))
+        XCTAssertTrue(labels.values.contains("NOW 100 Hits Party/CD1"))
+    }
+
+    /// A bonus track sitting directly in the release folder means the
+    /// folder is not a pure disc container -- collapsing it would conflate
+    /// "in the folder itself" with "in one of its discs".
+    func testATrackAlongsideTheDiscsBlocksTheCollapse() {
+        let labels = Library.folderLabels([
+            "/music/Now Yearbook 99 (2026)/CD1/a.mp3",
+            "/music/Now Yearbook 99 (2026)/CD2/b.mp3",
+            "/music/Now Yearbook 99 (2026)/bonus.mp3"])
+        XCTAssertEqual(Set(labels.values).count, 3)
+    }
+
+    /// Folder names that merely happen to share a parent -- not disc
+    /// numbers -- must never collapse. This is the ordinary shape of a
+    /// music library (many different albums under one root), so a false
+    /// positive here is not a corner case.
+    func testUnrelatedSiblingFoldersDoNotCollapse() {
+        let labels = Library.folderLabels([
+            "/music/Modern/full.mp3", "/music/Old/rolled off.mp3"])
+        XCTAssertEqual(Set(labels.values).count, 2)
     }
 
     /// The vectorised true-peak detector against the scalar one it replaced.

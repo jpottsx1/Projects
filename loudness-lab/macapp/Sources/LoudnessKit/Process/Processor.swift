@@ -1,5 +1,13 @@
 import Foundation
 
+/// SET ASIDE. The app runs `loudness-lab subbass` instead.
+///
+/// Kept, with its golden tests, because it is validated work that costs
+/// nothing sitting here and is the fallback if bundling Python ever
+/// becomes the better answer. Nothing in the app calls it: see
+/// `Engine.run`, which builds the command line and drives the progress bar
+/// from the JSON the tool writes.
+///
 /// One track through the chain, off the main thread and several at a time.
 ///
 /// This lived in the app's Engine, which is `@MainActor` -- so every decode,

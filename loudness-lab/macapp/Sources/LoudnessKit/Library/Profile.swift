@@ -28,6 +28,17 @@ public struct Profile: Codable, Equatable, Sendable {
     public var punchDecay: Double = 8.0
     public var declip: Bool = false
     public var declipMax: Double = 6.0
+    // Putting dynamics back. Both off by default: they reshape what a
+    // compressor left rather than recovering anything, so they are a
+    // choice about a record and not a repair every record wants.
+    public var targetLRA: Double = 0.0       // loudness range to widen to
+    public var maxAttenuation: Double = 6.0  // how far the quiet parts may drop
+    public var transient: Double = 0.0       // dB of emphasis at an onset
+    public var minCrest: Double = 11.0       // above this, nothing flattened it
+    // Air. The one stage that invents rather than restores, so off by
+    // default and a taste control rather than a repair.
+    public var air: Double = 0.0             // dB of generated harmonics
+    public var airTune: Double = 3500.0      // Hz they are generated from
 
     public init() {}
 
@@ -40,6 +51,52 @@ public struct Profile: Codable, Equatable, Sendable {
         case minActivity = "min_activity"
         case punchDecay = "punch_decay"
         case declipMax = "declip_max"
+        case transient
+        case targetLRA = "target_lra"
+        case maxAttenuation = "max_attenuation"
+        case minCrest = "min_crest"
+        case air
+        case airTune = "air_tune"
+    }
+
+    /// Tolerant of a key that is not there, which the synthesised decoder
+    /// is not: a property's default value does NOT make its key optional.
+    ///
+    /// The manifest the command line writes leaves `description` out
+    /// entirely -- it is a property of the named profile, not of the run --
+    /// and one missing key fails the whole document. That would have shown
+    /// up as the app processing a folder correctly and then showing no
+    /// results at all, which is a long way from the cause.
+    ///
+    /// It also means a profile written by a newer version, or an older one,
+    /// still loads with the fields it does have.
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        let fallback = Profile()
+        func number(_ key: CodingKeys, _ default_: Double) throws -> Double {
+            try values.decodeIfPresent(Double.self, forKey: key) ?? default_
+        }
+        description = try values.decodeIfPresent(String.self, forKey: .description)
+            ?? fallback.description
+        target = try number(.target, fallback.target)
+        estimator = try values.decodeIfPresent(String.self, forKey: .estimator)
+            ?? fallback.estimator
+        peakCeiling = try number(.peakCeiling, fallback.peakCeiling)
+        auto = try values.decodeIfPresent(Bool.self, forKey: .auto) ?? fallback.auto
+        reference = try values.decodeIfPresent(String.self, forKey: .reference)
+        amount = try number(.amount, fallback.amount)
+        maxAmount = try number(.maxAmount, fallback.maxAmount)
+        minActivity = try number(.minActivity, fallback.minActivity)
+        punch = try number(.punch, fallback.punch)
+        punchDecay = try number(.punchDecay, fallback.punchDecay)
+        declip = try values.decodeIfPresent(Bool.self, forKey: .declip) ?? fallback.declip
+        declipMax = try number(.declipMax, fallback.declipMax)
+        targetLRA = try number(.targetLRA, fallback.targetLRA)
+        maxAttenuation = try number(.maxAttenuation, fallback.maxAttenuation)
+        transient = try number(.transient, fallback.transient)
+        minCrest = try number(.minCrest, fallback.minCrest)
+        air = try number(.air, fallback.air)
+        airTune = try number(.airTune, fallback.airTune)
     }
 
     public static let estimators = ["lufs_i", "s_p50", "s_p90", "s_p95", "s_max"]
@@ -121,7 +178,91 @@ public struct Profile: Codable, Equatable, Sendable {
         // floor gets mistaken for a bassline.
         eighties.minActivity = 20
 
+        // Measured on "Now Yearbook 99 (2026)", 82 tracks over four CDs,
+        // against the same 43-track modern reference the others use. The
+        // first corpus here whose problem is NOT a missing low end.
+        //
+        //   low end 31.5-63 Hz  CD4 -18.53  CD1 -18.43  CD3 -18.21  CD2 -17.38
+        //   reference           -14.89
+        //
+        // A deficit of 2.5 to 3.6 dB, against 6.2-10.9 for the eighties and
+        // 4.9-7.4 for the disco. By 1999 the bottom end was being put there.
+        //
+        // What IS wrong with it is everything the loudness war did:
+        //
+        //   median LUFS-I  -9.48      median true peak  +0.86 dBTP
+        //   median s_p95   -7.71      median LRA         5.40
+        //   median crest              10.01 dB
+        //   arrived clipped           36 of 82 (43.9%), CD4 at 60%
+        //   worst offender            9652 clipped runs
+        //
+        // Crest at 10.0 is squarely in the hard-limited band (8-11) and LRA
+        // at 5.4 in the loudness-war band (4-6). Both dynamics stages have
+        // something to do here, which is not true of any other corpus in
+        // this library. Per disc:
+        //
+        //   disc   LRA   crest   clipped
+        //   CD2    6.49   9.88     29%
+        //   CD3    5.45   9.95     38%
+        //   CD4    5.66  10.47     60%
+        //   CD1    4.44  10.73     50%
+        //
+        // LRA and crest run in OPPOSITE directions. CD2 has the most range
+        // left and the least punch; CD1 the reverse. A single "how squashed
+        // is it" number would call CD2 the healthiest and CD1 the worst,
+        // when they are damaged in different ways and want different
+        // stages. Measured again over eleven folders and 216 tracks the
+        // relationship holds at r = -0.85.
+        //
+        // Two figures from that larger measurement bear on this profile.
+        // The modern reference corpus sits at crest 10.21 and LRA 5.45 --
+        // the same band as this 1999 material, and below every pre-1990
+        // folder measured -- so there is no reference to aim at for
+        // dynamics and these targets stay absolute. The top end needs nothing: these discs run 3.6 to
+        // 6.4 dB ABOVE the reference at 8-16 kHz.
+        var nineties = Profile()
+        nineties.description = "Late 1990s pop. Low end nearly there "
+            + "(2.5-3.6 dB short), but hard-limited: crest 10.0, LRA 5.4, "
+            + "44% arrived clipped. Needs a reference. Lossy."
+        nineties.auto = true
+        // Just above the measured worst of 3.64, on the same rule that gave
+        // disco 8 against 7.35 and the eighties 11 against 10.92.
+        nineties.maxAmount = 4
+        nineties.minActivity = 20
+        // Between the eighties (0-10%, off) and the disco reissue (53-76%,
+        // on). Expect the SMALLEST gain here: de-clipping returns about
+        // 2 dB at light clipping and 0.4 at heavy, and 9652 runs is heavy.
+        nineties.declip = true
+        // Off. 2-6 kHz here is programmed hats and samples, and the top end
+        // already sits above the reference.
+        nineties.punch = 0
+        // From 5.40, deliberately modest: +1.6 LU drops the quietest
+        // passages 1.6 dB and never approaches the cap. A bigger target
+        // would make these duck under the next record, which for a DJ is
+        // the failure and not the feature.
+        nineties.targetLRA = 7
+        // Crest 10.01 -> about 11.5 at roughly half a dB per dB, landing
+        // just under the gate rather than past it. The exchange rate was
+        // measured on a synthetic fixture, so that is an extrapolation
+        // until this corpus is processed and measured again. All four discs
+        // (9.88 to 10.73) pass the gate and the spread is only 0.85 dB, so
+        // unlike the sub, one figure genuinely suits the whole corpus.
+        nineties.transient = 3
+        // Eleven, not twelve. The threshold started at 12 from the
+        // published range and on eleven folders looked vindicated, with
+        // unlimited-era material at 11.87 to 12.11 and 1999 pop at 9.88 to
+        // 10.73. Five more folders filled the gap in. Sixteen now read
+        //
+        //   9.63 9.88 9.95 10.21 10.47 10.73 | 11.78 11.82 11.87 11.91
+        //   11.95 12.10 12.11 12.15 12.23 12.92
+        //
+        // and the largest gap is 10.73 to 11.78, midpoint 11.25. A gate at
+        // 12 cuts the upper cluster in half. It changes nothing for this
+        // corpus, which passes either gate; it changes everything else.
+        nineties.minCrest = 11
+
         return ["level-only": levelOnly, "restore": restore,
-                "disco-70s": disco, "eighties": eighties]
+                "disco-70s": disco, "eighties": eighties,
+                "nineties": nineties]
     }()
 }

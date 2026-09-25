@@ -69,6 +69,20 @@ public struct Survey: Sendable {
         /// so there is no folder to aim at. It needs an absolute target,
         /// and this is the measurement that would set one.
         public var lra: Double?
+        /// Median crest, per folder: true peak minus integrated loudness,
+        /// the peak-to-loudness ratio.
+        ///
+        /// The OTHER half of "over-compressed", and a different injury from
+        /// the one LRA describes. LRA is what a slow compressor took out
+        /// over bars; this is what a fast limiter took out over
+        /// milliseconds. A record limited hard measures 8 to 11 dB, one
+        /// that was not measures 13 and up.
+        ///
+        /// Both are needed because a folder can be short of one and not the
+        /// other, and the stage that repairs one does nothing for the
+        /// other. Reading only LRA would have the attack stage set from a
+        /// number that says nothing about attacks.
+        public var crest: Double?
         /// Median shape per band, 31.5 to 63 Hz.
         public let curve: [Double: Double]
         /// Mean of the above -- one number to sort and compare folders on.
@@ -96,6 +110,7 @@ public struct Survey: Sendable {
     public var medianLUFSI: Double?
     public var medianSP95: Double?
     public var medianLRA: Double?
+    public var medianCrest: Double?
     public var medianTruePeak: Double?
     public var clipping = Clipping()
     public var targets: [TargetRow] = []
@@ -112,42 +127,52 @@ public struct Survey: Sendable {
         var survey = Survey()
         let rows = try library.tracks(under: roots)
         survey.measured = rows.count
-        guard !rows.isEmpty else { return survey }
 
-        survey.medianLUFSI = BS1770.percentile(rows.compactMap(\.lufsI), 50)
-        survey.medianSP95 = BS1770.percentile(rows.compactMap(\.sP95), 50)
-        survey.medianLRA = BS1770.percentile(rows.compactMap(\.lra), 50)
-        survey.medianTruePeak = BS1770.percentile(rows.compactMap(\.truePeakDBTP), 50)
+        // Everything below this point that depends on the CURRENT
+        // selection's own rows -- medians, clipping, targets -- has
+        // nothing to compute if that selection has never been measured.
+        // The folder table further down does not: it is library-wide by
+        // design (see below), and skipping it here would mean a brand
+        // new, not-yet-measured folder can never see the reference list
+        // it needs to be sized against -- exactly the case this feature
+        // exists for.
+        if !rows.isEmpty {
+            survey.medianLUFSI = BS1770.percentile(rows.compactMap(\.lufsI), 50)
+            survey.medianSP95 = BS1770.percentile(rows.compactMap(\.sP95), 50)
+            survey.medianLRA = BS1770.percentile(rows.compactMap(\.lra), 50)
+            survey.medianCrest = BS1770.percentile(rows.compactMap(\.crestDB), 50)
+            survey.medianTruePeak = BS1770.percentile(rows.compactMap(\.truePeakDBTP), 50)
 
-        // --- clipping ---
-        var clipping = Clipping()
-        clipping.measured = rows.count
-        let withRuns = rows.filter { ($0.clipRuns ?? 0) > 0 }
-        clipping.tracks = withRuns.count
-        clipping.heavy = rows.filter { ($0.clipRuns ?? 0) > 100 }.count
-        clipping.medianRuns = Int(BS1770.percentile(
-            withRuns.map { Double($0.clipRuns ?? 0) }, 50) ?? 0)
-        if let worst = withRuns.max(by: { ($0.clipRuns ?? 0) < ($1.clipRuns ?? 0) }) {
-            clipping.worst = (worst.name, worst.clipRuns ?? 0)
-        }
-        survey.clipping = clipping
+            // --- clipping ---
+            var clipping = Clipping()
+            clipping.measured = rows.count
+            let withRuns = rows.filter { ($0.clipRuns ?? 0) > 0 }
+            clipping.tracks = withRuns.count
+            clipping.heavy = rows.filter { ($0.clipRuns ?? 0) > 100 }.count
+            clipping.medianRuns = Int(BS1770.percentile(
+                withRuns.map { Double($0.clipRuns ?? 0) }, 50) ?? 0)
+            if let worst = withRuns.max(by: { ($0.clipRuns ?? 0) < ($1.clipRuns ?? 0) }) {
+                clipping.worst = (worst.name, worst.clipRuns ?? 0)
+            }
+            survey.clipping = clipping
 
-        // --- what levelling would cost, per target ---
-        let levels = rows.compactMap { row -> (Double, Double)? in
-            guard let value = row.sP95 ?? row.lufsI, value.isFinite else { return nil }
-            return (value, row.truePeakDBTP ?? -.infinity)
-        }
-        if !levels.isEmpty {
-            for target in stride(from: -10.0, through: -18.0, by: -2.0) {
-                let gains = levels.map { (target - $0.0, $0.1) }
-                let count = Double(gains.count)
-                survey.targets.append(TargetRow(
-                    targetLUFS: target,
-                    needBoost: Double(gains.filter { $0.0 > 0 }.count) / count,
-                    bigBoost: Double(gains.filter { $0.0 > 3 }.count) / count,
-                    wouldExceedCeiling: Double(gains.filter {
-                        $0.1.isFinite && $0.1 + $0.0 > peakCeiling
-                    }.count) / count))
+            // --- what levelling would cost, per target ---
+            let levels = rows.compactMap { row -> (Double, Double)? in
+                guard let value = row.sP95 ?? row.lufsI, value.isFinite else { return nil }
+                return (value, row.truePeakDBTP ?? -.infinity)
+            }
+            if !levels.isEmpty {
+                for target in stride(from: -10.0, through: -18.0, by: -2.0) {
+                    let gains = levels.map { (target - $0.0, $0.1) }
+                    let count = Double(gains.count)
+                    survey.targets.append(TargetRow(
+                        targetLUFS: target,
+                        needBoost: Double(gains.filter { $0.0 > 0 }.count) / count,
+                        bigBoost: Double(gains.filter { $0.0 > 3 }.count) / count,
+                        wouldExceedCeiling: Double(gains.filter {
+                            $0.1.isFinite && $0.1 + $0.0 > peakCeiling
+                        }.count) / count))
+                }
             }
         }
 
@@ -167,11 +192,15 @@ public struct Survey: Sendable {
         var counts: [String: Int] = [:]
         var clipped: [String: Int] = [:]
         var ranges: [String: [Double]] = [:]
+        var crests: [String: [Double]] = [:]
         for row in everything {
             let label = labels[row.path] ?? "(root)"
             counts[label, default: 0] += 1
             if (row.clipRuns ?? 0) > 0 { clipped[label, default: 0] += 1 }
             if let lra = row.lra, lra.isFinite { ranges[label, default: []].append(lra) }
+            if let crest = row.crestDB, crest.isFinite {
+                crests[label, default: []].append(crest)
+            }
         }
         let referenceName = wanted.flatMap { Library.resolveReference(curves, $0) }
         survey.reference = referenceName
@@ -196,6 +225,9 @@ public struct Survey: Sendable {
             var row = FolderLowEnd(folder: folder, tracks: counts[folder] ?? 0,
                                    clipped: clipped[folder] ?? 0,
                                    lra: ranges[folder].flatMap {
+                                       BS1770.percentile($0, 50)
+                                   },
+                                   crest: crests[folder].flatMap {
                                        BS1770.percentile($0, 50)
                                    },
                                    curve: curve, mean: mean, deficitVsReference: nil)
@@ -237,6 +269,7 @@ public struct Survey: Sendable {
         out += ["  median LUFS-I   \(dB(medianLUFSI))",
                 "  median s_p95    \(dB(medianSP95))",
                 "  median LRA      \(dB(medianLRA))",
+                "  median crest    \(dB(medianCrest)) dB",
                 "  median peak     \(dB(medianTruePeak)) dBTP", ""]
 
         out += ["Masters that were already clipped", String(repeating: "-", count: 62),
@@ -280,24 +313,122 @@ public struct Survey: Sendable {
                                   range, row.folder))
             }
         }
+        if folders.contains(where: { $0.lra != nil || $0.crest != nil }) {
+            out += ["", "Dynamics by folder — what the loudness war took out",
+                    String(repeating: "-", count: 62),
+                    "  Two different injuries, and the stage that repairs one does",
+                    "  nothing for the other, so both are here.",
+                    "",
+                    "  LRA is range over BARS: verse against chorus, breakdown",
+                    "  against drop. Loudness-war pop runs 4 to 6, a well-mastered",
+                    "  record 8 to 10. Low means the 'Loudness range' setting has",
+                    "  something to do — but keep the target modest, because a track",
+                    "  that ducks 8 LU in the breakdown disappears under the next one.",
+                    "",
+                    "  Crest is punch over MILLISECONDS: peak minus loudness. Low",
+                    "  means the 'Attack' setting has something to do, and it is the",
+                    "  one that makes a record hit harder without making it duck.",
+                    "  Measured on this library, limited masters read 9.6 to 10.7",
+                    "  and the rest 11.8 to 12.9, so the line sits at 11.",
+                    "",
+                    "  'range' needs BOTH to be low, not LRA alone. A seven-minute",
+                    "  disco groove runs at one level because that is the record, not",
+                    "  because a compressor did it -- and expanding it would invent",
+                    "  dynamics it never had. Low LRA with crest intact is the",
+                    "  arrangement; low LRA with crest gone is the mastering.",
+                    "",
+                    "  tracks    LRA   crest  clipped   wants                  folder"]
+            for row in folders.sorted(by: { ($0.crest ?? 99) < ($1.crest ?? 99) }) {
+                let range = row.lra.map { String(format: "%5.2f", $0) } ?? "    -"
+                let crest = row.crest.map { String(format: "%5.2f", $0) } ?? "    -"
+                // Said plainly rather than left to be worked out from three
+                // columns, and "wants" rather than "needs" because these are
+                // thresholds, not a diagnosis.
+                //
+                // The crest figure of 11 is where this library's own
+                // distribution breaks. Sixteen folders read 9.63 to 10.73
+                // and then 11.78 to 12.92, with a 1.05 dB gap between --
+                // wider than any other gap in the set. It was 12, from the
+                // published range, until five more folders landed between
+                // 11.78 and 12.15 and showed 12 cutting that upper cluster
+                // in half.
+                //
+                // `range` deliberately requires a low crest as well. Asking
+                // LRA alone marked every disco compilation in the library as
+                // wanting it, on records whose crest was the highest measured
+                // anywhere -- a groove that holds one level for seven minutes
+                // is the arrangement, and expanding it invents dynamics the
+                // record never had.
+                var wants: [String] = []
+                let flattened = (row.crest ?? 99) < 11.0
+                if row.clippedShare > 0.20 { wants.append("declip") }
+                if let lra = row.lra, lra < 6.0, flattened { wants.append("range") }
+                if flattened, row.crest != nil { wants.append("attack") }
+                let verdict = (wants.isEmpty ? "—" : wants.joined(separator: "+"))
+                    .padding(toLength: 23, withPad: " ", startingAt: 0)
+                out.append(String(format: "  %6d  %@   %@    %3.0f%%    %@%@",
+                                  row.tracks, range, crest,
+                                  row.clippedShare * 100, verdict, row.folder))
+            }
+        }
+
         if !folders.isEmpty {
-            out += ["", "Top end by folder, 8-16 kHz"
+            out += ["", "Top end by folder, 8-20 kHz"
                     + (reference.map { " (against \($0))" } ?? ""),
                     String(repeating: "-", count: 62),
-                    "  A high shelf can only lift what is there. A cliff "
-                    + "between 12.5k and 16k is",
-                    "  an MP3 low-pass, and boosting it raises noise; a gentle "
-                    + "slope is the record.", "",
-                    "   mean    vs ref      8k    10k   12.5k     16k   folder"]
+                    "  A high shelf can only lift what is THERE, so this is the "
+                    + "table that says",
+                    "  whether adding air is even an option.",
+                    "",
+                    "  'cliff' is the drop from 16k to 20k. Recorded music rolls "
+                    + "off a few dB",
+                    "  across that step; a lossy codec falls off a wall. 128 kbps "
+                    + "cuts near 16k",
+                    "  and 320 near 20k, so a large figure here means the band is "
+                    + "empty and a",
+                    "  shelf would raise nothing but the noise under it. Only a "
+                    + "harmonic",
+                    "  exciter can put content where there is none -- and that is "
+                    + "invention,",
+                    "  not restoration, which is why nothing here does it.",
+                    "",
+                    "  A '!' marks a drop of 20 dB or more: a wall rather than a "
+                    + "roll-off, and",
+                    "  a sign the files themselves are low-bitrate. That is a "
+                    + "re-rip, not a",
+                    "  setting -- no stage here can put back what the encoder "
+                    + "threw away.",
+                    "",
+                    "   mean    vs ref      8k    10k   12.5k     16k     20k"
+                    + "   cliff      folder"]
             for row in folders {
                 let versus = row.topDeficitVsReference.map { String(format: "%+7.2f", $0) }
                     ?? "      -"
-                let bands = [8000.0, 10000.0, 12500.0, 16000.0].map { band in
+                let bands = [8000.0, 10000.0, 12500.0, 16000.0, 20000.0].map { band in
                     row.topCurve[band].map { String(format: "%6.1f", $0) } ?? "     -"
                 }.joined(separator: "  ")
-                out.append(String(format: "  %+6.2f  %@  %@   %@",
+                // The step that shows a codec, rather than the 12.5k-to-16k
+                // one this table used to name: at 320 kbps the low-pass sits
+                // near 20k, so it does not touch 16k at all and the old
+                // reading could not see it.
+                let cliff: String
+                if let a = row.topCurve[16000.0], let b = row.topCurve[20000.0] {
+                    // Twenty dB is a wall, not a roll-off. Chosen from what
+                    // the two things look like rather than from this
+                    // library: music falls a few dB across a third of an
+                    // octave, a codec's stop-band is thirty down inside a
+                    // fraction of one. It is bounded either side here --
+                    // fifteen folders measure 6.7 to 12.9 and one measures
+                    // 27.0, and that one is 51 files of low-bitrate MP3.
+                    let drop = a - b
+                    cliff = String(format: "%6.1f", drop)
+                        + (drop >= 20.0 ? " !" : "  ")
+                } else {
+                    cliff = "     -  "
+                }
+                out.append(String(format: "  %+6.2f  %@  %@  %@   %@",
                                   row.topMean.isFinite ? row.topMean : 0,
-                                  versus, bands, row.folder))
+                                  versus, bands, cliff, row.folder))
             }
         }
         return out.joined(separator: "\n")

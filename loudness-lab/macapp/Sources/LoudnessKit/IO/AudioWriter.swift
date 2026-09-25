@@ -39,6 +39,20 @@ public enum AudioWriter {
 
         public var isLossless: Bool { self == .flac }
 
+        /// What `loudness-lab subbass --format` calls it.
+        ///
+        /// The command line's names are lower case and carry no bitrate,
+        /// because the bitrate is the command's to decide -- the label here
+        /// says what it decided. Two spellings of one thing, but the
+        /// alternative is a user-facing control reading "flac".
+        public var cliName: String {
+            switch self {
+            case .flac: return "flac"
+            case .mp3: return "mp3"
+            case .aac: return "aac"
+            }
+        }
+
         /// What ffmpeg is asked for. Nothing here for FLAC: that one is
         /// written directly and never goes near an encoder.
         var encoderArguments: [String] {

@@ -7,22 +7,37 @@
 # and no identity for macOS to hang file-access permissions on. A folder
 # with an Info.plist in it is all a Mac app actually is, so this makes one.
 #
-# Usage:  sh macapp/make-app.sh [--open]
+# Usage:  sh macapp/make-app.sh [--debug] [--open]
+#
+# `--debug` builds the Debug configuration instead of Release. Xcode's own
+# Run button needs this: it wants the icon and the identity a bundle gives
+# it too, and re-optimizing at -O on every keystroke-to-Cmd-R loop would
+# make that the slow way to see a change rather than the fast one.
 set -eu
 
 cd "$(dirname "$0")"
 
 VERSION="0.1.0"
 APP="LoudnessLab.app"
+CONFIG="release"
+if [ "${1:-}" = "--debug" ]; then CONFIG="debug"; shift; fi
 
-echo "Building release…"
-swift build -c release --product LoudnessLabUI
-BIN="$(swift build -c release --show-bin-path)/LoudnessLabUI"
+echo "Building $CONFIG…"
+swift build -c "$CONFIG" --product LoudnessLabApp
+BIN="$(swift build -c "$CONFIG" --show-bin-path)/LoudnessLabApp"
 [ -x "$BIN" ] || { echo "no executable at $BIN" >&2; exit 1; }
 
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/LoudnessLab"
+
+# SwiftUI's Bundle.module looks for this next to the binary's .app --
+# Contents/Resources -- when the package is linked into an app. Without
+# it here, Bundle.module fatalErrors the moment the app reaches for the
+# splash image.
+BIN_DIR="$(dirname "$BIN")"
+RESOURCE_BUNDLE="$BIN_DIR/LoudnessLab_LoudnessLabUI.bundle"
+[ -d "$RESOURCE_BUNDLE" ] && cp -R "$RESOURCE_BUNDLE" "$APP/Contents/Resources/"
 
 # --- icon -------------------------------------------------------------
 # A .icns built from whatever square image is sitting here. macOS ships
@@ -51,8 +66,8 @@ if [ -n "$ICON_SOURCE" ]; then
     # Exactly the sizes iconutil expects -- it refuses a set with anything
     # else in it.
     for size in 16 32 128 256 512; do
-        sips -z "$size" "$size" "$ICON_SOURCE"              --out "$ICONSET/icon_${size}x${size}.png" >/dev/null 2>&1
-        sips -z "$((size * 2))" "$((size * 2))" "$ICON_SOURCE"              --out "$ICONSET/icon_${size}x${size}@2x.png" >/dev/null 2>&1
+        sips -s format png -z "$size" "$size" "$ICON_SOURCE"              --out "$ICONSET/icon_${size}x${size}.png" >/dev/null 2>&1
+        sips -s format png -z "$((size * 2))" "$((size * 2))" "$ICON_SOURCE"              --out "$ICONSET/icon_${size}x${size}@2x.png" >/dev/null 2>&1
     done
     if iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"; then
         ICON_ENTRY='    <key>CFBundleIconFile</key>          <string>AppIcon</string>'

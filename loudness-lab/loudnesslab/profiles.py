@@ -38,6 +38,17 @@ FIELDS = {
     "punch_decay": 8.0,
     "declip": False,        # restore peaks that were clipped before we got them
     "declip_max": 6.0,      # dB, hard cap on how far one peak may be lifted
+    # Putting dynamics back. Both off by default: they reshape what a
+    # compressor left rather than recovering anything, so they are a choice
+    # about a record and not a repair every record wants.
+    "target_lra": 0.0,      # loudness range to widen to; 0 is off
+    "max_attenuation": 6.0, # dB the quiet passages may be pulled down by
+    "transient": 0.0,       # dB of attack emphasis at an onset; 0 is off
+    "min_crest": 11.0,      # above this a track was never flattened
+    # Air. The one stage that invents rather than restores, so off by
+    # default and a taste control rather than a repair.
+    "air": 0.0,             # dB added to 8-20 kHz as generated harmonics
+    "air_tune": 3500.0,     # Hz the harmonics are generated from, upward
 }
 
 BUILT_IN = {
@@ -132,6 +143,106 @@ BUILT_IN = {
         # Drum machines already have beater click, and 2-6 kHz on this
         # material is full of gated reverb rather than attack.
         "punch": 0.0,
+    },
+    # Measured on "Now Yearbook 99 (2026)", 82 tracks over four CDs, against
+    # the same 43-track modern reference the others use. The first corpus
+    # here whose problem is NOT a missing low end.
+    #
+    #   low end 31.5-63 Hz   CD4 -18.53  CD1 -18.43  CD3 -18.21  CD2 -17.38
+    #   reference            -14.89
+    #
+    # A deficit of 2.5 to 3.6 dB, against 6.2-10.9 for the eighties and
+    # 4.9-7.4 for the disco. By 1999 the bottom end was being put there. So
+    # the sub caps at 4, just above the measured worst, on the same rule
+    # that gave disco 8 and the eighties 11.
+    #
+    # What IS wrong with it is everything the loudness war did:
+    #
+    #   median LUFS-I   -9.48        median true peak  +0.86 dBTP
+    #   median s_p95    -7.71        median LRA         5.40
+    #   median crest                 10.01 dB
+    #   arrived clipped              36 of 82 (43.9%), CD4 at 60%
+    #   worst offender               9652 clipped runs
+    #
+    # Crest at 10.0 is squarely in the hard-limited band (8-11 dB), and LRA
+    # at 5.4 in the loudness-war band (4-6). Both stages have something to
+    # do here, which is not true of any other corpus in this library.
+    #
+    # Per disc, and this is the part that matters:
+    #
+    #   disc   LRA   crest   clipped
+    #   CD2    6.49   9.88     29%
+    #   CD3    5.45   9.95     38%
+    #   CD4    5.66  10.47     60%
+    #   CD1    4.44  10.73     50%
+    #
+    # LRA and crest run in OPPOSITE directions across the four. CD2 has the
+    # most range left and the least punch; CD1 the reverse. A single "how
+    # squashed is it" number would call CD2 the healthiest disc and CD1 the
+    # worst, when they are damaged in different ways and want different
+    # stages. Measured again over eleven folders and 216 tracks the same
+    # relationship holds at r = -0.85, so this is the library speaking and
+    # not four points of noise.
+    #
+    # The modern reference corpus sits at crest 10.21 and LRA 5.45 -- in
+    # the same band as this 1999 material and below every pre-1990 folder
+    # measured -- so there is no reference to aim at for dynamics and these
+    # targets have to stay absolute.
+    #
+    # The top end needs nothing: these discs run 3.6 to 6.4 dB ABOVE the
+    # reference at 8-16 kHz, and CD2 is the brightest folder measured
+    # anywhere in the library.
+    "nineties": {
+        "description": "Late 1990s pop. Low end nearly there (2.5-3.6 dB "
+                       "short), but hard-limited: crest 10.3, LRA 5.4, 44% "
+                       "arrived clipped. Needs `reference`. Lossy.",
+        "target": -16.0, "estimator": "s_p95", "peak_ceiling": -1.0,
+        "auto": True,
+        "max_amount": 4.0,
+        # The default. Nothing has measured sub-octave activity on this
+        # material, and moving a gate on a guess is how a static floor gets
+        # mistaken for a bassline.
+        "min_activity": 20.0,
+        # 44% of the corpus, and 60% of CD4 -- between the eighties (0-10%,
+        # off) and the disco reissue (53-76%, on). The worst track carries
+        # 9652 clipped runs against the disco worst of 398, so expect the
+        # SMALLEST gain here: de-clipping returns about 2 dB at light
+        # clipping and 0.4 at heavy, and this is heavy.
+        "declip": True,
+        # Off. 2-6 kHz on this material is programmed hats and samples, and
+        # the top end already sits above the reference.
+        "punch": 0.0,
+        # From 5.40. Deliberately modest: +1.6 LU, which drops the quietest
+        # passages 1.6 dB and never approaches the 6 dB cap. A bigger target
+        # would make these duck under the next record, which for a DJ is the
+        # failure and not the feature.
+        "target_lra": 7.0,
+        # Crest 10.01 -> about 11.5 at roughly half a dB per dB. That lands
+        # just under the gate rather than past it, which is the intent: the
+        # stage should stop being needed, not overshoot into a different
+        # kind of wrong. Note the exchange rate was measured on a synthetic
+        # fixture, so the figure is an extrapolation until this corpus is
+        # processed and re-measured.
+        #
+        # All four discs (9.88 to 10.73) pass the 12 dB gate, and the spread
+        # is only 0.85 dB -- so unlike the sub, one figure genuinely does
+        # suit the whole corpus here.
+        "transient": 3.0,
+    # Eleven, not twelve. The threshold started at 12 from the published
+    # range, and on eleven folders it looked vindicated: unlimited-era
+    # material read 11.87 to 12.11, 1999 pop 9.88 to 10.73, nothing in
+    # between. Five more folders filled that in. Sixteen folders now read
+    #
+    #   9.63 9.88 9.95 10.21 10.47 10.73 | 11.78 11.82 11.87 11.91 11.95
+    #   12.10 12.11 12.15 12.23 12.92
+    #
+    # and the largest gap is 10.73 to 11.78, midpoint 11.25. A gate at 12
+    # cuts the upper cluster in half, five folders either side of a line
+    # with nothing behind it.
+    #
+    # It changes nothing for this corpus, which sits at 9.63 to 10.73 and
+    # passes either gate. It changes what happens to everything else.
+        "min_crest": 11.0,
     },
 }
 

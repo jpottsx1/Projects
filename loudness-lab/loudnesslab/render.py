@@ -194,10 +194,23 @@ def one(job: dict) -> dict:
         # so the levelling that follows is what takes that back out.
         aired = air._blank("not asked for")
         if job.get("air", 0.0) > 0:
-            after, aired = air.excite(after, decode.TARGET_RATE,
-                                      amount_db=job["air"],
-                                      tune_hz=job.get("air_tune",
-                                                      air.DEFAULT_TUNE_HZ))
+            guide = None
+            if job.get("air_stems"):
+                guide = stems.load_air_guide(Path(job["stem_cache"]), original,
+                                             decode.TARGET_RATE)
+            if job.get("air_stems") and guide is None:
+                # Asked to follow the vocals and instruments, and there is
+                # nothing to follow: no air, rather than air everywhere,
+                # which is the thing that was asked NOT to happen.
+                aired = air._blank(
+                    "no air guide for this track"
+                    + (f" ({job['stem_error']})" if job.get("stem_error") else ""))
+            else:
+                after, aired = air.excite(after, decode.TARGET_RATE,
+                                          amount_db=job["air"],
+                                          tune_hz=job.get("air_tune",
+                                                          air.DEFAULT_TUNE_HZ),
+                                          guide=guide)
 
         kicks = (found[0] if found is not None
                  else subbass.detect_kicks(audio, decode.TARGET_RATE, drums)[0])

@@ -47,6 +47,8 @@ DOCUMENTED_BY = {
     "air": "air",
     "airTune": "airTune",
     "stemKicks": "stemKicks",
+    "airFixed": "airFixed",
+    "airStems": "airStems",
 }
 
 

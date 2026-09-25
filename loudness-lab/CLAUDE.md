@@ -153,7 +153,7 @@ every machine but the one that made it for a while.
 ```
 loudnesslab/     the Python: bs1770, spectrum, subbass, declip, expand,
                  air, mp3gain, decode, db, report, render, write, cli,
-                 stems (a Demucs drum stem, for finding kicks)
+                 stems (Demucs: a drum stem for kicks, a guide for air)
 tests/           its tests
 tools/           make_golden.py, the five checkers, measure_stem_kicks.py
 macapp/
@@ -723,6 +723,33 @@ kick's low end measured on drums and bass together (the tail up to the
 next kick at most, marked ">" when still ringing). Checked on a synthetic
 808: 100% vs 0% by which stem holds the boom, 55 Hz exactly, tail 784 ms
 against a true 806.
+
+### Air: why none arrived, and air that follows the stems
+
+The 1988 folder got no air on any track, and not by accident: with `auto`
+on (the eighties profile), `--air` is a ceiling and each track gets its
+8-20 kHz shortfall against the reference -- and that folder measures 4.56
+dB BRIGHTER than the reference, so every track's shortfall was nothing.
+`--air-fixed` ("Same air on every track") gives every track the figure
+as set while the sub is still sized per track (`cli._air_for`).
+
+`--air-stems` ("Air follows the vocals and instruments"): at separation
+time the balance of 2-10 kHz energy between vocals+other and drums is
+kept, as an envelope at 100 frames a second, beside the kick source
+(`stems.load_air_guide`). The exciter's gain is set exactly as without it,
+then its harmonics are scaled by that balance -- so where vocals and
+instruments carry the top end the track gets precisely the air the same
+setting gives unguided, and where hi-hats and cymbals do (bright already,
+and where an exciter turns to grit) less or none. Subtler overall by
+design. The harmonics are still made from the original: the stems steer,
+nothing separated is heard. No guide for a track means no air on it, not
+air everywhere. Separations from before the guide existed are redone
+once when guided air is asked for.
+
+An earlier draft described the setting as "the rise where the guide is
+open". A test on a fixture whose voice had almost nothing above 8 kHz
+showed that was false (+37 dB there, relatively) -- the statement above
+is the one the code keeps, and the one the test holds it to.
 
 ### Punch put high-frequency artifacts on late-80s pop
 

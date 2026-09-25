@@ -94,18 +94,26 @@ def _band_energy(x: np.ndarray, rate: int, low: float, high: float) -> float:
 def _blank(note: str | None = None) -> dict:
     return {"applied": False, "amount_db": 0.0, "measured_db": 0.0,
             "tune_hz": None, "peak_change_db": 0.0, "lufs_change_db": 0.0,
-            "note": note}
+            "guided": False, "note": note}
 
 
 def excite(x: np.ndarray, rate: int, amount_db: float = DEFAULT_AIR_DB,
            tune_hz: float = DEFAULT_TUNE_HZ,
-           drive: float = DRIVE, bias: float = BIAS) -> tuple[np.ndarray, dict]:
+           drive: float = DRIVE, bias: float = BIAS,
+           guide: np.ndarray | None = None) -> tuple[np.ndarray, dict]:
     """Add `amount_db` of generated harmonics to the 8-20 kHz band.
 
     The amount is measured, not mixed: the harmonic signal is scaled so the
     band actually rises by the figure asked for, and the report says what
     it rose by. A mix control that means "some" is how an exciter ends up
     used at three times the intended depth.
+
+    `guide`, per sample 0 to 1 (see `stems.load_air_guide`), is where the
+    air goes. The gain is set exactly as without it, and the harmonics are
+    then scaled by it: where the guide is open the track gets precisely the
+    air `amount_db` would give it unguided, and less where the drums carry
+    the top end. Subtler overall by design; `measured_db` is what the band
+    rose by across the whole track.
     """
     if amount_db <= 0:
         return x, _blank("no air asked for")
@@ -177,6 +185,10 @@ def excite(x: np.ndarray, rate: int, amount_db: float = DEFAULT_AIR_DB,
     wanted = before * (10 ** (amount_db / 10) - 1.0)
     gain = float((-cross + np.sqrt(cross * cross + added * wanted)) / added)
 
+    if guide is not None:
+        harmonics = harmonics * np.asarray(guide, dtype=np.float64)[:, None]
+        report["guided"] = True
+        report["guide_mean"] = float(np.mean(guide))
     y = (x + gain * harmonics).astype(x.dtype)
     after = _band_energy(y, rate, BAND_LOW_HZ, BAND_HIGH_HZ)
 

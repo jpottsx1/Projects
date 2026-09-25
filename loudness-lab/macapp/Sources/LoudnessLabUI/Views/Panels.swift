@@ -311,6 +311,13 @@ struct SettingsPanel: View {
                     .font(.caption).foregroundStyle(.secondary)
                     .help(Help.air.detail)
                 if profile.air > 0 {
+                    if profile.auto {
+                        Toggle("Same air on every track", isOn: $profile.airFixed)
+                            .help(Help.airFixed.summary)
+                    }
+                    Toggle("Air follows the vocals and instruments",
+                           isOn: $profile.airStems)
+                        .help(Help.airStems.summary)
                     // In kHz, because the shared slider steps by 0.5 and
                     // half a hertz across a six-kilohertz range is a
                     // control nobody can place.

@@ -145,6 +145,18 @@ KICK_WINDOW_S = 0.06
 # to vary by several dB. Set on synthetic drums; a real kit is what
 # `measure_stem_kicks.py --files` reports against.
 MIN_KICK_LEVEL_DB = -10.0
+# ...against the loudest hits NEARBY, not in the whole track. Against the
+# whole track, a verse or a build whose kicks sit 15 dB under the chorus's
+# lost every kick as "too light", and got no sub beside passages given the
+# full amount -- the low end falling out mid-song. The loudest nearby is
+# taken over this far before and this far after, each side on its own, and
+# the quieter side used -- a 2 s window (about a bar) spanning the edge of
+# the quiet passage still dropped half its kicks...
+KICK_LEVEL_WINDOW_S = 2.0
+# ...but never more than this far under the track's own loudest, so a
+# stretch with no kick at all (a breakdown of snare and hats) does not
+# promote its snares to kicks. A snare alone sits about 25 dB under.
+QUIET_SECTION_DB = 12.0
 # How far off a beat a kick may land and still count as on it, as a
 # fraction of a beat: 12% is 60 ms at 120 BPM, which a live drummer's feel
 # sits well inside and a sixteenth-note fill hit (25%) does not.
@@ -175,7 +187,8 @@ GRID_SUBDIVISIONS = (1, 2, 4)
 
 
 def _kick_level_db(drums: np.ndarray, rate: int, kicks: np.ndarray) -> np.ndarray:
-    """Per onset, its 30-90 Hz energy against the loudest onsets', in dB.
+    """Per onset, its 30-90 Hz energy against the loudest onsets around
+    it, in dB (see KICK_LEVEL_WINDOW_S and QUIET_SECTION_DB).
 
     "The loudest" is the 90th percentile of the onsets, so one freak hit
     cannot set the bar for the rest.
@@ -185,9 +198,20 @@ def _kick_level_db(drums: np.ndarray, rate: int, kicks: np.ndarray) -> np.ndarra
                              output="sos"), mono) ** 2
     span = int(KICK_WINDOW_S * rate)
     energy = np.array([float(low[k:k + span].sum()) for k in kicks])
-    reference = float(np.percentile(energy, 90))
-    if reference <= 0:
+    loudest = float(np.percentile(energy, 90))
+    if loudest <= 0:
         return np.full(kicks.size, -np.inf)
+    floor = loudest * 10 ** (-QUIET_SECTION_DB / 10)
+    reach = KICK_LEVEL_WINDOW_S * rate
+    reference = np.empty(kicks.size)
+    for i, k in enumerate(kicks):
+        # Each side on its own, and the quieter of the two: at the edge of
+        # a quiet passage, the loud one next door is not the comparison.
+        before = energy[(kicks >= k - reach) & (kicks <= k)]
+        after = energy[(kicks >= k) & (kicks <= k + reach)]
+        side = min(float(np.percentile(before, 90)),
+                   float(np.percentile(after, 90)))
+        reference[i] = max(side, floor)
     return 10 * np.log10(np.maximum(energy, 1e-30) / reference)
 
 
@@ -313,6 +337,16 @@ TUNED_MAX_HZ = 63.0
 # The burst's decay is set so it falls 20 dB when the kick does, within
 # these bounds: shorter clicks rather than thumps, longer is a note.
 TUNED_DECAY_S = (0.03, 0.2)
+# ...and never shorter than this many cycles of its own pitch to -20 dB.
+# Measured on ten 1983 dance records, drum-machine kicks fade in 38-82 ms,
+# so "fade when the kick does" put eight of the ten on the 30 ms floor:
+# about one cycle of a 32-43 Hz tone, which is a thump rather than depth,
+# and so little energy per burst that the amount asked for (up to +11 dB)
+# had to come as very loud ones -- heard as rough and pumping on Maniac.
+# Four cycles is a judgement of what it takes to hear a tone as a pitch,
+# not a measurement: 125 ms at 32 Hz, 89 ms at 45 Hz -- still well short
+# of the 280 ms that rang on like a bass note under the 1988 records.
+TUNED_MIN_CYCLES = 4.0
 VOICE_SAMPLE = 64
 
 
@@ -363,10 +397,12 @@ def kick_voice(source: np.ndarray, rate: int,
 def tuned_burst(pitch_hz: float, tail_s: float) -> tuple[float, float]:
     """(freq Hz, decay s) for a burst that sits under a kick of this voice:
     an octave down, or at the kick's own pitch when an octave down would
-    fall under the band, and gone 20 dB when the kick is."""
+    fall under the band, and gone 20 dB when the kick is -- but never in
+    fewer than TUNED_MIN_CYCLES of its own pitch."""
     freq = pitch_hz / 2 if pitch_hz / 2 >= TUNED_MIN_HZ else pitch_hz
     freq = float(min(max(freq, TUNED_MIN_HZ), TUNED_MAX_HZ))
-    decay = float(np.clip(tail_s / np.log(10), *TUNED_DECAY_S))
+    floor = max(TUNED_DECAY_S[0], TUNED_MIN_CYCLES / (freq * np.log(10)))
+    decay = float(np.clip(tail_s / np.log(10), floor, TUNED_DECAY_S[1]))
     return freq, decay
 
 

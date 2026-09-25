@@ -116,7 +116,7 @@ def one(job: dict) -> dict:
         # drum stem the parent separated before the pool started, keyed by
         # the audio as it ARRIVED -- before de-clipping, which is what the
         # parent had in hand when it separated.
-        drums = None
+        drums, found, selection = None, None, None
         if job.get("stem_kicks"):
             drums = stems.load_kick_source(Path(job["stem_cache"]), original,
                                            decode.TARGET_RATE)
@@ -124,8 +124,16 @@ def one(job: dict) -> dict:
                 skip = ("no drum stem to find kicks on"
                         + (f" ({job['stem_error']})" if job.get("stem_error") else ""))
             elif amount > 0:
-                kicks, _ = subbass.detect_kicks(audio, decode.TARGET_RATE, drums)
-                skip = subbass.tempo_check(kicks, decode.TARGET_RATE, job.get("bpm"))
+                # Every drum hit with an attack in the kick band, then only
+                # the ones heavy enough to be a kick and on the beat. The
+                # tempo check is on what survives, as the last word.
+                kicks, strengths = subbass.detect_kicks(
+                    audio, decode.TARGET_RATE, drums)
+                kicks, strengths, selection = subbass.select_kicks(
+                    drums, decode.TARGET_RATE, kicks, strengths, job.get("bpm"))
+                found = (kicks, strengths)
+                skip = selection["refused"] or subbass.tempo_check(
+                    kicks, decode.TARGET_RATE, job.get("bpm"))
         # The content check needs the audio, not the per-frame band
         # statistics, so it happens here rather than in the query.
         if amount > 0 and skip is None:
@@ -172,7 +180,7 @@ def one(job: dict) -> dict:
                                       freq=job["freq"], decay_s=job["decay"],
                                       punch_db=job["punch"],
                                       punch_decay_ms=job["punch_decay"],
-                                      drums=drums)
+                                      drums=drums, kicks=found)
         # Air last of the spectral stages, because it generates from what
         # is there and by this point what is there is finished. It is also
         # the only one that can push the file above full scale on its own,
@@ -184,7 +192,8 @@ def one(job: dict) -> dict:
                                       tune_hz=job.get("air_tune",
                                                       air.DEFAULT_TUNE_HZ))
 
-        kicks, _ = subbass.detect_kicks(audio, decode.TARGET_RATE, drums)
+        kicks = (found[0] if found is not None
+                 else subbass.detect_kicks(audio, decode.TARGET_RATE, drums)[0])
         # Against the ORIGINAL, not against the de-clipped intermediate: the
         # columns say "was", and what the track was is what arrived.
         # Restored transients belong in the snap figure, not hidden in a
@@ -259,6 +268,15 @@ def one(job: dict) -> dict:
         # de-clipping, range or attack it reads as a complaint that nothing
         # happened -- on a row that shows what happened.
         reason = None
+    if reason is None and selection is not None and (
+            selection["not_kick_shaped"] or selection["off_grid"]):
+        # What the filters threw away, so a track whose sub went under
+        # fewer hits than it has drums says why.
+        kept = (selection["found"] - selection["not_kick_shaped"]
+                - selection["off_grid"])
+        reason = (f"kicks: kept {kept} of {selection['found']} drum hits "
+                  f"({selection['not_kick_shaped']} too light, "
+                  f"{selection['off_grid']} off the beat)")
 
     manifest = None
     if variants:

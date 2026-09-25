@@ -149,6 +149,69 @@ class TestTheTempoCheck(unittest.TestCase):
             self.assertIsNone(subbass.tempo_check(self.kicks(0.25), RATE, tag))
 
 
+class TestSelectingTheKicks(unittest.TestCase):
+    """select_kicks on drum parts built from what stopped four real tracks:
+    a snare with low thump on 2 and 4, a clap, tom fills, scratches, and a
+    syncopated kick. Scored against the kicks' known times."""
+
+    def select(self, drums, bpm):
+        kicks, strengths = subbass.detect_kicks(drums, RATE, drums)
+        kept, _, report = subbass.select_kicks(drums, RATE, kicks, strengths, bpm)
+        return kicks, kept, report
+
+    def test_the_other_drums_read_as_kicks_before_and_not_after(self):
+        for drift in (0.0, 0.015, 0.03):
+            drums, truth, _ = fixtures.backbeat(seed=1, drift=drift)
+            found, kept, report = self.select(drums, 104.0)
+            self.assertLess(fixtures.score(found, truth)[1], 0.5, drift)
+            recall, precision, _ = fixtures.score(kept, truth)
+            self.assertGreaterEqual(precision, 0.85, drift)
+            # What is lost is the syncopated kick, off the beat: 6 of 29.
+            self.assertGreaterEqual(recall, 0.75, drift)
+            self.assertIsNone(report["refused"])
+
+    def test_the_tempo_check_passes_on_what_survives(self):
+        drums, _, _ = fixtures.backbeat(seed=0, drift=0.015)
+        found, kept, _ = self.select(drums, 104.0)
+        self.assertIsNotNone(subbass.tempo_check(found, RATE, 104.0))
+        self.assertIsNone(subbass.tempo_check(kept, RATE, 104.0))
+
+    def test_a_kick_under_a_snare_is_kept(self):
+        # On 2 and 4 the kick and the snare land together. A filter asking
+        # "is this ONLY a kick" dropped those and halved the kicks.
+        _, drums, truth = fixtures.programme("buried", seed=0)
+        _, kept, _ = self.select(drums, 60 / float(np.median(np.diff(truth))))
+        self.assertEqual(fixtures.score(kept, truth)[0], 1.0)
+
+    def test_scratches_and_snares_alone_are_dropped(self):
+        drums, _, other = fixtures.backbeat(seed=0)
+        _, kept, _ = self.select(drums, 104.0)
+        for kind in ("scratch", "snare"):
+            # Not the snare that ends each fill: it lands with the lowest
+            # floor tom, which has a kick's weight and is on the beat. That
+            # is the one wrong hit this lets through, and it is said so in
+            # CLAUDE.md rather than tested away.
+            alone = [h for h in other[kind]
+                     if np.min(np.abs(other["tom"] - h)) > 0.03]
+            hits = [h for h in alone if np.min(np.abs(kept / RATE - h)) <= 0.03]
+            self.assertEqual(hits, [], kind)
+
+    def test_a_tag_at_half_the_tempo_is_refused_not_fitted(self):
+        _, drums, truth = fixtures.programme("groove", seed=0)
+        bpm = 60 / float(np.median(np.diff(truth)))
+        _, kept, report = self.select(drums, bpm / 2)
+        self.assertIsNotNone(report["refused"])
+        self.assertLess(report["grid_coherence"], subbass.MIN_GRID_COHERENCE)
+        self.assertIsNone(self.select(drums, bpm)[2]["refused"])
+        self.assertIsNone(self.select(drums, bpm * 2)[2]["refused"])
+
+    def test_without_a_tag_only_the_weight_filter_runs(self):
+        drums, _, _ = fixtures.backbeat(seed=0)
+        _, _, report = self.select(drums, None)
+        self.assertEqual(report["off_grid"], 0)
+        self.assertGreater(report["not_kick_shaped"], 0)
+
+
 class TestTheKeptKickSource(unittest.TestCase):
     """What is kept is 8 kHz mono. It has to find the same kicks."""
 
@@ -230,7 +293,24 @@ class TestTheStageUsesTheStem(unittest.TestCase):
         # more hits than beats, which is the case the check exists for.
         result = self.run_one(self.job(bpm=self.bpm / 2))
         self.assertEqual(result["status"], "skipped")
-        self.assertIn("BPM", result["reason"])
+        self.assertIn("settle on a beat", result["reason"])
+
+    def test_a_backbeat_track_gets_its_sub(self):
+        """The four tracks the first real run skipped: snare thump, fills
+        and scratches on the drum stem read as double the tag. Now the
+        stage keeps the kicks and goes ahead, and says what it dropped."""
+        drums, truth, _ = fixtures.backbeat(seed=0, drift=0.015)
+        rng = np.random.default_rng(3)
+        mix = (drums + 0.05 * rng.standard_normal(drums.shape)).astype(np.float32)
+        self.mix = mix
+        stems.store_kick_source(self.cache, mix, RATE, drums)
+        result = self.run_one(self.job(bpm=104.0))
+        self.assertEqual(result["status"], "ok", result.get("reason"))
+        self.assertGreater(result["applied_db"], 1.0)
+        self.assertIn("too light", result["reason"])
+        seconds = mix.shape[0] / RATE
+        used = result["kicks_per_minute"] * seconds / 60
+        self.assertLess(used, 1.2 * truth.size)
 
     def test_no_kept_stem_means_no_sub_and_says_why(self):
         result = self.run_one(self.job(stem_error="RuntimeError: out of memory"))

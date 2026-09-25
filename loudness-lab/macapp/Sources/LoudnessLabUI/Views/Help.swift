@@ -456,11 +456,20 @@ enum Help {
         the untouched original, so nothing the separation got wrong can be \
         heard.
 
-        It also checks the kicks against the BPM tag. Where they do not \
-        agree -- a ballad with no kick on every beat, a funk pattern busier \
-        than one per beat -- the track gets no sub, and the log says why. \
-        That turns a wrong guess into a track left alone. A track with no \
-        BPM tag is not checked.
+        Not every hit on the drum track is a kick. A LinnDrum snare, an 808 \
+        clap, a floor tom or a scratch can have an attack down there too, so \
+        two filters decide which hits get sub. Weight: a kick is among the \
+        heaviest hits below 90 Hz, and a snare or scratch on its own is far \
+        lighter -- while a kick with a snare on top of it still counts. The \
+        beat: using the BPM tag, hits that land between beats (fill notes, \
+        scratches) are dropped. A syncopated kick off the beat is dropped \
+        with them: one fewer burst, never one in the wrong place.
+
+        What survives is checked against the tag. Where the kicks still do \
+        not agree with it, or do not settle on a beat at the tagged tempo \
+        at all (a tag at half the real tempo does this), the track gets no \
+        sub and the log says why. A track with no BPM tag gets the weight \
+        filter only.
 
         Separating is the slowest thing a run does, the first time. What it \
         finds is kept, so running the same folder again with \

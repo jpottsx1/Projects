@@ -584,7 +584,11 @@ def cmd_subbass(args: argparse.Namespace) -> int:
                     "same batch", 1)
 
     if porcelain:
-        _emit({"event": "selected", "total": len(jobs), "analysed": analysed,
+        # `selected` is what the app reads; `total` is kept for anything
+        # already reading that. The app showed "0 track(s) to process" on
+        # every run until this carried both.
+        _emit({"event": "selected", "total": len(jobs), "selected": len(jobs),
+               "analysed": analysed,
                "duplicates": duplicates, "reference": reference_name,
                "format": write.label(args.format), "out": str(out_dir)})
     out(f"{len(rows)} of {analysed} track(s) under the given path(s) selected"

@@ -130,6 +130,116 @@ def detect_kicks(x: np.ndarray, rate: int,
     return peaks, (strengths / loudest if loudest > 0 else strengths)
 
 
+# Telling a kick from the other drums. On a drum stem the bassline is gone,
+# but a LinnDrum snare, an 808 clap, a floor tom and a scratch all have an
+# attack the detector's 30-100 Hz band can hear. What they lack is a kick's
+# WEIGHT down there: measured on synthetic drums, every kick sat within
+# 1.3 dB of the loudest hits in 30-90 Hz, and a snare or a scratch alone
+# about 25 dB below them. Measured against the loudest hits and not as a
+# ratio to the rest of the drum, because on 2 and 4 the kick and the snare
+# land together -- a ratio called those snares and dropped half the kicks;
+# this reads them as the kicks they contain.
+KICK_BODY_HZ = (30.0, 90.0)
+KICK_WINDOW_S = 0.06
+# Halfway across that 25 dB gap, which leaves a live drummer's kicks room
+# to vary by several dB. Set on synthetic drums; a real kit is what
+# `measure_stem_kicks.py --files` reports against.
+MIN_KICK_LEVEL_DB = -10.0
+# How far off a beat a kick may land and still count as on it, as a
+# fraction of a beat: 12% is 60 ms at 120 BPM, which a live drummer's feel
+# sits well inside and a sixteenth-note fill hit (25%) does not.
+GRID_TOLERANCE = 0.12
+# The grid is found locally, from the kicks this many beats either side,
+# so a live drummer's drift is followed rather than fought.
+GRID_WINDOW_BEATS = 8
+# How firmly the kicks agree on where the beat is: the length of their mean
+# position within a beat, as a unit vector -- 1 when every kick lands on
+# the same spot, 0 when they are spread evenly. Measured on synthetic
+# drums: four-on-the-floor tagged at HALF its tempo reads 0.01 (the kicks
+# fall alternately on and exactly between the tagged beats), while every
+# correctly tagged case, drifting or syncopated, read 0.42 or more. Below
+# this the tag and the kicks disagree, and thinning the kicks to fit the
+# tag would quietly put sub under every other one.
+MIN_GRID_COHERENCE = 0.25
+
+
+def _kick_level_db(drums: np.ndarray, rate: int, kicks: np.ndarray) -> np.ndarray:
+    """Per onset, its 30-90 Hz energy against the loudest onsets', in dB.
+
+    "The loudest" is the 90th percentile of the onsets, so one freak hit
+    cannot set the bar for the rest.
+    """
+    mono = drums.mean(axis=1).astype(np.float64) if drums.ndim == 2 else drums
+    low = sosfiltfilt(butter(4, KICK_BODY_HZ, btype="band", fs=rate,
+                             output="sos"), mono) ** 2
+    span = int(KICK_WINDOW_S * rate)
+    energy = np.array([float(low[k:k + span].sum()) for k in kicks])
+    reference = float(np.percentile(energy, 90))
+    if reference <= 0:
+        return np.full(kicks.size, -np.inf)
+    return 10 * np.log10(np.maximum(energy, 1e-30) / reference)
+
+
+def _on_grid(kicks: np.ndarray, rate: int, bpm: float) -> tuple[np.ndarray, float]:
+    """Which kicks land within GRID_TOLERANCE of a beat, and how firmly
+    they agree on where the beat is (see MIN_GRID_COHERENCE).
+
+    Where the beats are is worked out around each kick from its neighbours
+    -- the circular mean of their positions within a beat -- so the grid
+    follows a live drummer's drift and needs no downbeat from anywhere.
+    """
+    period = 60.0 / bpm * rate
+    phase = (kicks / period) % 1.0
+    angle = np.exp(2j * np.pi * phase)
+    reach = GRID_WINDOW_BEATS * period
+    keep = np.zeros(kicks.size, dtype=bool)
+    firmness = np.empty(kicks.size)
+    for i, k in enumerate(kicks):
+        near = np.abs(kicks - k) <= reach
+        mean = angle[near].mean()
+        firmness[i] = abs(mean)
+        offset = (phase[i] - np.angle(mean) / (2 * np.pi) + 0.5) % 1.0 - 0.5
+        keep[i] = abs(offset) <= GRID_TOLERANCE
+    return keep, float(np.median(firmness))
+
+
+def select_kicks(drums: np.ndarray, rate: int, kicks: np.ndarray,
+                 strengths: np.ndarray, tagged_bpm: float | None
+                 ) -> tuple[np.ndarray, np.ndarray, dict]:
+    """Keep the onsets on a drum stem that are kicks, and on the beat.
+
+    Two filters, one per kind of wrong hit. Kick weight: drops snares,
+    claps, most toms and scratches, which land ON the beat and so pass any
+    grid, while keeping a kick that has a snare on top of it. On the
+    grid (only with a BPM tag): drops fill hits and scratches, which can
+    be kick-shaped but land between beats. A syncopated kick off the beat
+    is dropped with them -- one fewer burst, never a burst in the wrong
+    place, which is the trade this whole stage is built on.
+    """
+    report = {"found": int(kicks.size), "not_kick_shaped": 0, "off_grid": 0,
+              "grid_coherence": None, "refused": None}
+    if kicks.size == 0:
+        return kicks, strengths, report
+    shaped = _kick_level_db(drums, rate, kicks) >= MIN_KICK_LEVEL_DB
+    report["not_kick_shaped"] = int((~shaped).sum())
+    kicks, strengths = kicks[shaped], strengths[shaped]
+    if (kicks.size >= 8 and tagged_bpm is not None
+            and np.isfinite(tagged_bpm) and tagged_bpm > 0):
+        grid, coherence = _on_grid(kicks, rate, float(tagged_bpm))
+        report["grid_coherence"] = round(coherence, 3)
+        if coherence < MIN_GRID_COHERENCE:
+            report["refused"] = (
+                f"kicks do not settle on a beat at the tagged "
+                f"{tagged_bpm:.0f} BPM (agreement {coherence:.2f}) -- "
+                f"the tag may be half the tempo, so no sub")
+        else:
+            report["off_grid"] = int((~grid).sum())
+            kicks, strengths = kicks[grid], strengths[grid]
+    if strengths.size and strengths.max() > 0:
+        strengths = strengths / strengths.max()
+    return kicks, strengths, report
+
+
 # How far the tempo the kicks imply may sit from the BPM tag. Measured on
 # 35 tagged tracks, detecting on a Demucs drum stem: where the kicks were
 # right, the implied tempo came within 0.98-1.03 of the tag; the nearest
@@ -147,16 +257,17 @@ def tempo_check(kicks: np.ndarray, rate: int,
     bassline on the mix, or on a stem a funk pattern busier than one per
     beat -- and a burst under each would put sub on the off-beat.
 
-    Half the tag is accepted: the kicks are real, one every other tagged
-    beat, which is a half-time groove or a tag Serato doubled. Fewer
-    detections than beats cannot put a burst anywhere it does not belong.
+    Half and a quarter of the tag are accepted: the kicks are real, one
+    every other beat (1 and 3, a half-time groove, a tag Serato doubled)
+    or one a bar. Fewer detections than beats cannot put a burst anywhere
+    it does not belong.
     """
     if tagged_bpm is None or not np.isfinite(tagged_bpm) or tagged_bpm <= 0:
         return None
     if kicks.size < 8:
         return None             # enhance() declines this itself, and says so
     implied = 60.0 / float(np.median(np.diff(kicks) / rate))
-    for multiple in (1.0, 0.5):
+    for multiple in (1.0, 0.5, 0.25):
         if abs(implied / (tagged_bpm * multiple) - 1.0) <= TEMPO_TOLERANCE:
             return None
     return (f"kicks imply {implied:.0f} BPM against a tag of "
@@ -333,12 +444,16 @@ def enhance(x: np.ndarray, rate: int, amount_db: float = 5.0,
             decay_s: float = DEFAULT_DECAY_S,
             punch_db: float = 0.0,
             punch_decay_ms: float = DEFAULT_PUNCH_DECAY_MS,
-            drums: np.ndarray | None = None) -> tuple[np.ndarray, dict]:
+            drums: np.ndarray | None = None,
+            kicks: tuple[np.ndarray, np.ndarray] | None = None
+            ) -> tuple[np.ndarray, dict]:
     """Add `amount_db` of energy to the 31.5-63 Hz octave, under the kicks.
 
     `drums`, if given, is where the kicks are found -- see `detect_kicks`.
     Only the detection moves: the sub is still added to `x`, never to the
-    stem, so nothing the separator got wrong reaches the audio.
+    stem, so nothing the separator got wrong reaches the audio. `kicks`, if
+    given, is (offsets, strengths) already found and filtered -- see
+    `select_kicks` -- and is used as it is.
 
     Returns the new audio and a report of what was actually done, because the
     point of a prototype is to be checked rather than believed.
@@ -350,7 +465,8 @@ def enhance(x: np.ndarray, rate: int, amount_db: float = 5.0,
         report["note"] = "no spectral change asked for"
         return x, report
 
-    kicks, strengths = detect_kicks(x, rate, drums)
+    kicks, strengths = (detect_kicks(x, rate, drums) if kicks is None
+                        else kicks)
     report = _blank_report(amount_db)
     report["kicks"] = int(kicks.size)
     report["kicks_per_minute"] = (kicks.size / (x.shape[0] / rate / 60)

@@ -724,6 +724,43 @@ next kick at most, marked ">" when still ringing). Checked on a synthetic
 808: 100% vs 0% by which stem holds the boom, 55 Hz exactly, tail 784 ms
 against a true 806.
 
+### 1983: the tuned sub was too short, and quiet passages lost their kicks
+
+Jeff on the 1983 folder: Maniac "rough on the bottom, missing all sorts,
+awkward pumping"; Flashdance "three weird bottom outs mid-song where it
+goes flabby"; Blue Monday "could be deeper"; She Blinded Me With Science
+"the bass line is the kick drum and we are missing it". The report on ten
+of those records:
+
+- **Detection was not the problem on Maniac**: 146 kicks a minute at 159
+  BPM, 0.93 on quarters, 4 dropped as light.
+- **The sub was a thump.** Drum-machine kicks here fade in 38-82 ms, so
+  "fade when the kick does" put EIGHT of ten tracks on the 30 ms decay
+  floor -- about one cycle of a 32-43 Hz tone. And the amount asked for
+  (up to +11 dB) had to come from bursts that short, so each was very
+  loud: rough, and pumping. `TUNED_MIN_CYCLES` = 4 now keeps every burst
+  ringing at least four cycles of its own pitch to -20 dB (127 ms for
+  Maniac's 31.5 Hz). Four is a judgement, not a measurement.
+- **A quiet passage lost every kick.** Weight was judged against the
+  loudest hits in the whole track, so a verse or a build 15 dB under the
+  chorus dropped all its kicks as "too light" -- no sub there, beside
+  passages given the full amount. It is now judged against the loudest
+  hits within 2 s before and 2 s after, separately, taking the quieter
+  side (an 8 s window, and then a 2 s one spanning the edge, still lost
+  half of a 6 s quiet passage), and never lower than 12 dB under the
+  track's loudest, so a breakdown of snare and hats does not promote its
+  snares. Quiet passages down to 15 dB keep every kick. The cost: in a
+  breakdown with no kick, a tom fill's higher toms now pass too.
+  Below about 16 dB `detect_kicks` itself does not see an onset (its gate
+  is 15% of the 95th-percentile envelope), which is a separate limit.
+- **The report now lists every stretch over two bars with no kick
+  kept**, with times and why the hits in it were dropped, to hold against
+  where a bottom-out was heard.
+
+Not yet done: the bassline. On She Blinded Me With Science and Blue
+Monday the low end is carried by the bass, and a sub laid only under
+kicks cannot follow it.
+
 ### Air: why none arrived, and air that follows the stems
 
 The 1988 folder got no air on any track, and not by accident: with `auto`

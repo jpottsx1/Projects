@@ -194,13 +194,16 @@ def _scratch(n: int, rng) -> np.ndarray:
 
 
 def backbeat(seconds: float = 30.0, bpm: float = 104.0, seed: int = 0,
-             drift: float = 0.0) -> tuple[np.ndarray, np.ndarray, dict]:
+             drift: float = 0.0, breakdown: tuple[float, float] | None = None
+             ) -> tuple[np.ndarray, np.ndarray, dict]:
     """(drum part, kick times, other hits by kind): the pieces that stopped
     four tracks in the first real run. Kicks on 1 and 3 and a syncopated
     kick on the "and" of 2 every other bar; a snare with a low thump on 2
     and 4, and a clap on 4; a tom fill ending every fourth bar; and two
     scratches every four bars, off the beat. `drift` is a live drummer's
     tempo wander, as a fraction (0.015 swings 1.5% either way).
+    `breakdown` (start, end) in seconds drops the kicks there and keeps the
+    rest of the kit: snare, clap, toms, hats.
 
     The drum part only -- this is what a separator hands the detector.
     """
@@ -217,10 +220,11 @@ def backbeat(seconds: float = 30.0, bpm: float = 104.0, seed: int = 0,
     for i, b in enumerate(beats):
         bar, beat = divmod(i, 4)
         nxt = beats[i + 1] if i + 1 < beats.size else b + 60 / bpm
-        if beat in (0, 2) and not (bar % 4 == 3 and beat == 2):
+        silent = breakdown is not None and breakdown[0] <= b < breakdown[1]
+        if beat in (0, 2) and not (bar % 4 == 3 and beat == 2) and not silent:
             truth.append(b)
             _place(track, b, 0.9 * _kick(int(0.3 * RATE), rng))
-        if beat == 1 and bar % 2 == 1:
+        if beat == 1 and bar % 2 == 1 and not silent:
             s = b + (nxt - b) / 2                   # the "and" of 2
             truth.append(s)
             _place(track, s, 0.8 * _kick(int(0.3 * RATE), rng))
@@ -297,6 +301,42 @@ def kick_profile(drums: np.ndarray, bass: np.ndarray, kicks: np.ndarray,
     return share, f"{voice[0]:.0f} Hz", f"{voice[1] * 1000:.0f} ms"
 
 
+def _clock(samples: int, rate: int) -> str:
+    seconds = samples / rate
+    return f"{int(seconds // 60)}:{seconds % 60:04.1f}"
+
+
+def gaps(drums: np.ndarray, found: np.ndarray, kept: np.ndarray, rate: int,
+         bpm: float | None, length: int) -> list[str]:
+    """Every stretch longer than two bars with no kept kick, and why the
+    drum hits in it were dropped. The sub goes only where kicks are kept,
+    so on a track given a large amount these are the places its low end
+    falls back to the original -- which by ear can sound like the bottom
+    falling out. Listed with times, to hold against what was heard."""
+    if kept.size == 0:
+        return ["no kicks kept anywhere"]
+    span = int((8 * 60.0 / bpm if bpm else 4.0) * rate)
+    heavy = (subbass._kick_level_db(drums, rate, found) >= subbass.MIN_KICK_LEVEL_DB
+             if found.size else np.zeros(0, dtype=bool))
+    kept_set = set(int(k) for k in kept)
+    edges = np.concatenate([[0], kept, [length]])
+    lines = []
+    for a, b in zip(edges[:-1], edges[1:]):
+        if b - a <= span:
+            continue
+        inside = (found > a) & (found < b)
+        light = int((inside & ~heavy).sum())
+        off = int(sum(1 for k, h in zip(found[inside], heavy[inside])
+                      if h and int(k) not in kept_set))
+        where = ("from the start" if a == 0 else
+                 "to the end" if b == length else "")
+        lines.append(f"no kick kept {_clock(a, rate)}-{_clock(b, rate)}"
+                     + (f" ({where})" if where else "")
+                     + f": {int(inside.sum())} drum hits there, {light} too light, "
+                       f"{off} off the grid")
+    return lines
+
+
 def grid_counts(drums: np.ndarray, kicks: np.ndarray, rate: int,
                 bpm: float | None, minutes: float) -> str:
     """Kicks a minute that a grid of quarters, eighths and sixteenths would
@@ -367,6 +407,7 @@ def measure_files(paths: list[Path], backends: list[str]) -> int:
                              f"{subbass.DEFAULT_FREQ_HZ:.0f} Hz, "
                              f"{subbass.DEFAULT_DECAY_S * 1000:.0f} ms)")
             notes.append(grid_counts(drums, kicks, RATE, tagged, minutes))
+            notes.extend(gaps(drums, kicks, kept, RATE, tagged, x.shape[0]))
         cells = []
         for name in columns:
             kicks = found[name]

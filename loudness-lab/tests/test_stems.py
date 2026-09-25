@@ -170,6 +170,35 @@ class TestSelectingTheKicks(unittest.TestCase):
         self.assertIsNone(report["grid_step"])
         self.assertEqual(report["off_grid"], 0)
 
+    def test_a_quiet_passage_keeps_its_kicks(self):
+        """Weight is judged against the hits nearby. Against the whole
+        track, a passage whose kicks sat 15 dB under the rest lost every
+        one, and got no sub beside passages given the full amount."""
+        _, drums, truth = fixtures.programme("groove", seconds=40.0, seed=0)
+        drums = drums.copy()
+        drums[20 * RATE:26 * RATE] *= 10 ** (-15 / 20)
+        bpm = 60 / float(np.median(np.diff(truth)))
+        _, kept, _ = self.select(drums, bpm)
+        there = (truth >= 20) & (truth < 26)
+        kept_there = kept[(kept >= 20 * RATE) & (kept < 26 * RATE)]
+        self.assertEqual(fixtures.score(kept_there, truth[there])[0], 1.0)
+
+    def test_a_breakdown_without_a_kick_does_not_make_its_snares_kicks(self):
+        """The other side of judging locally: where there is no kick at
+        all, the loudest nearby is a snare. QUIET_SECTION_DB stops the
+        comparison dropping that far."""
+        drums, truth, other = fixtures.backbeat(seed=0, breakdown=(10.0, 20.0))
+        _, kept, _ = self.select(drums, 104.0)
+        inside = kept[(kept >= 10.5 * RATE) & (kept < 19.5 * RATE)] / RATE
+        # What does get in is a tom fill: with no kick nearby, its higher
+        # toms are compared only with the fill, and pass. The cost of
+        # judging locally, stated rather than tested away -- the snares,
+        # claps and scratches of the breakdown stay out.
+        not_toms = [x for x in inside if np.min(np.abs(other["tom"] - x)) > 0.03]
+        self.assertEqual(not_toms, [])
+        self.assertLessEqual(len(inside), 6)
+        self.assertEqual(fixtures.score(kept, truth)[0], 1.0)
+
     def test_a_kick_under_a_snare_is_kept(self):
         # On 2 and 4 the kick and the snare land together. A filter asking
         # "is this ONLY a kick" dropped those and halved the kicks.
@@ -260,7 +289,18 @@ class TestTuningTheSub(unittest.TestCase):
         # exp(-t/decay) is down 20 dB at decay * ln(10).
         self.assertAlmostEqual(decay * np.log(10), 0.127, delta=0.001)
         self.assertEqual(subbass.tuned_burst(70.0, 5.0)[1], subbass.TUNED_DECAY_S[1])
-        self.assertEqual(subbass.tuned_burst(70.0, 0.001)[1], subbass.TUNED_DECAY_S[0])
+
+    def test_a_short_kick_still_gets_a_sub_long_enough_to_be_a_tone(self):
+        """1983 drum machines: kicks fading in 38-82 ms put eight of ten
+        tracks on the 30 ms floor -- one cycle of a 32 Hz tone, a thump.
+        Now at least TUNED_MIN_CYCLES of the sub's own pitch to -20 dB."""
+        for pitch, tail in ((63.0, 0.067), (66.0, 0.048), (43.0, 0.046), (61.0, 0.058)):
+            freq, decay = subbass.tuned_burst(pitch, tail)
+            cycles = decay * np.log(10) * freq
+            self.assertGreaterEqual(cycles, subbass.TUNED_MIN_CYCLES - 1e-9, pitch)
+        # Maniac: 63 Hz kick, 67 ms -> a 31.5 Hz sub that lasts ~127 ms.
+        freq, decay = subbass.tuned_burst(63.0, 0.067)
+        self.assertAlmostEqual(decay * np.log(10), 0.127, delta=0.003)
 
     def test_too_few_kicks_leave_the_burst_alone(self):
         drums, onsets = _kicks_at(70.0, 0.127)

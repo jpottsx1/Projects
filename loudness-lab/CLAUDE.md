@@ -153,7 +153,7 @@ every machine but the one that made it for a while.
 ```
 loudnesslab/     the Python: bs1770, spectrum, subbass, declip, expand,
                  air, mp3gain, decode, db, report, render, write, cli,
-                 stems (a Demucs drum stem, for finding kicks)
+                 stems (Demucs: a drum stem for kicks, a guide for air)
 tests/           its tests
 tools/           make_golden.py, the five checkers, measure_stem_kicks.py
 macapp/
@@ -701,10 +701,21 @@ kicks at 55-84 Hz: pitch within 0.5 Hz, tail within 15 ms. Without the
 stem the fixed 45 Hz, 0.12 s burst is unchanged.
 
 The grid is the other finding: Domino Dancing, Buffalo Stance and Push It
-lost 224-420 hits each as off-beat, most likely real syncopated kicks (an
-808 tresillo puts them between beats). `--files` now prints what a grid
-of quarters, eighths and sixteenths each keeps a minute, and how firmly
-the kicks sit on it; the stage stays on quarters until that is read.
+lost 224-420 hits each as off-beat, most likely real syncopated kicks.
+`--files` printed how firmly the kicks sit on quarters, eighths and
+sixteenths, and each record has a grid it plainly follows: straight ones
+quarters (0.95-1.00), Bananarama and Kylie eighths (1.00, against 0.87
+and 0.79 on quarters), Buffalo Stance sixteenths (0.96, against 0.37).
+
+So the grid is now picked per track: the tag's quarters, eighths or
+sixteenths, whichever the kicks sit on most firmly, the coarser of two
+within 0.05. A tag at half the tempo is simply the eighth grid, so the
+"try double the tag" step is gone. And a grid is used only at a fit of
+0.5 or better -- good fits read 0.79 and up, poor ones 0.11-0.37, and
+Domino Dancing's 0.32 had been dropping most of its kicks -- otherwise the
+weight filter works alone. On the synthetic backbeat that takes recall
+from 0.79 to 1.00 (the syncopated kicks) and precision from 0.88 to
+0.76-0.91: low floor toms in fills sit on a sixteenth grid too.
 
 `--files` now prints, per track, the share of the kick-band energy at the
 kept kicks that sits in the bass stem, and the pitch and tail of the
@@ -712,6 +723,33 @@ kick's low end measured on drums and bass together (the tail up to the
 next kick at most, marked ">" when still ringing). Checked on a synthetic
 808: 100% vs 0% by which stem holds the boom, 55 Hz exactly, tail 784 ms
 against a true 806.
+
+### Air: why none arrived, and air that follows the stems
+
+The 1988 folder got no air on any track, and not by accident: with `auto`
+on (the eighties profile), `--air` is a ceiling and each track gets its
+8-20 kHz shortfall against the reference -- and that folder measures 4.56
+dB BRIGHTER than the reference, so every track's shortfall was nothing.
+`--air-fixed` ("Same air on every track") gives every track the figure
+as set while the sub is still sized per track (`cli._air_for`).
+
+`--air-stems` ("Air follows the vocals and instruments"): at separation
+time the balance of 2-10 kHz energy between vocals+other and drums is
+kept, as an envelope at 100 frames a second, beside the kick source
+(`stems.load_air_guide`). The exciter's gain is set exactly as without it,
+then its harmonics are scaled by that balance -- so where vocals and
+instruments carry the top end the track gets precisely the air the same
+setting gives unguided, and where hi-hats and cymbals do (bright already,
+and where an exciter turns to grit) less or none. Subtler overall by
+design. The harmonics are still made from the original: the stems steer,
+nothing separated is heard. No guide for a track means no air on it, not
+air everywhere. Separations from before the guide existed are redone
+once when guided air is asked for.
+
+An earlier draft described the setting as "the rise where the guide is
+open". A test on a fixture whose voice had almost nothing above 8 kHz
+showed that was false (+37 dB there, relatively) -- the statement above
+is the one the code keeps, and the one the test holds it to.
 
 ### Punch put high-frequency artifacts on late-80s pop
 

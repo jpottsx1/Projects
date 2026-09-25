@@ -59,6 +59,14 @@ MODEL_RATE = 44100
 # times the size.
 KICK_SOURCE_RATE = 2000
 
+# The air guide: where the top end is carried by vocals and instruments
+# rather than by drums. Measured in the band the exciter works from, as an
+# energy envelope at a frame rate far below audio -- the guide moves with
+# phrases and hits, not with waveforms.
+GUIDE_BAND_HZ = (2000.0, 10000.0)
+GUIDE_RATE = 100                # frames a second
+GUIDE_SMOOTH_HZ = 8.0           # envelope smoothing: ~20 ms rise and fall
+
 _loaded: dict[str, object] = {}
 
 
@@ -168,9 +176,24 @@ def _cache_path(cache_dir: Path, key: str) -> Path:
     return Path(cache_dir) / key[:2] / f"{key}.npz"
 
 
+def _band_envelope(y: np.ndarray, rate: int) -> np.ndarray:
+    """Energy in GUIDE_BAND_HZ, smoothed and sampled at GUIDE_RATE."""
+    from scipy.signal import butter, sosfiltfilt
+    mono = np.asarray(y, dtype=np.float64)
+    mono = mono.mean(axis=1) if mono.ndim == 2 else mono
+    band = sosfiltfilt(butter(4, GUIDE_BAND_HZ, btype="band", fs=rate,
+                              output="sos"), mono)
+    env = sosfiltfilt(butter(2, GUIDE_SMOOTH_HZ, btype="low", fs=rate,
+                             output="sos"), band * band)
+    step = rate // GUIDE_RATE
+    return np.maximum(env[::step], 0.0).astype(np.float32)
+
+
 def store_kick_source(cache_dir: Path, x: np.ndarray, rate: int,
-                      drums: np.ndarray) -> Path:
-    """Keep what `detect_kicks` needs from a drum stem of `x`."""
+                      drums: np.ndarray,
+                      others: list[np.ndarray] | None = None) -> Path:
+    """Keep what `detect_kicks` needs from a drum stem of `x` -- and, given
+    the other stems (`others`: vocals, other), the air guide too."""
     mono = np.asarray(drums, dtype=np.float64)
     mono = mono.mean(axis=1) if mono.ndim == 2 else mono
     small = soxr.resample(mono, rate, KICK_SOURCE_RATE, quality="VHQ")
@@ -179,8 +202,13 @@ def store_kick_source(cache_dir: Path, x: np.ndarray, rate: int,
     # Written aside and renamed, so a run stopped mid-write cannot leave a
     # truncated file that the next run reads as a stem.
     partial = path.with_name(path.stem + ".partial.npz")
+    extra = {}
+    if others is not None:
+        extra = {"guide_drums": _band_envelope(drums, rate),
+                 "guide_tonal": _band_envelope(sum(others), rate)}
     np.savez_compressed(partial, drums=small.astype(np.float32),
-                        length=np.int64(x.shape[0]), rate=np.int64(rate))
+                        length=np.int64(x.shape[0]), rate=np.int64(rate),
+                        **extra)
     partial.replace(path)
     return path
 
@@ -200,5 +228,38 @@ def load_kick_source(cache_dir: Path, x: np.ndarray,
     return np.column_stack([mono, mono]).astype(np.float32)
 
 
-def has_kick_source(cache_dir: Path, x: np.ndarray) -> bool:
-    return _cache_path(cache_dir, audio_key(x)).exists()
+def has_kick_source(cache_dir: Path, x: np.ndarray, guide: bool = False) -> bool:
+    """Whether `x` was separated -- and, with `guide`, whether the air guide
+    was kept too. Separations from before the guide existed have only the
+    drums, so asking for air on them separates once more."""
+    path = _cache_path(cache_dir, audio_key(x))
+    if not path.exists():
+        return False
+    if not guide:
+        return True
+    with np.load(path) as stored:
+        return "guide_tonal" in stored.files
+
+
+def load_air_guide(cache_dir: Path, x: np.ndarray,
+                   rate: int) -> np.ndarray | None:
+    """Per sample of `x`, 0 to 1: the share of the 2-10 kHz energy that
+    vocals and instruments carry rather than drums. None if not kept.
+
+    The exciter multiplies its harmonics by this, so air lands where the
+    top end is a voice, a string, a synth -- and backs off where it is
+    hi-hats and cymbals, which are bright already and which an exciter
+    turns to grit.
+    """
+    path = _cache_path(cache_dir, audio_key(x))
+    if not path.exists():
+        return None
+    with np.load(path) as stored:
+        if "guide_tonal" not in stored.files:
+            return None
+        tonal = stored["guide_tonal"].astype(np.float64)
+        drums = stored["guide_drums"].astype(np.float64)
+    total = tonal + drums
+    share = np.where(total > 0, tonal / np.maximum(total, 1e-30), 0.0)
+    frames = np.arange(share.size) * (rate // GUIDE_RATE)
+    return np.interp(np.arange(x.shape[0]), frames, share).astype(np.float32)

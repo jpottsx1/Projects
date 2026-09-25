@@ -378,6 +378,8 @@ final class Engine: ObservableObject {
             }
             if profile.declip { arguments += ["--declip"] }
             if profile.stemKicks { arguments += ["--stem-kicks"] }
+            if profile.airFixed { arguments += ["--air-fixed"] }
+            if profile.airStems { arguments += ["--air-stems"] }
             if !compare { arguments += ["--no-compare"] }
             if dryRun { arguments += ["--dry-run"] }
             if let selection { arguments += ["--select", selection.path] }

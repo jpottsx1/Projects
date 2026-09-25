@@ -42,6 +42,10 @@ public struct Profile: Codable, Equatable, Sendable {
     // Find kicks on a Demucs drum stem, and skip the sub where they
     // disagree with the BPM tag. Off by default: it needs Demucs.
     public var stemKicks: Bool = false
+    // Air as set on every track even when `auto` sizes the sub, and air
+    // that follows the vocals and instruments rather than the hi-hats.
+    public var airFixed: Bool = false
+    public var airStems: Bool = false
 
     public init() {}
 
@@ -61,6 +65,8 @@ public struct Profile: Codable, Equatable, Sendable {
         case air
         case airTune = "air_tune"
         case stemKicks = "stem_kicks"
+        case airFixed = "air_fixed"
+        case airStems = "air_stems"
     }
 
     /// Tolerant of a key that is not there, which the synthesised decoder
@@ -103,6 +109,10 @@ public struct Profile: Codable, Equatable, Sendable {
         airTune = try number(.airTune, fallback.airTune)
         stemKicks = try values.decodeIfPresent(Bool.self, forKey: .stemKicks)
             ?? fallback.stemKicks
+        airFixed = try values.decodeIfPresent(Bool.self, forKey: .airFixed)
+            ?? fallback.airFixed
+        airStems = try values.decodeIfPresent(Bool.self, forKey: .airStems)
+            ?? fallback.airStems
     }
 
     public static let estimators = ["lufs_i", "s_p50", "s_p90", "s_p95", "s_max"]

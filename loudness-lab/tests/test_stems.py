@@ -25,7 +25,7 @@ from scipy.signal import butter, sosfiltfilt
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "tools"))
-from loudnesslab import cli, decode, render, stems, subbass  # noqa: E402
+from loudnesslab import air, cli, decode, render, stems, subbass  # noqa: E402
 import measure_stem_kicks as fixtures  # noqa: E402
 
 RATE = fixtures.RATE
@@ -136,21 +136,39 @@ class TestSelectingTheKicks(unittest.TestCase):
             found, kept, report = self.select(drums, 104.0)
             self.assertLess(fixtures.score(found, truth)[1], 0.5, drift)
             recall, precision, _ = fixtures.score(kept, truth)
-            self.assertGreaterEqual(precision, 0.85, drift)
-            # What is lost is the syncopated kick, off the beat: 6 of 29.
-            self.assertGreaterEqual(recall, 0.75, drift)
-            self.assertEqual(report["grid_bpm"], 104.0)
+            # Every kick, the syncopated one included: the grid is picked to
+            # fit the kicks, so a kick between beats is kept. What gets in
+            # with it is the low floor toms of the fills, which are kick
+            # weight and on a sixteenth grid -- the trade, measured.
+            self.assertEqual(recall, 1.0, drift)
+            self.assertGreaterEqual(precision, 0.75, drift)
 
-    def test_what_survives_agrees_with_the_tag(self):
+    def test_what_survives_is_close_to_the_kicks(self):
         # Before: more than two hits for every kick -- snares, claps, toms
-        # and scratches as well. After: kicks on 1 and 3, reading half the
-        # tag, which is one kick every other beat.
+        # and scratches as well. After: within a third of the real count.
         drums, truth, _ = fixtures.backbeat(seed=0, drift=0.015)
         found, kept, _ = self.select(drums, 104.0)
         self.assertGreater(found.size, 2 * truth.size)
-        self.assertLessEqual(kept.size, truth.size)
-        self.assertAlmostEqual(fixtures.implied_bpm(kept, RATE) / 104.0, 0.5,
-                               delta=0.03)
+        self.assertLessEqual(kept.size, 1.35 * truth.size)
+
+    def test_the_grid_is_the_one_the_kicks_sit_on(self):
+        # Four-on-the-floor sits on quarters. Kicks on every eighth -- a
+        # SAW-style record, or a tag at half the tempo -- on eighths.
+        _, drums, truth = fixtures.programme("groove", seed=0)
+        bpm = 60 / float(np.median(np.diff(truth)))
+        self.assertEqual(self.select(drums, bpm)[2]["grid_step"], 1)
+        self.assertEqual(self.select(drums, bpm / 2)[2]["grid_step"], 2)
+        self.assertEqual(self.select(drums, bpm / 4)[2]["grid_step"], 4)
+
+    def test_a_loose_fit_is_no_grid_at_all(self):
+        # Domino Dancing's best fit was 0.32: a grid that loose drops most
+        # of the kicks. Under MIN_GRID_COHERENCE the weight filter works
+        # alone rather than trusting it.
+        drums, _, _ = fixtures.backbeat(seed=0, drift=0.03)
+        _, _, report = self.select(drums, 104.0)
+        self.assertLess(report["grid_coherence"], subbass.MIN_GRID_COHERENCE)
+        self.assertIsNone(report["grid_step"])
+        self.assertEqual(report["off_grid"], 0)
 
     def test_a_kick_under_a_snare_is_kept(self):
         # On 2 and 4 the kick and the snare land together. A filter asking
@@ -172,16 +190,15 @@ class TestSelectingTheKicks(unittest.TestCase):
             hits = [h for h in alone if np.min(np.abs(kept / RATE - h)) <= 0.03]
             self.assertEqual(hits, [], kind)
 
-    def test_a_tag_at_half_the_tempo_moves_to_double_not_to_every_other_kick(self):
+    def test_a_tag_at_half_the_tempo_keeps_every_kick(self):
         # Four-on-the-floor on a half-speed grid lands alternately on and
-        # exactly between its beats. Fitting that grid would keep every
-        # other kick; the grid at double the tag keeps them all.
+        # exactly between its beats. Quarters of that tag would keep every
+        # other kick; its eighths keep them all.
         _, drums, truth = fixtures.programme("groove", seed=0)
         bpm = 60 / float(np.median(np.diff(truth)))
         _, kept, report = self.select(drums, bpm / 2)
-        self.assertAlmostEqual(report["grid_bpm"], bpm, places=6)
+        self.assertEqual(report["grid_step"], 2)
         self.assertEqual(fixtures.score(kept, truth)[:2], (1.0, 1.0))
-        self.assertAlmostEqual(self.select(drums, bpm)[2]["grid_bpm"], bpm, places=6)
 
     def test_a_tag_that_fits_no_grid_falls_back_to_weight_alone(self):
         # Not refused: the kicks that are heavy enough still get their sub.
@@ -326,7 +343,7 @@ class TestTheStageUsesTheStem(unittest.TestCase):
         self.assertGreater(on_stem["applied_db"], 1.0)
 
     def test_a_tag_at_half_the_tempo_still_gets_a_sub_on_every_kick(self):
-        # Refused, once. Now the grid moves to double the tag and every kick
+        # Refused, once. Now the grid is the tag's eighths and every kick
         # keeps its burst, and the log says which grid it used.
         stems.store_kick_source(self.cache, self.mix, RATE, self.drums)
         result = self.run_one(self.job(bpm=self.bpm / 2))
@@ -334,7 +351,7 @@ class TestTheStageUsesTheStem(unittest.TestCase):
         seconds = self.mix.shape[0] / RATE
         self.assertAlmostEqual(result["kicks_per_minute"] * seconds / 60,
                                self.truth.size, delta=1)
-        self.assertIn("double", result["reason"])
+        self.assertIn("eighths", result["reason"])
 
     def test_a_backbeat_track_gets_its_sub(self):
         """The four tracks the first real run skipped: snare thump, fills
@@ -405,7 +422,9 @@ class TestTheSeparationPass(unittest.TestCase):
 
     def separate(self, x, rate, backend):
         self.calls += 1
-        return {"drums": self.drums}
+        quiet = np.zeros_like(self.drums)
+        return {"drums": self.drums, "vocals": quiet, "other": quiet,
+                "bass": quiet}
 
     def run_pass(self, jobs, separate=None):
         out = io.StringIO()
@@ -418,7 +437,8 @@ class TestTheSeparationPass(unittest.TestCase):
 
     @staticmethod
     def job(**changes):
-        return {"path": "a.mp3", "name": "a", "amount": 5.0, "skip": None, **changes}
+        return {"path": "a.mp3", "name": "a", "amount": 5.0, "skip": None,
+                "stem_kicks": True, **changes}
 
     def test_each_track_is_separated_once(self):
         events = self.run_pass([self.job()])
@@ -433,6 +453,20 @@ class TestTheSeparationPass(unittest.TestCase):
         self.run_pass([self.job(amount=0.0), self.job(skip="within 0.5 dB")])
         self.assertEqual(self.calls, 0)
 
+    def test_guided_air_is_separated_even_with_no_sub(self):
+        self.run_pass([self.job(amount=0.0, stem_kicks=False, air=2.0,
+                                air_stems=True)])
+        self.assertEqual(self.calls, 1)
+        self.assertTrue(stems.has_kick_source(self.cache, self.mix, guide=True))
+
+    def test_a_separation_without_the_guide_is_redone_for_air(self):
+        # Separations from before the guide existed kept only the drums.
+        stems.store_kick_source(self.cache, self.mix, RATE, self.drums)
+        self.assertFalse(stems.has_kick_source(self.cache, self.mix, guide=True))
+        self.run_pass([self.job(air=2.0, air_stems=True)])
+        self.assertEqual(self.calls, 1)
+        self.assertIsNotNone(stems.load_air_guide(self.cache, self.mix, RATE))
+
     def test_a_failure_is_carried_to_the_track_not_raised(self):
         def broken(x, rate, backend):
             raise RuntimeError("MPS out of memory")
@@ -440,6 +474,138 @@ class TestTheSeparationPass(unittest.TestCase):
         events = self.run_pass([job], separate=broken)
         self.assertEqual(events[0]["status"], "error")
         self.assertIn("out of memory", job["stem_error"])
+
+
+def _hats_then_voice(seconds: float = 12.0):
+    """A drum stem of bright hi-hat noise in the first half only, and a
+    'vocal' -- a 3-6 kHz tone cluster -- in the second half only. The mix is
+    both. Returns (mix, drums, voice), each stereo."""
+    from scipy.signal import butter, sosfilt
+    n = int(seconds * RATE)
+    rng = np.random.default_rng(7)
+    t = np.arange(n) / RATE
+    half = n // 2
+    hats = sosfilt(butter(4, 6000, btype="high", fs=RATE, output="sos"),
+                   rng.standard_normal(n)) * 0.2
+    hats[half:] = 0
+    voice = sum(np.sin(2 * np.pi * f * t) for f in (3100, 4200, 5300)) * 0.08
+    voice[:half] = 0
+    st = lambda y: np.stack([y, y], axis=1).astype(np.float32)  # noqa: E731
+    return st(hats + voice), st(hats), st(voice)
+
+
+class TestAirFollowsTheStems(unittest.TestCase):
+    """Air where vocals and instruments carry the top end, not hi-hats."""
+
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.cache = Path(self.dir.name)
+        self.mix, self.drums, self.voice = _hats_then_voice()
+        stems.store_kick_source(self.cache, self.mix, RATE, self.drums,
+                                [self.voice, np.zeros_like(self.voice)])
+        self.half = self.mix.shape[0] // 2
+
+    def tearDown(self):
+        self.dir.cleanup()
+
+    def test_the_guide_opens_on_the_voice_and_shuts_on_the_hats(self):
+        guide = stems.load_air_guide(self.cache, self.mix, RATE)
+        self.assertEqual(guide.shape, (self.mix.shape[0],))
+        second = RATE
+        self.assertLess(float(np.median(guide[second:self.half - second])), 0.05)
+        self.assertGreater(float(np.median(guide[self.half + second:-second])), 0.95)
+
+    def test_the_air_goes_where_the_guide_is_open(self):
+        guide = stems.load_air_guide(self.cache, self.mix, RATE)
+        out, report = air.excite(self.mix, RATE, amount_db=3.0, guide=guide)
+        self.assertTrue(report["guided"])
+        added = (out.astype(np.float64) - self.mix)[:, 0]
+        second = RATE
+        on_hats = float(np.sqrt(np.mean(added[second:self.half - second] ** 2)))
+        on_voice = float(np.sqrt(np.mean(added[self.half + second:-second] ** 2)))
+        self.assertGreater(on_voice, 20 * on_hats)
+        # Unguided, the hats get air as well: the thing this is for.
+        plain, _ = air.excite(self.mix, RATE, amount_db=3.0)
+        added = (plain.astype(np.float64) - self.mix)[:, 0]
+        self.assertGreater(float(np.sqrt(np.mean(added[second:self.half - second] ** 2))),
+                           5 * on_hats)
+
+    def test_where_the_guide_is_open_the_air_is_what_plain_air_adds(self):
+        """The gain is set as without a guide, then the guide takes air
+        away where the drums carry the top end. So where it is open, the
+        track gets exactly what the same setting would add unguided -- not
+        an average squeezed into fewer passages, which would make them
+        hotter than plain air at that setting ever is."""
+        guide = stems.load_air_guide(self.cache, self.mix, RATE)
+        out, guided = air.excite(self.mix, RATE, amount_db=3.0, guide=guide)
+        plain_out, plain = air.excite(self.mix, RATE, amount_db=3.0)
+        second = RATE
+        voice = slice(self.half + second, self.mix.shape[0] - second)
+        with_guide = (out.astype(np.float64) - self.mix)[voice, 0]
+        without = (plain_out.astype(np.float64) - self.mix)[voice, 0]
+        ratio = np.sqrt(np.mean(with_guide ** 2) / np.mean(without ** 2))
+        self.assertAlmostEqual(float(ratio), 1.0, delta=0.05)
+        # And over the whole track, clearly less than unguided.
+        self.assertAlmostEqual(plain["measured_db"], 3.0, delta=0.1)
+        self.assertLess(guided["measured_db"], plain["measured_db"] - 0.5)
+
+    def test_no_guide_means_no_air_rather_than_air_everywhere(self):
+        empty = Path(self.dir.name) / "elsewhere"
+        job = {"path": "t.mp3", "name": "t", "folder": "f", "stem": "t",
+               "amount": 0.0, "skip": None, "label": "air", "freq": 45.0,
+               "decay": 0.12, "punch": 0.0, "punch_decay": 8.0,
+               "declip": False, "declip_max": 6.0, "min_activity": 0.0,
+               "target_lra": 0.0, "max_attenuation": 6.0, "transient": 0.0,
+               "min_crest": 11.0, "air": 3.0, "air_tune": 3500.0,
+               "stem_kicks": False, "air_stems": True, "bpm": None,
+               "stem_cache": str(empty), "target": -16.0, "estimator": "s_p95",
+               "peak_ceiling": -1.0, "compare": True, "dry_run": True,
+               "out_dir": self.dir.name, "fmt": "flac"}
+        with mock.patch.object(decode, "decode", return_value=self.mix), \
+                mock.patch.object(decode, "TARGET_RATE", RATE):
+            result = render.one(job)
+            self.assertFalse(result["air"]["applied"])
+            self.assertIn("no air guide", result["air"]["note"])
+            result = render.one({**job, "stem_cache": str(self.cache)})
+        self.assertTrue(result["air"]["applied"])
+        self.assertTrue(result["air"]["guided"])
+
+
+class TestFixedAir(unittest.TestCase):
+    """--air-fixed: with --auto sizing the sub, air stays the amount set.
+    A folder brighter than the reference otherwise gets none at any
+    setting -- the 1988 folder, at +4.56 dB, got none."""
+
+    @staticmethod
+    def args(**changes):
+        import argparse
+        base = {"air": 3.0, "auto": True, "air_fixed": False}
+        return argparse.Namespace(**{**base, **changes})
+
+    def air_for(self, args, shortfall):
+        reason = None if shortfall > 0 else "already within 0.0 dB of the reference"
+        with mock.patch.object(cli, "_auto_amount",
+                               return_value=(max(shortfall, 0.0), reason)):
+            return cli._air_for(args, conn=None, path="t.mp3",
+                                top_curve={8000: -20.0})
+
+    def test_a_bright_track_gets_no_air_when_sized(self):
+        self.assertEqual(self.air_for(self.args(), shortfall=-4.56), 0.0)
+
+    def test_fixed_air_ignores_the_reference(self):
+        self.assertEqual(self.air_for(self.args(air_fixed=True), shortfall=-4.56), 3.0)
+        self.assertEqual(self.air_for(self.args(air_fixed=True), shortfall=1.2), 3.0)
+
+    def test_sized_air_is_the_shortfall(self):
+        self.assertEqual(self.air_for(self.args(), shortfall=1.2), 1.2)
+
+    def test_without_auto_air_is_always_as_set(self):
+        self.assertEqual(self.air_for(self.args(auto=False), shortfall=-4.56), 3.0)
+
+    def test_it_is_a_profile_setting(self):
+        from loudnesslab import profiles
+        self.assertIs(profiles.FIELDS["air_fixed"], False)
+        self.assertIs(profiles.FIELDS["air_stems"], False)
 
 
 if __name__ == "__main__":

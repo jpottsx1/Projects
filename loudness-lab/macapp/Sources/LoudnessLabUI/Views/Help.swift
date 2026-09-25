@@ -438,6 +438,43 @@ enum Help {
         than silently dropped.
         """)
 
+    static let airFixed = HelpEntry(
+        title: "Same air on every track",
+        summary: "Give every track the Air amount, even when the sub is sized per track.",
+        detail: """
+        With "Size it per track against a reference" on, Air is normally a \
+        ceiling: each track gets only what its 8-20 kHz band falls short of \
+        the reference. A folder already brighter than the reference gets \
+        none at any setting -- the 1988 dance folder measured 4.56 dB \
+        brighter, and every track came back with no air.
+
+        On, every track gets the Air amount as set, while the sub is still \
+        sized per track. Air is a taste control rather than a repair, so a \
+        fixed amount is often what is wanted.
+        """)
+
+    static let airStems = HelpEntry(
+        title: "Air follows the vocals and instruments",
+        summary: "Put air where voices and instruments carry the top end, not hi-hats.",
+        detail: """
+        Plain air excites everything above the tune frequency, hi-hats and \
+        cymbals included. Those are bright already, and exciting them is \
+        where an exciter turns to grit.
+
+        With this on, each track is separated with Demucs (once, and kept), \
+        and the air follows the balance of the top end moment to moment: \
+        full where vocals, synths and strings carry it, backing away where \
+        the drums do. Where vocals and instruments carry the top end, the \
+        track gets exactly the air the same setting gives without this; \
+        where the drums do, less or none. So across a track it is subtler -- \
+        the Results column says what it actually added.
+
+        The separated tracks only steer the air; the harmonics are still \
+        made from the original, so nothing from the separation is heard. A \
+        track that could not be separated gets no air rather than air \
+        everywhere. Needs Demucs, like "Find kicks on the drum track".
+        """)
+
     static let stemKicks = HelpEntry(
         title: "Find kicks on the drum track",
         summary: "Separate the drums with Demucs and find the kicks there, not in the full mix.",
@@ -671,7 +708,7 @@ enum Help {
                                  stemKicks]),
         HelpSection("Attack", [punch, punchDecay]),
         HelpSection("Dynamics", [targetLRA, maxAttenuation, transient, minCrest]),
-        HelpSection("Air", [air, airTune]),
+        HelpSection("Air", [air, airFixed, airStems, airTune]),
         HelpSection("Level", [target, estimator, peakCeiling]),
         HelpSection("The run", [limit, format, output, compare, dryRun]),
         HelpSection("Listening", [switching, matchLoudness, blind]),

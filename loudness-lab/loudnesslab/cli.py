@@ -135,6 +135,22 @@ def _auto_amount(conn, path: str, curve: dict, cap: float,
     return min(shortfall, cap), None
 
 
+def _air_for(args: argparse.Namespace, conn, path: str, top_curve: dict) -> float:
+    """The air one track gets.
+
+    With --auto the --air figure is a ceiling and each track gets its own
+    shortfall against the reference over 8-20 kHz, as the sub does -- unless
+    --air-fixed, which gives every track the figure as set. Without it, a
+    folder brighter than the reference gets no air at any setting: the 1988
+    folder, 4.56 dB brighter, got none on every track.
+    """
+    if args.air <= 0 or args.air_fixed or not (args.auto and top_curve):
+        return args.air
+    amount, _ = _auto_amount(conn, path, top_curve, args.air,
+                             bands=report.TOP_SHAPE_BANDS)
+    return amount
+
+
 def _level_to_target(audio, args, measured: dict):
     """Bring the finished audio to the profile's level. Returns the audio,
     the gain applied, and the resulting true peak.
@@ -181,18 +197,27 @@ def _separate_for_kicks(jobs: list[dict], cache_dir: Path, porcelain: bool,
     the reason, and the worker skips the sub on it and says why -- the
     de-clipping and dynamics it may also want still happen.
     """
+    def kicks(job):
+        return job.get("stem_kicks") and float(job["amount"]) > 0
+
+    def guide(job):
+        return job.get("air_stems") and float(job.get("air", 0.0)) > 0
+
     wanted = [job for job in jobs
-              if job.get("skip") is None and float(job["amount"]) > 0]
+              if job.get("skip") is None and (kicks(job) or guide(job))]
     for done, job in enumerate(wanted, 1):
         status, reason = "ok", None
         try:
             audio = decode.decode(Path(job["path"]))
-            if stems.has_kick_source(cache_dir, audio):
+            if stems.has_kick_source(cache_dir, audio, guide=True):
                 reason = "already separated"
             else:
+                # Always keep both: separating is the cost, and the guide is
+                # a few hundred kilobytes on top of what the kicks need.
                 parts = stems.separate(audio, decode.TARGET_RATE, "demucs")
                 stems.store_kick_source(cache_dir, audio, decode.TARGET_RATE,
-                                        parts["drums"])
+                                        parts["drums"],
+                                        [parts["vocals"], parts["other"]])
         except Exception as exc:  # per track, like every other stage
             status = "error"
             reason = f"{type(exc).__name__}: {exc}"[:300]
@@ -407,8 +432,9 @@ def cmd_subbass(args: argparse.Namespace) -> int:
     if args.auto and not args.reference:
         return fail("error: --auto needs a reference corpus. Give --reference, "
                     "or set it in the profile.")
-    if args.stem_kicks and "demucs" not in stems.available():
-        return fail("error: finding kicks on the drum stem needs Demucs, which "
+    if (args.stem_kicks or (args.air_stems and args.air > 0)) \
+            and "demucs" not in stems.available():
+        return fail("error: the drum stem and the air guide need Demucs, which "
                     "is not installed here.\nDouble-click "
                     "'Measure Kick Detection.command' once to install it, or "
                     "run: .venv/bin/pip install demucs")
@@ -504,7 +530,7 @@ def cmd_subbass(args: argparse.Namespace) -> int:
                     f"--auto needs a reference folder; {args.reference!r} "
                     f"matched none (or matched several).\nName one of the "
                     f"folders that report lowend --by folder lists.")
-            if args.air > 0:
+            if args.air > 0 and not args.air_fixed:
                 # Same idea as the sub's shortfall, over the band air is
                 # measured in: --air becomes the ceiling per track gets
                 # sized up to, rather than a flat amount every track gets
@@ -517,10 +543,8 @@ def cmd_subbass(args: argparse.Namespace) -> int:
             for row in rows:
                 amounts[row["path"]] = _auto_amount(conn, row["path"], curve,
                                                     args.max_amount)
-                if args.air > 0 and top_curve:
-                    air_amounts[row["path"]] = _auto_amount(
-                        conn, row["path"], top_curve, args.air,
-                        bands=report.TOP_SHAPE_BANDS)
+                air_amounts[row["path"]] = (
+                    _air_for(args, conn, row["path"], top_curve), None)
     finally:
         conn.close()
     if not rows:
@@ -573,6 +597,7 @@ def cmd_subbass(args: argparse.Namespace) -> int:
             "transient": args.transient, "min_crest": args.min_crest,
             "air": air_amount, "air_tune": args.air_tune,
             "stem_kicks": bool(args.stem_kicks), "bpm": row["bpm"],
+            "air_stems": bool(args.air_stems),
             "stem_cache": str(args.stem_cache or database.parent / "stem-cache"),
             "target": args.target, "estimator": args.estimator,
             "peak_ceiling": args.peak_ceiling,
@@ -604,8 +629,10 @@ def cmd_subbass(args: argparse.Namespace) -> int:
         out(f"profile: {args.profile}")
     heading = ("sub=auto (per track)" if args.auto
                else f"sub={args.amount:+.1f} dB")
-    air_heading = (f"air<=+{args.air:.0f} dB (per track)" if args.auto
-                  else f"air+{args.air:.0f} dB")
+    air_heading = ((f"air<=+{args.air:.0f} dB (per track)"
+                    if args.auto and not args.air_fixed
+                    else f"air+{args.air:.0f} dB")
+                   + (" following vocals and instruments" if args.air_stems else ""))
     out(f"KICK PROTOTYPE  {heading} in "
         f"{subbass.SUB_LOW_HZ:.0f}-{subbass.SUB_HIGH_HZ:.0f} Hz  "
         f"punch={args.punch:+.1f} dB in "
@@ -697,7 +724,7 @@ def cmd_subbass(args: argparse.Namespace) -> int:
                      if args.air > 0 else "")
                   + note)
 
-    if args.stem_kicks:
+    if args.stem_kicks or (args.air_stems and args.air > 0):
         _separate_for_kicks(jobs, Path(jobs[0]["stem_cache"]), porcelain,
                             args.quiet)
     results = render.run(jobs, workers=workers, progress=report_one)
@@ -1327,6 +1354,16 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_argument("--stem-cache", type=Path, default=None, metavar="DIR",
                      help="--stem-kicks: where separated drum parts are kept "
                           "(default: stem-cache/ beside the database)")
+    sub.add_argument("--air-fixed", action="store_true", default=None,
+                     help="--auto: give every track the --air amount rather "
+                          "than sizing it against the reference. Without "
+                          "this a folder brighter than the reference gets "
+                          "no air at any setting")
+    sub.add_argument("--air-stems", action="store_true", default=None,
+                     help="--air: put the air where vocals and instruments "
+                          "carry the top end, not hi-hats and cymbals, from "
+                          "a Demucs separation. --air is then the amount "
+                          "where the guide is fully open. Needs Demucs")
     sub.add_argument("--summary-only", action="store_true",
                      help="print only the policy preview, not a row per track")
     sub.add_argument("--dry-run", action="store_true",

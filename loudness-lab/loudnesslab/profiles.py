@@ -53,6 +53,13 @@ FIELDS = {
     # skip the sub where they disagree with the BPM tag. Off by default:
     # it needs Demucs installed, and separating is slow the first time.
     "stem_kicks": False,
+    # Air as a fixed amount on every track even when `auto` sizes the sub.
+    # Without it, `auto` sizes air against the reference too, and a folder
+    # already brighter than the reference gets none at any setting.
+    "air_fixed": False,
+    # Air where vocals and instruments carry the top end, and not where
+    # hi-hats and cymbals do. Needs Demucs, like `stem_kicks`.
+    "air_stems": False,
 }
 
 BUILT_IN = {

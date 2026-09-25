@@ -152,16 +152,26 @@ GRID_TOLERANCE = 0.12
 # The grid is found locally, from the kicks this many beats either side,
 # so a live drummer's drift is followed rather than fought.
 GRID_WINDOW_BEATS = 8
-# How firmly the kicks agree on where the beat is: the length of their mean
-# position within a beat, as a unit vector -- 1 when every kick lands on
-# the same spot, 0 when they are spread evenly. Measured on synthetic
-# drums: four-on-the-floor tagged at HALF its tempo reads 0.01 (the kicks
-# fall alternately on and exactly between the tagged beats), while every
-# correctly tagged case, drifting or syncopated, read 0.42 or more. Below
-# this the tag's grid is not the kicks' grid, and thinning the kicks to fit
-# it would quietly put sub under every other one -- so select_kicks tries
-# double the tag, then no grid, rather than using it.
-MIN_GRID_COHERENCE = 0.25
+# How firmly the kicks agree on where the grid is: the length of their mean
+# position within a step, as a unit vector -- 1 when every kick lands on
+# the same spot, 0 when they are spread evenly.
+#
+# Which grid is picked per track, from quarters, eighths and sixteenths of
+# the tag: the one the kicks sit on most firmly, and the coarser of two
+# within GRID_TIE of each other, since a coarser grid drops more of what
+# is not a kick. Measured on twelve 1988 dance records: straight records
+# sat on quarters at 0.95-1.00; Bananarama and Kylie on eighths at 1.00
+# (0.87 and 0.79 on quarters); Buffalo Stance on sixteenths at 0.96 (0.37
+# on quarters, which dropped 60% of its kicks). A tag at half the real
+# tempo is the eighth grid, so it needs no case of its own.
+#
+# A grid is only used if it fits at least this well. Good fits read 0.79
+# and up, poor ones 0.11-0.37: Domino Dancing's best was 0.32, and a grid
+# that loose dropped most of its kicks. Below this the weight filter works
+# alone, as with no tag.
+MIN_GRID_COHERENCE = 0.5
+GRID_TIE = 0.05
+GRID_SUBDIVISIONS = (1, 2, 4)
 
 
 def _kick_level_db(drums: np.ndarray, rate: int, kicks: np.ndarray) -> np.ndarray:
@@ -226,16 +236,12 @@ def select_kicks(drums: np.ndarray, rate: int, kicks: np.ndarray,
 
     Nothing here turns a track away. Filtered hit by hit, every kick that
     survives is one that belongs under a burst, so a disagreement with the
-    tag costs the hits that disagree and not the record. Which grid:
-
-    - the tag, if the kicks settle on it;
-    - double the tag, if they do not and settle there instead -- Serato
-      halves some tempos, and four-on-the-floor on a half-speed grid lands
-      alternately on and exactly between its beats;
-    - none, if neither fits: the weight filter alone, as with no tag.
+    tag costs the hits that disagree and not the record. The grid is the
+    tag's quarters, eighths or sixteenths, whichever the kicks sit on (see
+    MIN_GRID_COHERENCE); if none fits, the weight filter works alone.
     """
     report = {"found": int(kicks.size), "not_kick_shaped": 0, "off_grid": 0,
-              "grid_bpm": None, "grid_coherence": None}
+              "grid_bpm": None, "grid_step": None, "grid_coherence": None}
     if kicks.size == 0:
         return kicks, strengths, report
     shaped = _kick_level_db(drums, rate, kicks) >= MIN_KICK_LEVEL_DB
@@ -243,16 +249,18 @@ def select_kicks(drums: np.ndarray, rate: int, kicks: np.ndarray,
     kicks, strengths = kicks[shaped], strengths[shaped]
     if (kicks.size >= 8 and tagged_bpm is not None
             and np.isfinite(tagged_bpm) and tagged_bpm > 0):
-        for bpm in (float(tagged_bpm), 2.0 * float(tagged_bpm)):
-            grid, coherence = _on_grid(kicks, rate, bpm)
-            if report["grid_coherence"] is None:
-                report["grid_coherence"] = round(coherence, 3)
-            if coherence >= MIN_GRID_COHERENCE:
-                report["grid_bpm"] = bpm
-                report["grid_coherence"] = round(coherence, 3)
-                report["off_grid"] = int((~grid).sum())
-                kicks, strengths = kicks[grid], strengths[grid]
-                break
+        fits = {step: _on_grid(kicks, rate, float(tagged_bpm), step)
+                for step in GRID_SUBDIVISIONS}
+        best = max(coherence for _, coherence in fits.values())
+        step = next(s for s in GRID_SUBDIVISIONS
+                    if fits[s][1] >= best - GRID_TIE)
+        grid, coherence = fits[step]
+        report["grid_coherence"] = round(coherence, 3)
+        if coherence >= MIN_GRID_COHERENCE:
+            report["grid_bpm"] = float(tagged_bpm)
+            report["grid_step"] = step
+            report["off_grid"] = int((~grid).sum())
+            kicks, strengths = kicks[grid], strengths[grid]
     if strengths.size and strengths.max() > 0:
         strengths = strengths / strengths.max()
     return kicks, strengths, report
@@ -266,9 +274,9 @@ def describe_selection(report: dict, tagged_bpm: float | None) -> str | None:
     grid = ""
     if report["grid_bpm"] is None and tagged_bpm:
         grid = "; no beat grid fitted the tag, so weight alone"
-    elif report["grid_bpm"] and tagged_bpm and report["grid_bpm"] != tagged_bpm:
-        grid = (f"; on a {report['grid_bpm']:.0f} BPM grid, double the "
-                f"{tagged_bpm:.0f} tag")
+    elif report["grid_step"] and report["grid_step"] > 1:
+        grid = (f"; on a grid of {('', '', 'eighths', '', 'sixteenths')[report['grid_step']]} "
+                f"at {report['grid_bpm']:.0f} BPM")
     if not (report["not_kick_shaped"] or report["off_grid"] or grid):
         return None
     return (f"kicks: kept {kept} of {report['found']} drum hits "

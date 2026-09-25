@@ -465,11 +465,12 @@ enum Help {
         scratches) are dropped. A syncopated kick off the beat is dropped \
         with them: one fewer burst, never one in the wrong place.
 
-        What survives is checked against the tag. Where the kicks still do \
-        not agree with it, or do not settle on a beat at the tagged tempo \
-        at all (a tag at half the real tempo does this), the track gets no \
-        sub and the log says why. A track with no BPM tag gets the weight \
-        filter only.
+        No track is turned away for disagreeing with its tag: only the hits \
+        that disagree go. If the kicks do not line up with the tagged tempo \
+        but do with double it (Serato halves some tempos), that grid is \
+        used. If they fit neither, or there is no BPM tag, the weight filter \
+        works alone. The log says what was kept and dropped, and which grid \
+        was used. A track gets no sub only if too few kicks are left.
 
         Separating is the slowest thing a run does, the first time. What it \
         finds is kept, so running the same folder again with \

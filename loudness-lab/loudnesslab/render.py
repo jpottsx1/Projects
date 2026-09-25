@@ -125,15 +125,15 @@ def one(job: dict) -> dict:
                         + (f" ({job['stem_error']})" if job.get("stem_error") else ""))
             elif amount > 0:
                 # Every drum hit with an attack in the kick band, then only
-                # the ones heavy enough to be a kick and on the beat. The
-                # tempo check is on what survives, as the last word.
+                # the ones heavy enough to be a kick and on the beat.
                 kicks, strengths = subbass.detect_kicks(
                     audio, decode.TARGET_RATE, drums)
                 kicks, strengths, selection = subbass.select_kicks(
                     drums, decode.TARGET_RATE, kicks, strengths, job.get("bpm"))
                 found = (kicks, strengths)
-                skip = selection["refused"] or subbass.tempo_check(
-                    kicks, decode.TARGET_RATE, job.get("bpm"))
+                # No whole-track verdict: the filters have already dropped
+                # every hit that does not belong. Too few left is the one
+                # reason to go without, and enhance() says that itself.
         # The content check needs the audio, not the per-frame band
         # statistics, so it happens here rather than in the query.
         if amount > 0 and skip is None:
@@ -268,15 +268,8 @@ def one(job: dict) -> dict:
         # de-clipping, range or attack it reads as a complaint that nothing
         # happened -- on a row that shows what happened.
         reason = None
-    if reason is None and selection is not None and (
-            selection["not_kick_shaped"] or selection["off_grid"]):
-        # What the filters threw away, so a track whose sub went under
-        # fewer hits than it has drums says why.
-        kept = (selection["found"] - selection["not_kick_shaped"]
-                - selection["off_grid"])
-        reason = (f"kicks: kept {kept} of {selection['found']} drum hits "
-                  f"({selection['not_kick_shaped']} too light, "
-                  f"{selection['off_grid']} off the beat)")
+    if reason is None and selection is not None:
+        reason = subbass.describe_selection(selection, job.get("bpm"))
 
     manifest = None
     if variants:

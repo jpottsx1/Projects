@@ -120,35 +120,6 @@ class TestSeparate(unittest.TestCase):
             self.assertTrue(np.all(np.isfinite(stem)), name)
 
 
-class TestTheTempoCheck(unittest.TestCase):
-    """Kicks every `period` seconds, against a tag. 120 BPM is 0.5 s."""
-
-    @staticmethod
-    def kicks(period: float, count: int = 40) -> np.ndarray:
-        return (np.arange(count) * period * RATE).astype(int)
-
-    def test_one_kick_per_beat_passes(self):
-        self.assertIsNone(subbass.tempo_check(self.kicks(0.5), RATE, 120.0))
-
-    def test_double_is_refused(self):
-        # The octave bass on the mix, or a busy funk pattern on the stem.
-        note = subbass.tempo_check(self.kicks(0.25), RATE, 120.0)
-        self.assertIsNotNone(note)
-        self.assertIn("240", note)
-
-    def test_half_is_accepted(self):
-        # A kick every other tagged beat: a doubled tag, or half-time.
-        self.assertIsNone(subbass.tempo_check(self.kicks(1.0), RATE, 120.0))
-
-    def test_the_tolerance_is_five_percent(self):
-        self.assertIsNone(subbass.tempo_check(self.kicks(60 / 125.0), RATE, 120.0))
-        self.assertIsNotNone(subbass.tempo_check(self.kicks(60 / 128.0), RATE, 120.0))
-
-    def test_no_tag_cannot_refuse(self):
-        for tag in (None, float("nan"), 0.0):
-            self.assertIsNone(subbass.tempo_check(self.kicks(0.25), RATE, tag))
-
-
 class TestSelectingTheKicks(unittest.TestCase):
     """select_kicks on drum parts built from what stopped four real tracks:
     a snare with low thump on 2 and 4, a clap, tom fills, scratches, and a
@@ -168,13 +139,18 @@ class TestSelectingTheKicks(unittest.TestCase):
             self.assertGreaterEqual(precision, 0.85, drift)
             # What is lost is the syncopated kick, off the beat: 6 of 29.
             self.assertGreaterEqual(recall, 0.75, drift)
-            self.assertIsNone(report["refused"])
+            self.assertEqual(report["grid_bpm"], 104.0)
 
-    def test_the_tempo_check_passes_on_what_survives(self):
-        drums, _, _ = fixtures.backbeat(seed=0, drift=0.015)
+    def test_what_survives_agrees_with_the_tag(self):
+        # Before: more than two hits for every kick -- snares, claps, toms
+        # and scratches as well. After: kicks on 1 and 3, reading half the
+        # tag, which is one kick every other beat.
+        drums, truth, _ = fixtures.backbeat(seed=0, drift=0.015)
         found, kept, _ = self.select(drums, 104.0)
-        self.assertIsNotNone(subbass.tempo_check(found, RATE, 104.0))
-        self.assertIsNone(subbass.tempo_check(kept, RATE, 104.0))
+        self.assertGreater(found.size, 2 * truth.size)
+        self.assertLessEqual(kept.size, truth.size)
+        self.assertAlmostEqual(fixtures.implied_bpm(kept, RATE) / 104.0, 0.5,
+                               delta=0.03)
 
     def test_a_kick_under_a_snare_is_kept(self):
         # On 2 and 4 the kick and the snare land together. A filter asking
@@ -196,14 +172,27 @@ class TestSelectingTheKicks(unittest.TestCase):
             hits = [h for h in alone if np.min(np.abs(kept / RATE - h)) <= 0.03]
             self.assertEqual(hits, [], kind)
 
-    def test_a_tag_at_half_the_tempo_is_refused_not_fitted(self):
+    def test_a_tag_at_half_the_tempo_moves_to_double_not_to_every_other_kick(self):
+        # Four-on-the-floor on a half-speed grid lands alternately on and
+        # exactly between its beats. Fitting that grid would keep every
+        # other kick; the grid at double the tag keeps them all.
         _, drums, truth = fixtures.programme("groove", seed=0)
         bpm = 60 / float(np.median(np.diff(truth)))
         _, kept, report = self.select(drums, bpm / 2)
-        self.assertIsNotNone(report["refused"])
-        self.assertLess(report["grid_coherence"], subbass.MIN_GRID_COHERENCE)
-        self.assertIsNone(self.select(drums, bpm)[2]["refused"])
-        self.assertIsNone(self.select(drums, bpm * 2)[2]["refused"])
+        self.assertAlmostEqual(report["grid_bpm"], bpm, places=6)
+        self.assertEqual(fixtures.score(kept, truth)[:2], (1.0, 1.0))
+        self.assertAlmostEqual(self.select(drums, bpm)[2]["grid_bpm"], bpm, places=6)
+
+    def test_a_tag_that_fits_no_grid_falls_back_to_weight_alone(self):
+        # Not refused: the kicks that are heavy enough still get their sub.
+        _, drums, truth = fixtures.programme("groove", seed=0)
+        bpm = 60 / float(np.median(np.diff(truth)))
+        for wrong in (bpm * 1.37, bpm * 0.77):
+            _, kept, report = self.select(drums, wrong)
+            self.assertIsNone(report["grid_bpm"], wrong)
+            self.assertEqual(report["off_grid"], 0)
+            self.assertEqual(fixtures.score(kept, truth)[:2], (1.0, 1.0))
+            self.assertIn("weight alone", subbass.describe_selection(report, wrong))
 
     def test_without_a_tag_only_the_weight_filter_runs(self):
         drums, _, _ = fixtures.backbeat(seed=0)
@@ -287,13 +276,16 @@ class TestTheStageUsesTheStem(unittest.TestCase):
                            1.5 * on_stem["kicks_per_minute"])
         self.assertGreater(on_stem["applied_db"], 1.0)
 
-    def test_kicks_that_disagree_with_the_tag_get_no_sub(self):
+    def test_a_tag_at_half_the_tempo_still_gets_a_sub_on_every_kick(self):
+        # Refused, once. Now the grid moves to double the tag and every kick
+        # keeps its burst, and the log says which grid it used.
         stems.store_kick_source(self.cache, self.mix, RATE, self.drums)
-        # Tagged at half the real tempo, the kicks found read as double:
-        # more hits than beats, which is the case the check exists for.
         result = self.run_one(self.job(bpm=self.bpm / 2))
-        self.assertEqual(result["status"], "skipped")
-        self.assertIn("settle on a beat", result["reason"])
+        self.assertEqual(result["status"], "ok", result.get("reason"))
+        seconds = self.mix.shape[0] / RATE
+        self.assertAlmostEqual(result["kicks_per_minute"] * seconds / 60,
+                               self.truth.size, delta=1)
+        self.assertIn("double", result["reason"])
 
     def test_a_backbeat_track_gets_its_sub(self):
         """The four tracks the first real run skipped: snare thump, fills

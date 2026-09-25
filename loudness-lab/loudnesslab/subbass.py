@@ -158,8 +158,9 @@ GRID_WINDOW_BEATS = 8
 # drums: four-on-the-floor tagged at HALF its tempo reads 0.01 (the kicks
 # fall alternately on and exactly between the tagged beats), while every
 # correctly tagged case, drifting or syncopated, read 0.42 or more. Below
-# this the tag and the kicks disagree, and thinning the kicks to fit the
-# tag would quietly put sub under every other one.
+# this the tag's grid is not the kicks' grid, and thinning the kicks to fit
+# it would quietly put sub under every other one -- so select_kicks tries
+# double the tag, then no grid, rather than using it.
 MIN_GRID_COHERENCE = 0.25
 
 
@@ -215,9 +216,19 @@ def select_kicks(drums: np.ndarray, rate: int, kicks: np.ndarray,
     be kick-shaped but land between beats. A syncopated kick off the beat
     is dropped with them -- one fewer burst, never a burst in the wrong
     place, which is the trade this whole stage is built on.
+
+    Nothing here turns a track away. Filtered hit by hit, every kick that
+    survives is one that belongs under a burst, so a disagreement with the
+    tag costs the hits that disagree and not the record. Which grid:
+
+    - the tag, if the kicks settle on it;
+    - double the tag, if they do not and settle there instead -- Serato
+      halves some tempos, and four-on-the-floor on a half-speed grid lands
+      alternately on and exactly between its beats;
+    - none, if neither fits: the weight filter alone, as with no tag.
     """
     report = {"found": int(kicks.size), "not_kick_shaped": 0, "off_grid": 0,
-              "grid_coherence": None, "refused": None}
+              "grid_bpm": None, "grid_coherence": None}
     if kicks.size == 0:
         return kicks, strengths, report
     shaped = _kick_level_db(drums, rate, kicks) >= MIN_KICK_LEVEL_DB
@@ -225,53 +236,37 @@ def select_kicks(drums: np.ndarray, rate: int, kicks: np.ndarray,
     kicks, strengths = kicks[shaped], strengths[shaped]
     if (kicks.size >= 8 and tagged_bpm is not None
             and np.isfinite(tagged_bpm) and tagged_bpm > 0):
-        grid, coherence = _on_grid(kicks, rate, float(tagged_bpm))
-        report["grid_coherence"] = round(coherence, 3)
-        if coherence < MIN_GRID_COHERENCE:
-            report["refused"] = (
-                f"kicks do not settle on a beat at the tagged "
-                f"{tagged_bpm:.0f} BPM (agreement {coherence:.2f}) -- "
-                f"the tag may be half the tempo, so no sub")
-        else:
-            report["off_grid"] = int((~grid).sum())
-            kicks, strengths = kicks[grid], strengths[grid]
+        for bpm in (float(tagged_bpm), 2.0 * float(tagged_bpm)):
+            grid, coherence = _on_grid(kicks, rate, bpm)
+            if report["grid_coherence"] is None:
+                report["grid_coherence"] = round(coherence, 3)
+            if coherence >= MIN_GRID_COHERENCE:
+                report["grid_bpm"] = bpm
+                report["grid_coherence"] = round(coherence, 3)
+                report["off_grid"] = int((~grid).sum())
+                kicks, strengths = kicks[grid], strengths[grid]
+                break
     if strengths.size and strengths.max() > 0:
         strengths = strengths / strengths.max()
     return kicks, strengths, report
 
 
-# How far the tempo the kicks imply may sit from the BPM tag. Measured on
-# 35 tagged tracks, detecting on a Demucs drum stem: where the kicks were
-# right, the implied tempo came within 0.98-1.03 of the tag; the nearest
-# wrong one was 1.25 away. 5% sits in that gap with room on both sides.
-TEMPO_TOLERANCE = 0.05
-
-
-def tempo_check(kicks: np.ndarray, rate: int,
-                tagged_bpm: float | None) -> str | None:
-    """Why the kicks found should NOT be trusted, or None if they can be.
-
-    One kick per beat is what four-on-the-floor has, so the median gap
-    between the kicks found should be one beat of the tagged tempo. Double
-    means something between the beats is being read as a kick -- an octave
-    bassline on the mix, or on a stem a funk pattern busier than one per
-    beat -- and a burst under each would put sub on the off-beat.
-
-    Half and a quarter of the tag are accepted: the kicks are real, one
-    every other beat (1 and 3, a half-time groove, a tag Serato doubled)
-    or one a bar. Fewer detections than beats cannot put a burst anywhere
-    it does not belong.
-    """
-    if tagged_bpm is None or not np.isfinite(tagged_bpm) or tagged_bpm <= 0:
+def describe_selection(report: dict, tagged_bpm: float | None) -> str | None:
+    """One line on what select_kicks did, or None if it changed nothing
+    worth saying. For the log, so a track whose sub went under fewer hits
+    than it has drums says why."""
+    kept = report["found"] - report["not_kick_shaped"] - report["off_grid"]
+    grid = ""
+    if report["grid_bpm"] is None and tagged_bpm:
+        grid = "; no beat grid fitted the tag, so weight alone"
+    elif report["grid_bpm"] and tagged_bpm and report["grid_bpm"] != tagged_bpm:
+        grid = (f"; on a {report['grid_bpm']:.0f} BPM grid, double the "
+                f"{tagged_bpm:.0f} tag")
+    if not (report["not_kick_shaped"] or report["off_grid"] or grid):
         return None
-    if kicks.size < 8:
-        return None             # enhance() declines this itself, and says so
-    implied = 60.0 / float(np.median(np.diff(kicks) / rate))
-    for multiple in (1.0, 0.5, 0.25):
-        if abs(implied / (tagged_bpm * multiple) - 1.0) <= TEMPO_TOLERANCE:
-            return None
-    return (f"kicks imply {implied:.0f} BPM against a tag of "
-            f"{tagged_bpm:.0f} -- not one kick per beat, so no sub")
+    return (f"kicks: kept {kept} of {report['found']} drum hits "
+            f"({report['not_kick_shaped']} too light, "
+            f"{report['off_grid']} off the beat){grid}")
 
 
 def _backtrack(peaks: np.ndarray, fast: np.ndarray, rate: int) -> np.ndarray:

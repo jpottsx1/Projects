@@ -286,6 +286,9 @@ def measure_files(paths: list[Path], backends: list[str]) -> int:
         x = decode.decode(path, RATE)
         minutes = x.shape[0] / RATE / 60
         found = {"mix": subbass.detect_kicks(x, RATE)[0]}
+        # What each column is scored against: the tag, or for a filtered
+        # column the grid the filter settled on (double the tag, sometimes).
+        against = {name: tagged for name in columns}
         notes = []
         for backend in backends:
             drums = stems.separate(x, RATE, backend)["drums"]
@@ -293,20 +296,22 @@ def measure_files(paths: list[Path], backends: list[str]) -> int:
             found[backend] = kicks
             kept, _, report = subbass.select_kicks(drums, RATE, kicks, strengths,
                                                    tagged)
-            # A refusal means no sub at all, so score it as finding nothing.
-            found[backend + "+filter"] = (np.array([], dtype=int)
-                                          if report["refused"] else kept)
+            found[backend + "+filter"] = kept
+            if report["grid_bpm"]:
+                against[backend + "+filter"] = report["grid_bpm"]
             notes.append(f"{report['not_kick_shaped']} light, "
                          f"{report['off_grid']} off-beat, grid "
                          f"{report['grid_coherence']}"
-                         + (" REFUSED" if report["refused"] else ""))
+                         + (f" at {report['grid_bpm']:.0f}"
+                            if report["grid_bpm"] else " (none fitted)"))
         cells = []
         for name in columns:
             kicks = found[name]
             bpm = implied_bpm(kicks, RATE)
             cells.append(f"{bpm:>6.1f};{kicks.size / minutes:>4.0f}")
             if tagged:
-                ok = any(abs(bpm - tagged * m) <= 0.03 * tagged * m
+                target = against[name]
+                ok = any(abs(bpm - target * m) <= 0.03 * target * m
                          for m in ((1.0,) if "+filter" not in name
                                    else (1.0, 0.5, 0.25)))
                 agree.setdefault(name, []).append(ok)
@@ -314,9 +319,9 @@ def measure_files(paths: list[Path], backends: list[str]) -> int:
         print(f"{label}  " + "  ".join(f"{c:>14}" for c in cells)
               + f"   {path.name}" + (f"  [dropped {'; '.join(notes)}]" if notes else ""))
     if agree:
-        print("\nimplied tempo within 3% of the tag (after the filter, 1x, "
-              "1/2 or 1/4 -- kicks on 1 and 3, or once a bar, are still "
-              "kicks):")
+        print("\nimplied tempo within 3% of the tag (after the filter: of "
+              "the grid it used, 1x, 1/2 or 1/4 -- kicks on 1 and 3, or once "
+              "a bar, are still kicks):")
         for name, hits in agree.items():
             print(f"  {name:<16} {sum(hits)} of {len(hits)}")
     return 0

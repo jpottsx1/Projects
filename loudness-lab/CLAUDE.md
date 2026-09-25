@@ -688,6 +688,17 @@ next kick at most, marked ">" when still ringing). Checked on a synthetic
 808: 100% vs 0% by which stem holds the boom, 55 Hz exactly, tail 784 ms
 against a true 806.
 
+### Punch put high-frequency artifacts on late-80s pop
+
+Confirmed by ear on a Paula Abdul track processed with Punch at +3.5 dB:
+audible high-frequency artifacts, gone with Punch at 0 and everything else
+the same. `shape_attacks` lifts 2-6 kHz at each kick with a 1 ms rise and
+an 8 ms fall. On disco that band at a kick is mostly beater click; on
+late-80s pop it is hi-hats, snare rattle, claps and vocal sibilance, and
+a gain moving that fast over them is heard as tick and grit. No built-in
+profile turns Punch on, and on this material it should stay off until
+the shaping is made slower or band-aware.
+
 ## Open
 
 1. **`Disco Music` is 51 files that want re-ripping, not processing.** A

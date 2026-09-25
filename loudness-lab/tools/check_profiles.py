@@ -24,7 +24,7 @@ from loudnesslab import profiles  # noqa: E402
 NAMES = {
     "targetLRA": "target_lra", "maxAttenuation": "max_attenuation",
     "transient": "transient", "minCrest": "min_crest",
-    "air": "air", "airTune": "air_tune",
+    "air": "air", "airTune": "air_tune", "stemKicks": "stem_kicks",
     "target": "target", "estimator": "estimator", "peakCeiling": "peak_ceiling",
     "auto": "auto", "reference": "reference", "amount": "amount",
     "maxAmount": "max_amount", "minActivity": "min_activity",

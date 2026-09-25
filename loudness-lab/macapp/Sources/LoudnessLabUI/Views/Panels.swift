@@ -256,6 +256,8 @@ struct SettingsPanel: View {
                          // Static rumble swings about 11 dB, a real
                          // groove about 44. The judgement is between.
                          sweet: 16...22)
+                Toggle("Find kicks on the drum track", isOn: $profile.stemKicks)
+                    .help(Help.stemKicks.summary)
 
                 Divider()
 

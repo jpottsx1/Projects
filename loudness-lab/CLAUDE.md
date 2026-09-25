@@ -153,7 +153,7 @@ every machine but the one that made it for a while.
 ```
 loudnesslab/     the Python: bs1770, spectrum, subbass, declip, expand,
                  air, mp3gain, decode, db, report, render, write, cli,
-                 stems (prototype: a drum stem for kick detection)
+                 stems (a Demucs drum stem, for finding kicks)
 tests/           its tests
 tools/           make_golden.py, the five checkers, measure_stem_kicks.py
 macapp/
@@ -521,7 +521,7 @@ So `wants` now needs BOTH to be low: **low LRA with crest intact is the
 arrangement; low LRA with crest gone is the mastering.** The disco discs
 now read `declip`, which is what is actually wrong with them.
 
-## Stems: a prototype, for finding kicks
+## Stems: finding kicks on the drums
 
 The sub stage finds kicks in 30-100 Hz of the full mix, which is where the
 bassline is too. `stems.py` separates a drum part and `detect_kicks(...,
@@ -556,8 +556,8 @@ Hence `--files`: on four-on-the-floor, the tempo implied by the median gap
 between detected kicks should equal the BPM tag, and a detector firing on
 an octave bass reads double. The next step is that, with Demucs, over a
 disco folder and the 1999 discs. `Measure Kick Detection.command` does it
-from Finder: it installs Demucs into `.venv` on first use (PyTorch too,
-about 1-2 GB), asks for a folder, and saves the report in `scans/`. By
+from Finder: it installs Demucs into `.venv` on first use (PyTorch too;
+the model is about 80 MB), asks for a folder, and saves the report in `scans/`. By
 hand:
 
 ```sh
@@ -565,11 +565,76 @@ hand:
 .venv/bin/python tools/measure_stem_kicks.py --files <folder> --backend demucs
 ```
 
-Not in `requirements.txt` and not wired into the CLI or the app until
-that says it earns its gigabyte. Separation is also the slowest thing the
-tool would do (Spleeter took 8 s per 30 s on four CPU cores), so if it
-goes in, stems want caching by checksum and one process of their own, not
-a copy of the model per pool worker.
+**Measured on a real disc: 100 Hits - The New Romantics, Disc 1.** Twenty
+tracks, every one with a Serato BPM tag, Demucs on an Apple Silicon Mac.
+Implied tempo against the tag, within 5%:
+
+| | full mix | Demucs drum stem |
+|---|---|---|
+| matches the tag | 1 of 20 | 11 of 20 |
+| exactly double the tag | 9 of 20 | 1 of 20 |
+| anything else | 10 | 8 |
+
+The mix detector fires on the off-beat as well as the beat -- nine tracks
+at 1.91-2.06x, the eighth-note synth basslines this era is built on -- so
+the sub stage has been laying half its bursts under bass notes on this
+material. On the eleven the stem gets right it finds 0.85-1.02 kicks per
+tagged beat: nearly every kick, almost nothing else.
+
+Where the stem misses, the record is mostly why: Ghosts, 19, Vienna and
+Love Missile F1-11 have no steady kick at all. Fascist Groove Thang reads
+2x on both (a busy kick pattern, probably). Is It A Dream (1.45x), Karma
+Chameleon (1.87x), Imagination (1.65x) and Turn Back The Clock (0.72x) are
+unexplained and want listening to, not a theory.
+
+**And on disco, fifteen tagged tracks** (ABBA, Bee Gees, Cerrone, Donna
+Summer, Chic-era soul and funk): the stem matches the tag on 9, the mix
+on 2. Kicks per tagged beat is the plainer number -- the mix finds 1.26 to
+1.85 on EVERY track, including the two whose median tempo came out right,
+so it has been adding bursts to the whole disco library, not some of it.
+I Feel Love, the octave-bass record, is 1.33 on the mix and 1.00 on the
+stem. The stem reads 0.97-1.10 on the nine it gets right.
+
+Its misses: The Name of the Game reads 77.9 against a tag of 154 -- a
+slow song, so the tag is probably the doubled one, unverified. How Deep Is
+Your Love has no kick on every beat. Boogie Nights, Brick House, Best of
+My Love and Hot Line read 1.7-2x on both detectors: funk, with kick
+patterns busier than one per beat. Over both discs: stem 20 of 35, mix 3.
+
+That suggests the shape of the real stage: detect on the stem, and use the
+BPM tag as a gate -- where the kicks found do not agree with the tag, skip
+the sub for that track and say so. The misses above then become tracks
+left alone rather than tracks processed wrongly.
+
+### Built: `subbass --stem-kicks`, "Find kicks on the drum track" in the app
+
+Off by default, in every profile, because it needs Demucs and is slow the
+first time. What it does:
+
+- **Separates in the parent, once, before the pool.** `cli._separate_for_kicks`
+  runs Demucs one track at a time -- a model per pool worker would multiply
+  a gigabyte of memory by the worker count -- and emits `phase: "separate"`
+  progress, which the app shows as "Separated n of m".
+- **Keeps only what detection reads**: the drum stem's mono sum at 2 kHz,
+  at most 2.2 MB for five minutes, in `stem-cache/` beside the database.
+  Read back, it finds the same kicks as the stem, within 0.42 ms. Filed under a
+  hash of the DECODED audio, not the file, because Serato rewrites a file
+  every time a cue point moves and a file hash would throw the separation
+  away with it. A second run separates nothing.
+- **Gates on the BPM tag** (`subbass.tempo_check`): kicks implying 1x or
+  0.5x the tag, within 5%, are trusted; anything else skips the sub on
+  that track and says why. 5% is from the measurement above -- right
+  answers sat within 0.98-1.03, the nearest wrong one at 1.25. Half is
+  accepted because fewer kicks than beats cannot put a burst anywhere it
+  does not belong; double is refused because it can. No tag, no check.
+- **A track that fails to separate** is not a failed run: the reason rides
+  on the job and the worker skips only the sub, saying so.
+
+Demucs is still not in `requirements.txt`; `Measure Kick Detection.command`
+installs it, and the command refuses `--stem-kicks` with that instruction
+when it is missing. Not yet confirmed on the Mac: the Swift has not been
+compiled with these changes, and no processing run has used the stem yet.
+The first one wants an A/B by ear against the same tracks from the mix.
 
 ## Open
 

@@ -7,9 +7,9 @@
 # It writes nothing next to the music. The report is printed here and
 # saved in scans/, which git ignores.
 #
-# The first run installs Demucs and PyTorch into .venv: a download of
-# one to two gigabytes, once. See "Stems" in CLAUDE.md for what the
-# numbers mean.
+# The first run installs Demucs and PyTorch into .venv, once; the model
+# itself (about 80 MB) downloads on the first track. See "Stems" in
+# CLAUDE.md for what the numbers mean.
 set -eu
 # Without this, a failure inside the report pipe below would be tee's success.
 set -o pipefail
@@ -26,7 +26,7 @@ fail() {
 command -v ffmpeg >/dev/null 2>&1 || fail "ffmpeg is not installed: brew install ffmpeg"
 
 if ! .venv/bin/python -c "import demucs, torch" 2>/dev/null; then
-    echo "Installing Demucs and PyTorch -- one to two gigabytes, this once."
+    echo "Installing Demucs and PyTorch, this once."
     echo
     .venv/bin/python -m pip install --quiet demucs \
         || fail "The install failed. The errors above are the whole story -- copy them and send them on."
@@ -43,7 +43,10 @@ echo "Each track is separated first, which takes a while. The first one also"
 echo "downloads the Demucs model."
 echo
 
-.venv/bin/python tools/measure_stem_kicks.py --files "$FOLDER" --backend demucs 2>&1 | tee "$REPORT" \
+# -u: piped into tee, Python would otherwise hold every line back until the
+# whole folder was done, and a window that says nothing for twenty minutes
+# looks exactly like one that has hung.
+.venv/bin/python -u tools/measure_stem_kicks.py --files "$FOLDER" --backend demucs 2>&1 | tee "$REPORT" \
     || fail "The check stopped. The errors above are the whole story -- copy them and send them on."
 
 echo

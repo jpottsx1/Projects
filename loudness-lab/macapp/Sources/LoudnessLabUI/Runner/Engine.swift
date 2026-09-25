@@ -185,7 +185,14 @@ final class Engine: ObservableObject {
         case "progress":
             if let done = event.done, let total = event.total, total > 0 {
                 progress = Double(done) / Double(total)
-                let verb = event.phase == "process" ? "Processed" : "Measured"
+                let verb: String
+                switch event.phase {
+                case "process": verb = "Processed"
+                // Before processing, once per track, and the slow part
+                // of a first run with the drum stem on.
+                case "separate": verb = "Separated"
+                default: verb = "Measured"
+                }
                 progressNote = "\(verb) \(done) of \(total) — \(event.name ?? "")"
             }
             switch event.status ?? "ok" {
@@ -370,6 +377,7 @@ final class Engine: ObservableObject {
                 arguments += ["--reference", reference]
             }
             if profile.declip { arguments += ["--declip"] }
+            if profile.stemKicks { arguments += ["--stem-kicks"] }
             if !compare { arguments += ["--no-compare"] }
             if dryRun { arguments += ["--dry-run"] }
             if let selection { arguments += ["--select", selection.path] }

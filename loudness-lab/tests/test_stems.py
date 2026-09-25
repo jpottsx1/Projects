@@ -9,8 +9,12 @@ not asserted here, because it cannot be run without the model weights.
 
 from __future__ import annotations
 
+import contextlib
 import importlib.util
+import io
+import json
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -21,7 +25,7 @@ from scipy.signal import butter, sosfiltfilt
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "tools"))
-from loudnesslab import stems, subbass  # noqa: E402
+from loudnesslab import cli, decode, render, stems, subbass  # noqa: E402
 import measure_stem_kicks as fixtures  # noqa: E402
 
 RATE = fixtures.RATE
@@ -114,6 +118,177 @@ class TestSeparate(unittest.TestCase):
             self.assertEqual(stem.shape, x.shape, name)
             self.assertEqual(stem.dtype, np.float32, name)
             self.assertTrue(np.all(np.isfinite(stem)), name)
+
+
+class TestTheTempoCheck(unittest.TestCase):
+    """Kicks every `period` seconds, against a tag. 120 BPM is 0.5 s."""
+
+    @staticmethod
+    def kicks(period: float, count: int = 40) -> np.ndarray:
+        return (np.arange(count) * period * RATE).astype(int)
+
+    def test_one_kick_per_beat_passes(self):
+        self.assertIsNone(subbass.tempo_check(self.kicks(0.5), RATE, 120.0))
+
+    def test_double_is_refused(self):
+        # The octave bass on the mix, or a busy funk pattern on the stem.
+        note = subbass.tempo_check(self.kicks(0.25), RATE, 120.0)
+        self.assertIsNotNone(note)
+        self.assertIn("240", note)
+
+    def test_half_is_accepted(self):
+        # A kick every other tagged beat: a doubled tag, or half-time.
+        self.assertIsNone(subbass.tempo_check(self.kicks(1.0), RATE, 120.0))
+
+    def test_the_tolerance_is_five_percent(self):
+        self.assertIsNone(subbass.tempo_check(self.kicks(60 / 125.0), RATE, 120.0))
+        self.assertIsNotNone(subbass.tempo_check(self.kicks(60 / 128.0), RATE, 120.0))
+
+    def test_no_tag_cannot_refuse(self):
+        for tag in (None, float("nan"), 0.0):
+            self.assertIsNone(subbass.tempo_check(self.kicks(0.25), RATE, tag))
+
+
+class TestTheKeptKickSource(unittest.TestCase):
+    """What is kept is 8 kHz mono. It has to find the same kicks."""
+
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.cache = Path(self.dir.name)
+
+    def tearDown(self):
+        self.dir.cleanup()
+
+    def test_it_finds_the_same_kicks_as_the_stem_it_came_from(self):
+        mix, drums, _ = fixtures.programme("octave", seconds=20.0)
+        stems.store_kick_source(self.cache, mix, RATE, drums)
+        kept = stems.load_kick_source(self.cache, mix, RATE)
+        self.assertEqual(kept.shape, mix.shape)
+        direct, _ = subbass.detect_kicks(mix, RATE, drums)
+        again, _ = subbass.detect_kicks(mix, RATE, kept)
+        self.assertEqual(direct.size, again.size)
+        # Within a millisecond: the burst is laid at these offsets.
+        self.assertLessEqual(int(np.max(np.abs(direct - again))), RATE // 1000)
+
+    def test_other_audio_is_not_found(self):
+        mix, drums, _ = fixtures.programme("octave", seconds=8.0)
+        stems.store_kick_source(self.cache, mix, RATE, drums)
+        other, _, _ = fixtures.programme("groove", seconds=8.0)
+        self.assertIsNone(stems.load_kick_source(self.cache, other, RATE))
+        self.assertFalse(stems.has_kick_source(self.cache, other))
+        self.assertTrue(stems.has_kick_source(self.cache, mix))
+
+
+class TestTheStageUsesTheStem(unittest.TestCase):
+    """render.one, the per-track chain, with a kept drum source. Decoding
+    is stood in for so this runs without ffmpeg; nothing is written."""
+
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.cache = Path(self.dir.name)
+        self.mix, self.drums, self.truth = fixtures.programme("octave", seconds=20.0)
+        self.bpm = 60.0 / float(np.median(np.diff(self.truth)))
+
+    def tearDown(self):
+        self.dir.cleanup()
+
+    def job(self, **changes) -> dict:
+        job = {"path": "track.mp3", "name": "track", "folder": "f", "stem": "track",
+               "amount": 5.0, "skip": None, "label": "sub", "freq": 45.0,
+               "decay": 0.12, "punch": 0.0, "punch_decay": 8.0,
+               "declip": False, "declip_max": 6.0, "min_activity": 0.0,
+               "target_lra": 0.0, "max_attenuation": 6.0, "transient": 0.0,
+               "min_crest": 11.0, "air": 0.0, "air_tune": 3500.0,
+               "stem_kicks": True, "bpm": self.bpm, "stem_cache": str(self.cache),
+               "target": -16.0, "estimator": "s_p95", "peak_ceiling": -1.0,
+               "compare": True, "dry_run": True, "out_dir": self.dir.name,
+               "fmt": "flac"}
+        job.update(changes)
+        return job
+
+    def run_one(self, job: dict) -> dict:
+        with mock.patch.object(decode, "decode", return_value=self.mix), \
+                mock.patch.object(decode, "TARGET_RATE", RATE):
+            return render.one(job)
+
+    def test_the_kicks_come_from_the_stem(self):
+        stems.store_kick_source(self.cache, self.mix, RATE, self.drums)
+        on_stem = self.run_one(self.job())
+        on_mix = self.run_one(self.job(stem_kicks=False))
+        self.assertEqual(on_stem["status"], "ok", on_stem.get("reason"))
+        seconds = self.mix.shape[0] / RATE
+        self.assertAlmostEqual(on_stem["kicks_per_minute"] * seconds / 60,
+                               self.truth.size, delta=1)
+        # The mix reads the octave bass too: that is what this is for.
+        self.assertGreater(on_mix["kicks_per_minute"],
+                           1.5 * on_stem["kicks_per_minute"])
+        self.assertGreater(on_stem["applied_db"], 1.0)
+
+    def test_kicks_that_disagree_with_the_tag_get_no_sub(self):
+        stems.store_kick_source(self.cache, self.mix, RATE, self.drums)
+        # Tagged at half the real tempo, the kicks found read as double:
+        # more hits than beats, which is the case the check exists for.
+        result = self.run_one(self.job(bpm=self.bpm / 2))
+        self.assertEqual(result["status"], "skipped")
+        self.assertIn("BPM", result["reason"])
+
+    def test_no_kept_stem_means_no_sub_and_says_why(self):
+        result = self.run_one(self.job(stem_error="RuntimeError: out of memory"))
+        self.assertEqual(result["status"], "skipped")
+        self.assertIn("no drum stem", result["reason"])
+        self.assertIn("out of memory", result["reason"])
+
+
+class TestTheSeparationPass(unittest.TestCase):
+    """cli._separate_for_kicks: once per track, before the pool, and never
+    fatal. Demucs and ffmpeg are stood in for."""
+
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.cache = Path(self.dir.name)
+        self.mix, self.drums, _ = fixtures.programme("octave", seconds=6.0)
+        self.calls = 0
+
+    def tearDown(self):
+        self.dir.cleanup()
+
+    def separate(self, x, rate, backend):
+        self.calls += 1
+        return {"drums": self.drums}
+
+    def run_pass(self, jobs, separate=None):
+        out = io.StringIO()
+        with mock.patch.object(decode, "decode", return_value=self.mix), \
+                mock.patch.object(decode, "TARGET_RATE", RATE), \
+                mock.patch.object(stems, "separate", separate or self.separate), \
+                contextlib.redirect_stdout(out):
+            cli._separate_for_kicks(jobs, self.cache, porcelain=True, quiet=True)
+        return [json.loads(line) for line in out.getvalue().splitlines()]
+
+    @staticmethod
+    def job(**changes):
+        return {"path": "a.mp3", "name": "a", "amount": 5.0, "skip": None, **changes}
+
+    def test_each_track_is_separated_once(self):
+        events = self.run_pass([self.job()])
+        self.assertEqual(self.calls, 1)
+        self.assertTrue(stems.has_kick_source(self.cache, self.mix))
+        self.assertEqual([e["phase"] for e in events], ["separate"])
+        again = self.run_pass([self.job()])
+        self.assertEqual(self.calls, 1, "a kept track was separated again")
+        self.assertEqual(again[0]["reason"], "already separated")
+
+    def test_tracks_getting_no_sub_are_not_separated(self):
+        self.run_pass([self.job(amount=0.0), self.job(skip="within 0.5 dB")])
+        self.assertEqual(self.calls, 0)
+
+    def test_a_failure_is_carried_to_the_track_not_raised(self):
+        def broken(x, rate, backend):
+            raise RuntimeError("MPS out of memory")
+        job = self.job()
+        events = self.run_pass([job], separate=broken)
+        self.assertEqual(events[0]["status"], "error")
+        self.assertIn("out of memory", job["stem_error"])
 
 
 if __name__ == "__main__":

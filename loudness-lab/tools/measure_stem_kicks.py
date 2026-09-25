@@ -156,6 +156,96 @@ def programme(scenario: str, seconds: float = 30.0, bpm: float = 118.0,
     return stereo(mix), stereo(drums), np.array(truth)
 
 
+def _thump_snare(n: int, rng) -> np.ndarray:
+    """A LinnDrum-style snare: noise, plus a body that starts near 180 Hz and
+    falls -- which is what puts it in the kick detector's band."""
+    d = np.arange(n) / RATE
+    body = np.sin(2 * np.pi * np.cumsum(120 + 70 * np.exp(-d * 40)) / RATE)
+    noise = sosfilt(butter(2, [1200, 9000], btype="band", fs=RATE, output="sos"),
+                    rng.standard_normal(n))
+    return 0.9 * body * np.exp(-d * 18) + 0.8 * noise * np.exp(-d * 22)
+
+
+def _clap(n: int, rng) -> np.ndarray:
+    """An 808 clap: three quick noise bursts and a tail, with low-mid body."""
+    d = np.arange(n) / RATE
+    env = sum(np.exp(-np.clip(d - t, 0, None) * 300) * (d >= t)
+              for t in (0.0, 0.011, 0.022)) + 0.6 * np.exp(-d * 15) * (d >= 0.033)
+    noise = sosfilt(butter(2, [150, 4000], btype="band", fs=RATE, output="sos"),
+                    rng.standard_normal(n))
+    return noise * env
+
+
+def _tom(n: int, freq: float) -> np.ndarray:
+    d = np.arange(n) / RATE
+    f = freq * (1 + 0.3 * np.exp(-d * 30))
+    return (np.sin(2 * np.pi * np.cumsum(f) / RATE)
+            + 0.35 * np.sin(4 * np.pi * np.cumsum(f) / RATE)) * np.exp(-d * 9)
+
+
+def _scratch(n: int, rng) -> np.ndarray:
+    """A record scratch: a sawtooth-rich tone whose pitch swings fast, from
+    the low end up, with a hard start."""
+    d = np.arange(n) / RATE
+    f = 90 + 500 * np.abs(np.sin(2 * np.pi * 7 * d))
+    phase = np.cumsum(f) / RATE
+    saw = 2 * (phase % 1.0) - 1
+    return saw * np.minimum(1.0, d / 0.002) * np.exp(-d * 6)
+
+
+def backbeat(seconds: float = 30.0, bpm: float = 104.0, seed: int = 0,
+             drift: float = 0.0) -> tuple[np.ndarray, np.ndarray, dict]:
+    """(drum part, kick times, other hits by kind): the pieces that stopped
+    four tracks in the first real run. Kicks on 1 and 3 and a syncopated
+    kick on the "and" of 2 every other bar; a snare with a low thump on 2
+    and 4, and a clap on 4; a tom fill ending every fourth bar; and two
+    scratches every four bars, off the beat. `drift` is a live drummer's
+    tempo wander, as a fraction (0.015 swings 1.5% either way).
+
+    The drum part only -- this is what a separator hands the detector.
+    """
+    n = int(seconds * RATE)
+    rng = np.random.default_rng(seed)
+    track = np.zeros(n)
+    # Beat times, with the tempo wandering slowly if asked.
+    beats, t = [], 0.0
+    while t < seconds - 0.5:
+        beats.append(t)
+        t += 60.0 / (bpm * (1 + drift * np.sin(2 * np.pi * t / 17.0)))
+    beats = np.array(beats)
+    truth, other = [], {"snare": [], "clap": [], "tom": [], "scratch": []}
+    for i, b in enumerate(beats):
+        bar, beat = divmod(i, 4)
+        nxt = beats[i + 1] if i + 1 < beats.size else b + 60 / bpm
+        if beat in (0, 2) and not (bar % 4 == 3 and beat == 2):
+            truth.append(b)
+            _place(track, b, 0.9 * _kick(int(0.3 * RATE), rng))
+        if beat == 1 and bar % 2 == 1:
+            s = b + (nxt - b) / 2                   # the "and" of 2
+            truth.append(s)
+            _place(track, s, 0.8 * _kick(int(0.3 * RATE), rng))
+        if beat in (1, 3):
+            other["snare"].append(b)
+            _place(track, b, 0.55 * _thump_snare(int(0.3 * RATE), rng))
+        if beat == 3:
+            other["clap"].append(b)
+            _place(track, b, 0.4 * _clap(int(0.25 * RATE), rng))
+        if bar % 4 == 3 and beat == 2:              # fill: 3, e, &, a, 4-e
+            for j, freq in enumerate((140, 120, 100, 85, 72, 64)):
+                h = b + j * (nxt - b) / 4
+                other["tom"].append(h)
+                _place(track, h, 0.7 * _tom(int(0.35 * RATE), freq))
+        if bar % 4 == 1 and beat in (0, 2):
+            h = b + (nxt - b) * rng.choice([0.3, 0.4, 0.6, 0.7])
+            other["scratch"].append(h)
+            _place(track, h, 0.5 * _scratch(int(0.2 * RATE), rng))
+    track += sosfilt(butter(4, 7000, btype="high", fs=RATE, output="sos"),
+                     rng.standard_normal(n)) * 0.01
+    track = track / np.abs(track).max() * 0.8
+    return (np.stack([track, track], axis=1).astype(np.float32),
+            np.array(truth), {k: np.array(v) for k, v in other.items()})
+
+
 def score(detected: np.ndarray, truth: np.ndarray,
           tol: float = 0.03) -> tuple[float, float, float]:
     """(recall, precision, median |offset| in ms of the kicks found)."""
@@ -177,33 +267,63 @@ def implied_bpm(kicks: np.ndarray, rate: int) -> float:
 
 
 def measure_files(paths: list[Path], backends: list[str]) -> int:
+    """Each real track, scored against its BPM tag. For every separator two
+    columns: the stem as detected, and after `select_kicks` has dropped the
+    hits too light to be a kick and the ones off the beat -- which is what
+    the sub stage actually uses."""
     from loudnesslab import decode
 
     decode.require_tools()
     files = []
     for path in paths:
         files += decode.find_audio(path) if path.is_dir() else [path]
-    print(f"{'tagged':>6}  " + "  ".join(f"{name:>9}" for name in ["mix", *backends])
+    columns = ["mix"] + [c for b in backends for c in (b, b + "+filter")]
+    print(f"{'tagged':>6}  " + "  ".join(f"{name:>14}" for name in columns)
           + "   (implied BPM; kicks/min)  track")
     agree: dict[str, list[bool]] = {}
     for path in files:
         tagged = decode.probe(path).get("bpm")
         x = decode.decode(path, RATE)
         minutes = x.shape[0] / RATE / 60
+        found = {"mix": subbass.detect_kicks(x, RATE)[0]}
+        # What each column is scored against: the tag, or for a filtered
+        # column the grid the filter settled on (double the tag, sometimes).
+        against = {name: tagged for name in columns}
+        notes = []
+        for backend in backends:
+            drums = stems.separate(x, RATE, backend)["drums"]
+            kicks, strengths = subbass.detect_kicks(x, RATE, drums)
+            found[backend] = kicks
+            kept, _, report = subbass.select_kicks(drums, RATE, kicks, strengths,
+                                                   tagged)
+            found[backend + "+filter"] = kept
+            if report["grid_bpm"]:
+                against[backend + "+filter"] = report["grid_bpm"]
+            notes.append(f"{report['not_kick_shaped']} light, "
+                         f"{report['off_grid']} off-beat, grid "
+                         f"{report['grid_coherence']}"
+                         + (f" at {report['grid_bpm']:.0f}"
+                            if report["grid_bpm"] else " (none fitted)"))
         cells = []
-        for name in ["mix", *backends]:
-            drums = None if name == "mix" else stems.separate(x, RATE, name)["drums"]
-            kicks, _ = subbass.detect_kicks(x, RATE, drums)
+        for name in columns:
+            kicks = found[name]
             bpm = implied_bpm(kicks, RATE)
-            cells.append(f"{bpm:>5.1f};{kicks.size / minutes:>3.0f}")
+            cells.append(f"{bpm:>6.1f};{kicks.size / minutes:>4.0f}")
             if tagged:
-                agree.setdefault(name, []).append(abs(bpm - tagged) <= 0.03 * tagged)
+                target = against[name]
+                ok = any(abs(bpm - target * m) <= 0.03 * target * m
+                         for m in ((1.0,) if "+filter" not in name
+                                   else (1.0, 0.5, 0.25)))
+                agree.setdefault(name, []).append(ok)
         label = f"{tagged:>6.1f}" if tagged else f"{'-':>6}"
-        print(f"{label}  " + "  ".join(f"{c:>9}" for c in cells) + f"   {path.name}")
+        print(f"{label}  " + "  ".join(f"{c:>14}" for c in cells)
+              + f"   {path.name}" + (f"  [dropped {'; '.join(notes)}]" if notes else ""))
     if agree:
-        print("\nimplied tempo within 3% of the tag:")
+        print("\nimplied tempo within 3% of the tag (after the filter: of "
+              "the grid it used, 1x, 1/2 or 1/4 -- kicks on 1 and 3, or once "
+              "a bar, are still kicks):")
         for name, hits in agree.items():
-            print(f"  {name:<9} {sum(hits)} of {len(hits)}")
+            print(f"  {name:<16} {sum(hits)} of {len(hits)}")
     return 0
 
 

@@ -621,14 +621,46 @@ first time. What it does:
   hash of the DECODED audio, not the file, because Serato rewrites a file
   every time a cue point moves and a file hash would throw the separation
   away with it. A second run separates nothing.
-- **Gates on the BPM tag** (`subbass.tempo_check`): kicks implying 1x or
-  0.5x the tag, within 5%, are trusted; anything else skips the sub on
-  that track and says why. 5% is from the measurement above -- right
-  answers sat within 0.98-1.03, the nearest wrong one at 1.25. Half is
-  accepted because fewer kicks than beats cannot put a burst anywhere it
-  does not belong; double is refused because it can. No tag, no check.
+- **Filters the hits, never the track** (`subbass.select_kicks`, below).
+  It began as a whole-track gate -- kicks implying 1x or 0.5x the tag, or
+  no sub at all -- and that turned whole records away for a few wrong
+  hits. The gate is gone; a track goes without only when too few kicks
+  survive, which `enhance` already says.
 - **A track that fails to separate** is not a failed run: the reason rides
   on the job and the worker skips only the sub, saying so.
+
+**The first real run skipped four tracks** -- Tell It to My Heart, Push It,
+Domino Dancing, Straight Up, at 1.8-2.5x their tags. Not the bassline this
+time: on the drum STEM, a LinnDrum snare, an 808 clap, floor toms and
+scratching all have an attack the detector's band hears. So
+`subbass.select_kicks` now filters each hit:
+
+- **Weight**, not shape. A kick is among the heaviest hits in 30-90 Hz;
+  on synthetic drums every kick sat within 1.3 dB of the loudest, a snare
+  or scratch alone about 25 dB under. The first version asked instead
+  whether the hit was ONLY a kick (30-90 Hz against 140-600 Hz) and threw
+  away every kick with a snare on top of it -- 20 of 51 on one fixture,
+  the whole of 2 and 4 on disco. `MIN_KICK_LEVEL_DB` is -10, halfway.
+- **The beat.** With a tag, hits more than 12% of a beat off the grid go:
+  fill notes, scratches, and syncopated kicks with them (one fewer burst,
+  never a wrong one). The grid is found locally, from the kicks eight
+  beats either side, so a live drummer's drift is followed -- tested at
+  up to 3% tempo wander.
+- **A grid that does not fit is not used.** Four-on-the-floor tagged at
+  HALF its tempo would be thinned to every other kick. How firmly the kicks
+  agree on where the beat is tells: 0.01 in that case, 0.42 or more in
+  every correctly tagged one. Under `MIN_GRID_COHERENCE` (0.25) the grid at
+  DOUBLE the tag is tried, which fits that case exactly; if neither fits,
+  the weight filter works alone, as with no tag. Nothing is refused.
+
+On the backbeat fixture built from those four tracks' ingredients:
+precision 0.40 -> 0.88. Recall 0.79, the syncopated
+kicks. The one wrong hit let through is the lowest floor tom where a fill
+ends on the beat -- a kick's weight, on the grid. All the earlier
+scenarios keep every kick. Every constant here is from synthetic drums;
+`measure_stem_kicks.py --files` now prints a `+filter` column, what each
+filter dropped and the grid agreement, which is how they get checked
+against a real kit.
 
 Demucs is still not in `requirements.txt`; `Measure Kick Detection.command`
 installs it, and the command refuses `--stem-kicks` with that instruction

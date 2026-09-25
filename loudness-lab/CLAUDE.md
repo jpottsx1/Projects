@@ -138,6 +138,11 @@ every machine but the one that made it for a while.
   detector can hear -- a steady tone reads the full amount.
   `lifted_fraction` is the one that distinguishes shaping from gaining:
   0.006 for that tone, and it is what the tests assert on.
+- **`$VAR…` in a shell script breaks on macOS.** The shell there reads the
+  first byte of a non-ASCII character like `…` as part of the variable
+  name, so `"Building $CONFIG…"` looked up `CONFIG?` and `set -u` stopped
+  the build with `CONFIG?: unbound variable`. Linux does not, so nothing
+  here catches it: write `${CONFIG}…`.
 - **Folder grouping uses `Library.folderLabels`,** not the parent's name:
   two compilations each with a CD1 otherwise merge into one corpus, and a
   corpus silently averaged with another is a wrong number that looks

@@ -550,10 +550,13 @@ say what a stem can do and not what a separator will do on a record.
 Hence `--files`: on four-on-the-floor, the tempo implied by the median gap
 between detected kicks should equal the BPM tag, and a detector firing on
 an octave bass reads double. The next step is that, with Demucs, over a
-disco folder and the 1999 discs:
+disco folder and the 1999 discs. `Measure Kick Detection.command` does it
+from Finder: it installs Demucs into `.venv` on first use (PyTorch too,
+about 1-2 GB), asks for a folder, and saves the report in `scans/`. By
+hand:
 
 ```sh
-.venv/bin/pip install demucs     # PyTorch too; about 1-2 GB
+.venv/bin/pip install demucs
 .venv/bin/python tools/measure_stem_kicks.py --files <folder> --backend demucs
 ```
 

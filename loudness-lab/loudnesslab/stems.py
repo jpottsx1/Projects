@@ -67,17 +67,27 @@ def _demucs(x: np.ndarray, model=None) -> dict[str, np.ndarray]:
             from demucs.pretrained import get_model
             _loaded["demucs"] = get_model("htdemucs")
         model = _loaded["demucs"]
-    device = ("mps" if torch.backends.mps.is_available()
-              else "cuda" if torch.cuda.is_available() else "cpu")
-    model.to(device).eval()
     wav = torch.from_numpy(np.ascontiguousarray(x.T, dtype=np.float32))
     # Demucs normalises its input itself in its own CLI; do the same, or a
     # quiet track is separated as though it were a different recording.
     ref = wav.mean(0)
     mean, std = float(ref.mean()), float(ref.std()) or 1.0
-    with torch.no_grad():
-        out = apply_model(model, ((wav - mean) / std)[None], device=device,
-                          split=True, overlap=0.25, progress=False)[0]
+
+    def run(device: str):
+        model.to(device).eval()
+        with torch.no_grad():
+            return apply_model(model, ((wav - mean) / std)[None], device=device,
+                               split=True, overlap=0.25, progress=False)[0]
+
+    if torch.backends.mps.is_available():
+        # Apple's GPU backend has lacked operations Demucs uses in some
+        # PyTorch releases. Slower is better than stopping a batch.
+        try:
+            out = run("mps")
+        except (RuntimeError, NotImplementedError):
+            out = run("cpu")
+    else:
+        out = run("cuda" if torch.cuda.is_available() else "cpu")
     out = out * std + mean
     return {name: out[i].cpu().numpy().T.astype(np.float32)
             for i, name in enumerate(model.sources)}

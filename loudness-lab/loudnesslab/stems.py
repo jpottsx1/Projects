@@ -53,7 +53,7 @@ MODEL_RATE = 44100
 # What the kick source is kept at. `detect_kicks` reads 30-100 Hz and an
 # envelope smoothed at 60 Hz, so a few kilohertz holds everything it looks
 # at; 8 kHz leaves the anti-alias filter well clear of that band.
-KICK_SOURCE_RATE = 8000
+KICK_SOURCE_RATE = 2000
 
 _loaded: dict[str, object] = {}
 

@@ -117,6 +117,7 @@ def one(job: dict) -> dict:
         # the audio as it ARRIVED -- before de-clipping, which is what the
         # parent had in hand when it separated.
         drums, found, selection = None, None, None
+        freq, decay, voice = job["freq"], job["decay"], None
         if job.get("stem_kicks"):
             drums = stems.load_kick_source(Path(job["stem_cache"]), original,
                                            decode.TARGET_RATE)
@@ -131,6 +132,12 @@ def one(job: dict) -> dict:
                 kicks, strengths, selection = subbass.select_kicks(
                     drums, decode.TARGET_RATE, kicks, strengths, job.get("bpm"))
                 found = (kicks, strengths)
+                # Tune the burst to this track's kick, measured where the
+                # kick is on its own. The fixed 45 Hz, 0.12 s burst sat a
+                # second note under 60-84 Hz kicks and outlasted them.
+                voice = subbass.kick_voice(drums, decode.TARGET_RATE, kicks)
+                if voice is not None:
+                    freq, decay = subbass.tuned_burst(*voice)
                 # No whole-track verdict: the filters have already dropped
                 # every hit that does not belong. Too few left is the one
                 # reason to go without, and enhance() says that itself.
@@ -177,7 +184,7 @@ def one(job: dict) -> dict:
 
         after, info = subbass.enhance(audio, decode.TARGET_RATE,
                                       amount_db=amount,
-                                      freq=job["freq"], decay_s=job["decay"],
+                                      freq=freq, decay_s=decay,
                                       punch_db=job["punch"],
                                       punch_decay_ms=job["punch_decay"],
                                       drums=drums, kicks=found)
@@ -269,7 +276,12 @@ def one(job: dict) -> dict:
         # happened -- on a row that shows what happened.
         reason = None
     if reason is None and selection is not None:
-        reason = subbass.describe_selection(selection, job.get("bpm"))
+        notes = [subbass.describe_selection(selection, job.get("bpm"))]
+        if voice is not None:
+            notes.append(f"sub tuned to {freq:.0f} Hz, {decay * 1000:.0f} ms "
+                         f"(kick at {voice[0]:.0f} Hz, "
+                         f"{voice[1] * 1000:.0f} ms)")
+        reason = "; ".join(n for n in notes if n) or None
 
     manifest = None
     if variants:
@@ -290,6 +302,7 @@ def one(job: dict) -> dict:
         "shape_before": float(_mean_low(before_bands)),
         "shape_after": float(_mean_low(after_bands)),
         "applied_db": float(info["applied_db"]),
+        "sub_hz": float(freq), "sub_decay_ms": float(decay * 1000),
         "safety_trim_db": float(info["safety_trim_db"]),
         "peak_dbtp": float(peak),
         "match_db": float(match_db),

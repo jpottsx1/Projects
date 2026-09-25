@@ -201,6 +201,55 @@ class TestSelectingTheKicks(unittest.TestCase):
         self.assertGreater(report["not_kick_shaped"], 0)
 
 
+def _kicks_at(pitch: float, tail_s: float, seconds: float = 20.0,
+              every: float = 0.5) -> tuple[np.ndarray, np.ndarray]:
+    """A drum part of pitched kicks: a short downward sweep settling at
+    `pitch`, falling 20 dB in `tail_s`. Returns (stereo part, onsets)."""
+    n = int(seconds * RATE)
+    t = np.arange(int(1.0 * RATE)) / RATE
+    tau = tail_s / np.log(10)
+    kick = (np.sin(2 * np.pi * np.cumsum(pitch * (1 + 0.5 * np.exp(-t * 50))) / RATE)
+            * np.exp(-t / tau))
+    y, onsets = np.zeros(n), []
+    for on in np.arange(0, seconds - 1, every):
+        i = int(on * RATE)
+        onsets.append(i)
+        y[i:i + t.size] += kick[: n - i]
+    y = y / np.abs(y).max() * 0.8
+    return np.stack([y, y], axis=1).astype(np.float32), np.array(onsets)
+
+
+class TestTuningTheSub(unittest.TestCase):
+    """The burst follows the track's kick: 1988 dance records measured
+    58-84 Hz kicks falling 20 dB in 74-252 ms, under a fixed 45 Hz burst
+    that rang for about 280."""
+
+    def test_the_kick_is_measured(self):
+        for pitch, tail in ((55.0, 0.3), (70.0, 0.127), (84.0, 0.115)):
+            drums, onsets = _kicks_at(pitch, tail, every=1.2)
+            measured = subbass.kick_voice(drums, RATE, onsets)
+            self.assertAlmostEqual(measured[0], pitch, delta=1.0)
+            self.assertAlmostEqual(measured[1], tail, delta=0.02)
+
+    def test_the_burst_goes_an_octave_under_or_onto_the_kick(self):
+        self.assertAlmostEqual(subbass.tuned_burst(70.0, 0.127)[0], 35.0)
+        self.assertAlmostEqual(subbass.tuned_burst(84.0, 0.115)[0], 42.0)
+        # An octave under 58 is 29 Hz, below the band: the kick's own pitch.
+        self.assertAlmostEqual(subbass.tuned_burst(58.0, 0.1)[0], 58.0)
+        self.assertAlmostEqual(subbass.tuned_burst(45.0, 0.1)[0], 45.0)
+
+    def test_the_burst_is_gone_when_the_kick_is(self):
+        freq, decay = subbass.tuned_burst(70.0, 0.127)
+        # exp(-t/decay) is down 20 dB at decay * ln(10).
+        self.assertAlmostEqual(decay * np.log(10), 0.127, delta=0.001)
+        self.assertEqual(subbass.tuned_burst(70.0, 5.0)[1], subbass.TUNED_DECAY_S[1])
+        self.assertEqual(subbass.tuned_burst(70.0, 0.001)[1], subbass.TUNED_DECAY_S[0])
+
+    def test_too_few_kicks_leave_the_burst_alone(self):
+        drums, onsets = _kicks_at(70.0, 0.127)
+        self.assertIsNone(subbass.kick_voice(drums, RATE, onsets[:3]))
+
+
 class TestTheKeptKickSource(unittest.TestCase):
     """What is kept is 8 kHz mono. It has to find the same kicks."""
 
@@ -303,6 +352,36 @@ class TestTheStageUsesTheStem(unittest.TestCase):
         seconds = mix.shape[0] / RATE
         used = result["kicks_per_minute"] * seconds / 60
         self.assertLess(used, 1.2 * truth.size)
+
+    def test_the_sub_is_tuned_to_a_70_hz_kick(self):
+        """Stage level: a 70 Hz kick gets its sub at 35 Hz, and the energy
+        that goes in is there -- not at the old fixed 45."""
+        drums, onsets = _kicks_at(70.0, 0.127)
+        rng = np.random.default_rng(4)
+        self.mix = (drums + 0.02 * rng.standard_normal(drums.shape)).astype(np.float32)
+        stems.store_kick_source(self.cache, self.mix, RATE, drums)
+        result = self.run_one(self.job(bpm=120.0))
+        self.assertEqual(result["status"], "ok", result.get("reason"))
+        self.assertAlmostEqual(result["sub_hz"], 35.0, delta=1.0)
+        self.assertAlmostEqual(result["sub_decay_ms"], 127 / np.log(10), delta=10)
+        self.assertIn("tuned to 35 Hz", result["reason"])
+
+        # And the burst that tuning produces lands at 35 Hz.
+        out, _ = subbass.enhance(self.mix, RATE, amount_db=5.0,
+                                 freq=result["sub_hz"],
+                                 decay_s=result["sub_decay_ms"] / 1000,
+                                 kicks=(onsets, np.ones(onsets.size)))
+        added = (out.astype(np.float64) - self.mix)[:, 0]
+        spectrum = np.abs(np.fft.rfft(added))
+        freqs = np.fft.rfftfreq(added.size, 1 / RATE)
+        band = (freqs > 20) & (freqs < 80)
+        self.assertAlmostEqual(float(freqs[band][np.argmax(spectrum[band])]), 35.0,
+                               delta=2.0)
+
+    def test_without_the_stem_the_burst_is_the_fixed_one(self):
+        result = self.run_one(self.job(stem_kicks=False))
+        self.assertEqual(result["sub_hz"], 45.0)
+        self.assertAlmostEqual(result["sub_decay_ms"], 120.0)
 
     def test_no_kept_stem_means_no_sub_and_says_why(self):
         result = self.run_one(self.job(stem_error="RuntimeError: out of memory"))

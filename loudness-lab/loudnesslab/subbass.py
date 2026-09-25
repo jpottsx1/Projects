@@ -181,18 +181,25 @@ def _kick_level_db(drums: np.ndarray, rate: int, kicks: np.ndarray) -> np.ndarra
     return 10 * np.log10(np.maximum(energy, 1e-30) / reference)
 
 
-def _on_grid(kicks: np.ndarray, rate: int, bpm: float) -> tuple[np.ndarray, float]:
+def _on_grid(kicks: np.ndarray, rate: int, bpm: float,
+             subdivision: int = 1) -> tuple[np.ndarray, float]:
     """Which kicks land within GRID_TOLERANCE of a beat, and how firmly
     they agree on where the beat is (see MIN_GRID_COHERENCE).
+
+    `subdivision` 2 or 4 is a grid of eighths or sixteenths instead: the
+    report compares them, because syncopated grooves put real kicks
+    between the beats. The tolerance stays 12% of a beat, but never more
+    than a quarter of the step, or a sixteenth grid would accept anything.
 
     Where the beats are is worked out around each kick from its neighbours
     -- the circular mean of their positions within a beat -- so the grid
     follows a live drummer's drift and needs no downbeat from anywhere.
     """
-    period = 60.0 / bpm * rate
+    period = 60.0 / bpm * rate / subdivision
+    tolerance = min(GRID_TOLERANCE, 0.25 / subdivision) * subdivision
     phase = (kicks / period) % 1.0
     angle = np.exp(2j * np.pi * phase)
-    reach = GRID_WINDOW_BEATS * period
+    reach = GRID_WINDOW_BEATS * period * subdivision
     keep = np.zeros(kicks.size, dtype=bool)
     firmness = np.empty(kicks.size)
     for i, k in enumerate(kicks):
@@ -200,7 +207,7 @@ def _on_grid(kicks: np.ndarray, rate: int, bpm: float) -> tuple[np.ndarray, floa
         mean = angle[near].mean()
         firmness[i] = abs(mean)
         offset = (phase[i] - np.angle(mean) / (2 * np.pi) + 0.5) % 1.0 - 0.5
-        keep[i] = abs(offset) <= GRID_TOLERANCE
+        keep[i] = abs(offset) <= tolerance
     return keep, float(np.median(firmness))
 
 
@@ -283,6 +290,76 @@ def _backtrack(peaks: np.ndarray, fast: np.ndarray, rate: int) -> np.ndarray:
         below = np.flatnonzero(fast[low:peak + 1] <= fast[peak] * BACKTRACK_FRACTION)
         out[index] = low + below[-1] if below.size else peak
     return out
+
+
+# Tuning the burst to the track's own kick. Measured on twelve 1988 dance
+# records through a Demucs drum stem: kick fundamentals 58-84 Hz, tails
+# (to -20 dB) 74-252 ms. The fixed burst was 45 Hz ringing to -20 dB at
+# about 280 ms -- a second, lower note under every kick that outlasted it,
+# which by ear added no drum depth and read as "catching the bass line".
+VOICE_LOW_HZ, VOICE_HIGH_HZ = 30.0, 120.0
+# The octave below the kick, unless that falls under the band the stage
+# is sized in; then the kick's own pitch, which is already inside it.
+TUNED_MIN_HZ = 31.5
+TUNED_MAX_HZ = 63.0
+# The burst's decay is set so it falls 20 dB when the kick does, within
+# these bounds: shorter clicks rather than thumps, longer is a note.
+TUNED_DECAY_S = (0.03, 0.2)
+VOICE_SAMPLE = 64
+
+
+def kick_voice(source: np.ndarray, rate: int,
+               kicks: np.ndarray) -> tuple[float, float] | None:
+    """(pitch Hz, tail s) of the kicks' low end in `source`, or None.
+
+    Pitch: the strongest frequency from 30 to 120 Hz in each kick, median
+    over the kicks. Tail: how long the 30-120 Hz envelope takes to fall
+    20 dB, measured up to the next kick at most, median. `source` is
+    whatever holds the kick -- a drum stem in the stage, drums and bass
+    together in the report.
+    """
+    if kicks.size < 4:
+        return None
+    # A median needs a sample, not every kick: 64 spread across the track
+    # read the same as all of them and cost a tenth as much on a long mix.
+    gaps_all = np.diff(np.append(kicks, source.shape[0]))
+    if kicks.size > VOICE_SAMPLE:
+        pick = np.linspace(0, kicks.size - 1, VOICE_SAMPLE).astype(int)
+        kicks, gaps_all = kicks[pick], gaps_all[pick]
+    mono = source.mean(axis=1).astype(np.float64) if source.ndim == 2 else source
+    band = sosfiltfilt(butter(4, [VOICE_LOW_HZ, VOICE_HIGH_HZ], btype="band",
+                              fs=rate, output="sos"), mono)
+    env = sosfiltfilt(butter(2, 40, btype="low", fs=rate, output="sos"),
+                      np.abs(band))
+    look = int(0.5 * rate)
+    ring = int(1.5 * rate)
+    fft_n = 4 * rate                  # 0.25 Hz bins
+    freqs = np.fft.rfftfreq(fft_n, 1 / rate)
+    in_band = (freqs >= VOICE_LOW_HZ) & (freqs <= VOICE_HIGH_HZ)
+    pitches, tails = [], []
+    for k, gap in zip(kicks, gaps_all):
+        seg = band[k:k + min(look, int(gap))]
+        if seg.size < int(0.03 * rate):
+            continue
+        spec = np.abs(np.fft.rfft(seg * np.hanning(seg.size), fft_n))
+        pitches.append(float(freqs[in_band][np.argmax(spec[in_band])]))
+        e = env[k:k + min(ring, int(gap))]
+        peak = int(np.argmax(e[: int(0.05 * rate)]))
+        below = np.flatnonzero(e[peak:] <= e[peak] * 0.1)
+        tails.append((below[0] if below.size else e.size - peak) / rate)
+    if len(pitches) < 4:
+        return None
+    return float(np.median(pitches)), float(np.median(tails))
+
+
+def tuned_burst(pitch_hz: float, tail_s: float) -> tuple[float, float]:
+    """(freq Hz, decay s) for a burst that sits under a kick of this voice:
+    an octave down, or at the kick's own pitch when an octave down would
+    fall under the band, and gone 20 dB when the kick is."""
+    freq = pitch_hz / 2 if pitch_hz / 2 >= TUNED_MIN_HZ else pitch_hz
+    freq = float(min(max(freq, TUNED_MIN_HZ), TUNED_MAX_HZ))
+    decay = float(np.clip(tail_s / np.log(10), *TUNED_DECAY_S))
+    return freq, decay
 
 
 def _burst(rate: int, freq: float, decay_s: float) -> np.ndarray:

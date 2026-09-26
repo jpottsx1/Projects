@@ -42,13 +42,28 @@ if ! .venv/bin/python -c "import demucs, torch" 2>/dev/null; then
         || fail "The install failed. The errors above are the whole story -- copy them and send them on."
 fi
 
-# Several folders at once (Cmd-click them), one per line, so a run over a
-# few folders can be left alone.
+# Several folders, one at a time: pick a folder, then "Add another folder"
+# or "Start". Cmd-clicking several in one chooser was the first attempt,
+# and in practice a click there opens the folder instead of selecting it.
+# Cancel at any point starts with what has been chosen so far. One path
+# per line, so a run over a few folders can be left alone.
 FOLDERS="$(osascript \
-    -e 'set chosen to choose folder with prompt "Which folders should be checked? Cmd-click to choose several. Tracks with a BPM tag work best." with multiple selections allowed' \
     -e 'set out to ""' \
-    -e 'repeat with f in chosen' \
+    -e 'set promptText to "Which folder should be checked? Tracks with a BPM tag work best."' \
+    -e 'repeat' \
+    -e 'try' \
+    -e 'set f to choose folder with prompt promptText' \
+    -e 'on error' \
+    -e 'exit repeat' \
+    -e 'end try' \
     -e 'set out to out & POSIX path of f & linefeed' \
+    -e 'try' \
+    -e 'set r to button returned of (display dialog ("Chosen so far:" & return & out) buttons {"Add another folder", "Start"} default button "Start")' \
+    -e 'on error' \
+    -e 'exit repeat' \
+    -e 'end try' \
+    -e 'if r is "Start" then exit repeat' \
+    -e 'set promptText to "Which other folder should be checked?"' \
     -e 'end repeat' \
     -e 'return out' 2>/dev/null)" \
     || fail "No folder chosen."

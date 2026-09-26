@@ -153,7 +153,8 @@ every machine but the one that made it for a while.
 ```
 loudnesslab/     the Python: bs1770, spectrum, subbass, declip, expand,
                  air, mp3gain, decode, db, report, render, write, cli,
-                 stems (Demucs: a drum stem for kicks, a guide for air)
+                 stems (Demucs: a drum stem for kicks, a guide for air),
+                 machine (is this kick a drum machine? measured only)
 tests/           its tests
 tools/           make_golden.py, the five checkers, measure_stem_kicks.py
 macapp/
@@ -792,6 +793,32 @@ Blue Monday is `sub_offset` ("More or less than the reference", -6 to +6
 dB): added to each track's measured shortfall before the cap, so +3 is 3
 dB more than matching the reference, and a track at the cap needs the cap
 raised too.
+
+### Drum machines: two numbers to tell them from drummers
+
+Synth-pop -- New Order, Pet Shop Boys, Yazoo, Erasure, Depeche Mode -- is
+played by machines, and a machine plays ONE kick recording, exactly on its
+grid. If that shows plainly on real records, those tracks can be handled
+better than by guessing hit by hit: find the kick by matching its sound
+(a snare or tom is a different sound however loud; a quiet kick is the
+same sound), trust the sequencer's repeating pattern, and build the sub
+from the kick itself. Before building any of that, `machine.py` measures,
+and the report prints per track:
+
+- **How closely the kicks match their own average**, after lining them
+  up to the sample (`kick_template`): the median and the 10th percentile.
+- **How far they land from the grid** (`grid_jitter_ms`), using those
+  aligned onsets, the grid placed locally so a tag a fraction off the real
+  tempo is followed and does not read as timing.
+
+On synthetic drums: a machine 0.993 / 0.992 and 0.03 ms; a drummer with
+5-20 ms timing 0.963-0.965 median, 0.875-0.885 at the 10th percentile,
+and 2.4-8.8 ms (about 0.67 of the timing's standard deviation, as a
+normal distribution's median absolute value should be). Grid distance
+separates them by about eighty times; the median similarity barely does
+-- my synthetic drummer varies only a little -- and real records add
+bleed over the kicks that will pull a machine's similarity down. Which
+number holds up is for the 1983, 1988 and a disco folder to say.
 
 ### Air: why none arrived, and air that follows the stems
 

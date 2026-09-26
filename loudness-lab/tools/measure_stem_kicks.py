@@ -54,7 +54,7 @@ import numpy as np
 from scipy.signal import butter, sosfilt
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from loudnesslab import stems, subbass  # noqa: E402
+from loudnesslab import machine, stems, subbass  # noqa: E402
 
 RATE = 48000
 SCENARIOS = ("groove", "octave", "buried", "slap")
@@ -337,6 +337,26 @@ def gaps(drums: np.ndarray, found: np.ndarray, kept: np.ndarray, rate: int,
     return lines
 
 
+def machine_check(drums: np.ndarray, kept: np.ndarray, rate: int,
+                  bpm: float | None, step: int | None) -> str:
+    """Two numbers that should tell a drum machine from a drummer: how
+    closely the kicks match their own average (a machine plays one sample),
+    and how far they land from the grid (a sequencer is exact). On
+    synthetic drums: a machine 0.99 and 0.03 ms; a drummer 0.96 median but
+    0.88 at the 10th percentile, and 2.4-8.8 ms. Whether real records fall
+    into two groups like that is what this line is for."""
+    found = machine.kick_template(drums, rate, kept)
+    if found is None:
+        return "machine check: too few kicks"
+    _, similarity, onsets = found
+    jitter = machine.grid_jitter_ms(onsets, rate, bpm, step or 1) if bpm else None
+    return (f"machine check: kicks match their average at "
+            f"{np.median(similarity):.3f} (10th percentile "
+            f"{np.percentile(similarity, 10):.3f}); "
+            + (f"{jitter:.2f} ms from the grid (median)" if jitter is not None
+               else "no tag, no grid"))
+
+
 def grid_counts(drums: np.ndarray, kicks: np.ndarray, rate: int,
                 bpm: float | None, minutes: float) -> str:
     """Kicks a minute that a grid of quarters, eighths and sixteenths would
@@ -408,6 +428,8 @@ def measure_files(paths: list[Path], backends: list[str]) -> int:
                              f"{freq:.0f} Hz, {decay * 1000:.0f} ms (was "
                              f"{subbass.DEFAULT_FREQ_HZ:.0f} Hz, "
                              f"{subbass.DEFAULT_DECAY_S * 1000:.0f} ms)")
+            notes.append(machine_check(drums, kept, RATE, tagged,
+                                       report["grid_step"]))
             notes.append(grid_counts(drums, kicks, RATE, tagged, minutes))
             notes.extend(gaps(drums, kicks, kept, RATE, tagged, x.shape[0]))
         cells = []

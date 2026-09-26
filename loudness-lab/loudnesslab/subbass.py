@@ -246,7 +246,8 @@ def _on_grid(kicks: np.ndarray, rate: int, bpm: float,
 
 
 def select_kicks(drums: np.ndarray, rate: int, kicks: np.ndarray,
-                 strengths: np.ndarray, tagged_bpm: float | None
+                 strengths: np.ndarray, tagged_bpm: float | None,
+                 by_sound: bool = False
                  ) -> tuple[np.ndarray, np.ndarray, dict]:
     """Keep the onsets on a drum stem that are kicks, and on the beat.
 
@@ -263,15 +264,25 @@ def select_kicks(drums: np.ndarray, rate: int, kicks: np.ndarray,
     tag costs the hits that disagree and not the record. The grid is the
     tag's quarters, eighths or sixteenths, whichever the kicks sit on (see
     MIN_GRID_COHERENCE); if none fits, the weight filter works alone.
+
+    `by_sound` adds a third filter between the two: hits that do not sound
+    like the track's kick (`machine.sounds_like_the_kick`) go before the
+    grid is fitted, so the grid is fitted to kicks and not to a mix of
+    drums. Measured only, for now: the report runs it, processing does not.
     """
     report = {"found": int(kicks.size), "not_kick_shaped": 0, "off_grid": 0,
               "grid_bpm": None, "grid_step": None, "grid_coherence": None,
-              "strength_spread_db": None}
+              "strength_spread_db": None, "not_the_kick": 0}
     if kicks.size == 0:
         return kicks, strengths, report
     shaped = _kick_level_db(drums, rate, kicks) >= MIN_KICK_LEVEL_DB
     report["not_kick_shaped"] = int((~shaped).sum())
     kicks, strengths = kicks[shaped], strengths[shaped]
+    if by_sound:
+        from loudnesslab import machine
+        same, _ = machine.sounds_like_the_kick(drums, rate, kicks)
+        report["not_the_kick"] = int((~same).sum())
+        kicks, strengths = kicks[same], strengths[same]
     if (kicks.size >= 8 and tagged_bpm is not None
             and np.isfinite(tagged_bpm) and tagged_bpm > 0):
         fits = {step: _on_grid(kicks, rate, float(tagged_bpm), step)
@@ -307,7 +318,8 @@ def describe_selection(report: dict, tagged_bpm: float | None) -> str | None:
     """One line on what select_kicks did, or None if it changed nothing
     worth saying. For the log, so a track whose sub went under fewer hits
     than it has drums says why."""
-    kept = report["found"] - report["not_kick_shaped"] - report["off_grid"]
+    kept = (report["found"] - report["not_kick_shaped"]
+            - report.get("not_the_kick", 0) - report["off_grid"])
     grid = ""
     if report["grid_bpm"] is None and tagged_bpm:
         grid = "; no beat grid fitted the tag, so weight alone"

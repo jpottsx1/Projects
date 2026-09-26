@@ -793,5 +793,126 @@ class TestMachineCheck(unittest.TestCase):
         self.assertGreaterEqual(float(close.mean()), 0.95)
 
 
+
+def _kit_with_heavy_toms(seconds: float = 40.0, bpm: float = 110.0, seed: int = 0):
+    """A kick on every beat, a LinnDrum-style snare ON the kick on 2 and 4
+    -- half as loud again as the kick, as late-80s snares often are --
+    and a low tom -- as heavy as the kick, in its band -- on the "and" of
+    every other beat: a Latin-freestyle pattern of the Domino Dancing kind.
+    Returns (drums, kick times, tom times)."""
+    rng = np.random.default_rng(seed)
+    n, beat = int(seconds * RATE), 60 / bpm
+    track = np.zeros(n)
+    kicks, toms = [], []
+    for i, b in enumerate(np.arange(0.5, seconds - 1, beat)):
+        fixtures._place(track, b, 0.9 * fixtures._kick(int(0.3 * RATE), rng))
+        kicks.append(b)
+        if i % 2 == 1:
+            fixtures._place(track, b, 1.35 * fixtures._thump_snare(int(0.3 * RATE), rng))
+        else:
+            fixtures._place(track, b + beat / 2, 0.9 * fixtures._tom(int(0.35 * RATE), 64))
+            toms.append(b + beat / 2)
+    track = track / np.abs(track).max() * 0.8
+    return (np.stack([track, track], axis=1).astype(np.float32),
+            np.array(kicks), np.array(toms))
+
+
+class TestTheKicksOwnSound(unittest.TestCase):
+    """`select_kicks(by_sound=True)`: hits that do not sound like the
+    track's kick go before the grid is fitted."""
+
+    def select(self, drums, bpm, by_sound=True):
+        kicks, strengths = subbass.detect_kicks(drums, RATE, drums)
+        return subbass.select_kicks(drums, RATE, kicks, strengths, bpm,
+                                    by_sound=by_sound)
+
+    def test_the_other_drums_go_and_the_kicks_stay(self):
+        drums, truth, other = fixtures.backbeat(seconds=60.0)
+        before, _, _ = self.select(drums, 104.0, by_sound=False)
+        kept, _, report = self.select(drums, 104.0)
+        self.assertLess(fixtures.score(before, truth)[1], 0.85)
+        recall, precision, _ = fixtures.score(kept, truth)
+        self.assertGreaterEqual(precision, 0.98)
+        self.assertGreaterEqual(recall, 0.97)
+        self.assertGreater(report["not_the_kick"], 10)
+
+    def test_the_grid_is_then_fitted_to_the_kicks(self):
+        # Unfiltered, the toms and scratches pull the fit onto sixteenths;
+        # the kicks themselves sit on eighths (the syncopated "and" of 2).
+        drums, _, _ = fixtures.backbeat(seconds=60.0)
+        _, _, before = self.select(drums, 104.0, by_sound=False)
+        _, _, after = self.select(drums, 104.0)
+        self.assertEqual(before["grid_step"], 4)
+        self.assertEqual(after["grid_step"], 2)
+
+    def test_a_kick_under_a_snare_is_the_same_sound(self):
+        # Why the comparison is made in the kick's band only: across
+        # 30-2000 Hz a snare this loud takes the match to about 0.5.
+        drums, truth, _ = _kit_with_heavy_toms()
+        kept, _, _ = self.select(drums, 110.0)
+        on_snare = truth[1::2]
+        self.assertGreaterEqual(fixtures.score(kept, on_snare)[0], 0.98)
+
+    def test_a_tom_as_heavy_as_the_kick_is_not_the_kick(self):
+        # The kick is the most common heavy sound; the tom is as heavy but
+        # half as often, and must not become the template.
+        drums, truth, toms = _kit_with_heavy_toms()
+        before, _, _ = self.select(drums, None, by_sound=False)
+        kept, _, _ = self.select(drums, None)
+        self.assertGreater(fixtures.score(before, toms)[0], 0.9)
+        self.assertLess(fixtures.score(kept, toms)[0], 0.05)
+        self.assertGreaterEqual(fixtures.score(kept, truth)[0], 0.98)
+
+    def test_a_drummers_kicks_still_sound_alike(self):
+        for ms in (5.0, 20.0):
+            drums, onsets = _played(False, jitter_ms=ms, seconds=60.0)
+            kept, _, _ = self.select(drums, 120.0)
+            self.assertGreaterEqual(fixtures.score(kept, onsets)[0], 0.97)
+
+    def test_off_unless_asked(self):
+        drums, _, _ = fixtures.backbeat(seconds=30.0)
+        with mock.patch("loudnesslab.machine.sounds_like_the_kick") as asked:
+            _, _, report = self.select(drums, 104.0, by_sound=False)
+        asked.assert_not_called()
+        self.assertEqual(report["not_the_kick"], 0)
+
+    def test_too_few_hits_to_learn_from_are_all_kept(self):
+        # Four kicks and two toms: with more, the toms would go.
+        from loudnesslab import machine
+        drums, kicks, toms = _kit_with_heavy_toms(seconds=4.0)
+        hits = (np.sort(np.concatenate([kicks[:4], toms[:2]])) * RATE).astype(int)
+        keep, _ = machine.sounds_like_the_kick(drums, RATE, hits)
+        self.assertTrue(keep.all())
+
+
+
+class TestTheKickReport(unittest.TestCase):
+    """measure_stem_kicks.py --files, end to end on one synthetic track,
+    with decoding and Demucs stood in for. The report is the instrument
+    every constant here was checked with; a line that silently stops
+    printing is a measurement nobody knows is missing."""
+
+    def test_it_prints_the_sound_column_and_line(self):
+        from loudnesslab import decode
+        drums, _, _ = fixtures.backbeat(seconds=40.0)
+        parts = {"drums": drums, "bass": np.zeros_like(drums),
+                 "other": np.zeros_like(drums), "vocals": np.zeros_like(drums)}
+        out = io.StringIO()
+        with mock.patch.object(decode, "require_tools"), \
+                mock.patch.object(decode, "find_audio", return_value=[Path("a.mp3")]), \
+                mock.patch.object(decode, "probe", return_value={"bpm": 104.0}), \
+                mock.patch.object(decode, "decode", return_value=drums), \
+                mock.patch.object(stems, "separate", return_value=parts), \
+                contextlib.redirect_stdout(out):
+            fixtures.measure_files([Path("folder")], ["demucs"])
+        text = out.getvalue()
+        self.assertIn("demucs+sound", text)
+        line = next(l for l in text.splitlines() if "by sound:" in l)
+        self.assertIn("then grid: eighths", line)
+        self.assertIn("ms from the grid", line)
+        summary = text[text.index("implied tempo"):]
+        self.assertRegex(summary, r"demucs\+sound\s+1 of 1")
+
+
 if __name__ == "__main__":
     unittest.main()

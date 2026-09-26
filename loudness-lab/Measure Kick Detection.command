@@ -62,7 +62,7 @@ $FOLDERS
 END_OF_FOLDERS
 
 mkdir -p scans
-REPORT="scans/kick-detection-$(date +%Y-%m-%d-%H%M).txt"
+REPORT="scans/kick-detection-$(date +%Y-%m-%d-%H%M%S).txt"
 echo
 echo "Checking:"
 for f in "$@"; do echo "  $f"; done

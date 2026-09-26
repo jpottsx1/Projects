@@ -978,5 +978,51 @@ class TestTheKickReport(unittest.TestCase):
         self.assertRegex(summary, r"demucs\+sound\s+1 of 1")
 
 
+
+class TestWhereTheDroppedHitsAre(unittest.TestCase):
+    """The report's answer to "real kicks, or not?" for on-beat hits the
+    sound filter drops: bunched in one stretch with no kept kick inside
+    (a section with its own kick sound), or between kept kicks
+    throughout (something on some beats, changing the kick under it)."""
+
+    period = 0.5 * RATE                            # 120 BPM
+
+    def spans(self, dropped, kept):
+        return fixtures.dropped_spans(np.asarray(dropped, dtype=float),
+                                      np.asarray(kept, dtype=float), RATE, 120.0)
+
+    def test_a_section_with_its_own_kick(self):
+        beats = np.arange(120) * self.period
+        section = (beats >= 20 * RATE) & (beats < 32 * RATE)
+        text = self.spans(beats[section], beats[~section])
+        self.assertIn(f"{section.sum()} dropped, 0 kept among them", text)
+
+    def test_something_on_2_and_4(self):
+        beats = np.arange(120) * self.period
+        text = self.spans(beats[1::2], beats[0::2])
+        # One run the length of the track, the kept kicks between its hits.
+        self.assertIn("60 dropped, 59 kept among them", text)
+        self.assertNotIn("more elsewhere", text)
+
+    def test_the_report_shows_a_section_with_another_kick(self):
+        rng = np.random.default_rng(0)
+        n, beat = int(50 * RATE), 60 / 116
+        track = np.zeros(n)
+        t = np.arange(int(0.3 * RATE)) / RATE
+        boom = (np.sin(2 * np.pi * np.cumsum(75 * (1 + 0.2 * np.exp(-t * 30))) / RATE)
+                * np.exp(-t * 12))
+        for b in np.arange(0.5, 49, beat):
+            fixtures._place(track, b, 0.9 * (boom if 20 <= b < 32
+                                             else fixtures._kick(t.size, rng)))
+        track = track / np.abs(track).max() * 0.8
+        drums = np.stack([track, track], axis=1).astype(np.float32)
+        kicks, strengths = subbass.detect_kicks(drums, RATE, drums)
+        kept, _, report = subbass.select_kicks(drums, RATE, kicks, strengths,
+                                               116.0, by_sound=True)
+        line = fixtures.sound_line(drums, kept, report, 116.0, 50 / 60,
+                                   kicks, strengths)
+        self.assertRegex(line, r"where: 0:(19|20)\.\d-0:3[12]\.\d \d+ dropped, 0 kept")
+
+
 if __name__ == "__main__":
     unittest.main()

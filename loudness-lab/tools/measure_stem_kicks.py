@@ -488,28 +488,32 @@ REPORT_CACHE = Path(__file__).resolve().parents[1] / "scans" / "stems"
 CACHE_RATE = 8000
 
 
+def keep_separation(x: np.ndarray, backend: str, cache: Path) -> tuple[Path, bool]:
+    """Separate `x` and keep its drum and bass parts, unless that was done
+    before. (where it is kept, whether it already was)."""
+    import soxr
+    path = Path(cache) / f"{stems.audio_key(x)}-{backend}.npz"
+    if path.exists():
+        return path, True
+    parts = stems.separate(x, RATE, backend)
+    small = {name: soxr.resample(parts[name].mean(axis=1).astype(np.float64),
+                                 RATE, CACHE_RATE, quality="VHQ").astype(np.float32)
+             for name in ("drums", "bass")}
+    path.parent.mkdir(parents=True, exist_ok=True)
+    partial = path.with_name(path.stem + ".partial.npz")
+    np.savez_compressed(partial, **small)
+    partial.replace(path)
+    return path, False
+
+
 def separated(x: np.ndarray, backend: str,
               cache: Path | None = REPORT_CACHE) -> tuple[dict, bool]:
     """({"drums", "bass"} at RATE, stereo, as long as `x`; whether they came
     from the cache). A first run keeps what it separated and reads it back
     the same way a second run will, so the two report the same numbers."""
     import soxr
-    path = None
     if cache is not None:
-        path = Path(cache) / f"{stems.audio_key(x)}-{backend}.npz"
-        if not path.exists():
-            parts = stems.separate(x, RATE, backend)
-            small = {name: soxr.resample(parts[name].mean(axis=1).astype(np.float64),
-                                         RATE, CACHE_RATE, quality="VHQ")
-                                  .astype(np.float32)
-                     for name in ("drums", "bass")}
-            path.parent.mkdir(parents=True, exist_ok=True)
-            partial = path.with_name(path.stem + ".partial.npz")
-            np.savez_compressed(partial, **small)
-            partial.replace(path)
-            hit = False
-        else:
-            hit = True
+        path, hit = keep_separation(x, backend, cache)
         with np.load(path) as stored:
             out = {}
             for name in ("drums", "bass"):
@@ -522,97 +526,132 @@ def separated(x: np.ndarray, backend: str,
     return {"drums": parts["drums"], "bass": parts["bass"]}, False
 
 
+def _analyse(task: dict) -> dict:
+    """One track's analysis, from its decoded audio: everything the report
+    prints for it, and whether each column's tempo agreed with the tag.
+    Runs in a pool worker -- it needs neither ffmpeg nor Demucs, only the
+    audio it is handed and the separation kept in `cache` (or, with no
+    cache, the parts handed over too)."""
+    x, tagged, columns = task["x"], task["tagged"], task["columns"]
+    minutes = x.shape[0] / RATE / 60
+    found = {"mix": subbass.detect_kicks(x, RATE)[0]}
+    # What each column is scored against: the tag, or for a filtered
+    # column the grid the filter settled on (double the tag, sometimes).
+    against = {name: tagged for name in columns}
+    notes = []
+    for backend in task["backends"]:
+        parts = (task["parts"][backend] if task["parts"]
+                 else separated(x, backend, task["cache"])[0])
+        drums = parts["drums"]
+        kicks, strengths = subbass.detect_kicks(x, RATE, drums)
+        found[backend] = kicks
+        kept, _, report = subbass.select_kicks(drums, RATE, kicks, strengths,
+                                               tagged)
+        found[backend + "+filter"] = kept
+        if report["grid_bpm"]:
+            against[backend + "+filter"] = report["grid_bpm"] * report["grid_step"]
+        step = {1: "quarters", 2: "eighths", 4: "sixteenths"}.get(
+            report["grid_step"], "none fitted")
+        notes.append(f"dropped {report['not_kick_shaped']} light, "
+                     f"{report['off_grid']} off the grid; grid: {step} "
+                     f"(fit {report['grid_coherence']}); kept kicks vary "
+                     f"{report['strength_spread_db']} dB on the drum stem "
+                     f"(10th to 90th percentile) -- the bursts no longer do")
+        share, pitch, tail = kick_profile(drums, parts["bass"], kept, RATE)
+        notes.append(f"kick low end {share:.0%} in the bass stem; "
+                     f"drums and bass together ~{pitch}, tail {tail}")
+        voice = subbass.kick_voice(drums, RATE, kept)
+        if voice is not None:
+            freq, decay = subbass.tuned_burst(*voice)
+            notes.append(f"on the drum stem the kick is {voice[0]:.0f} Hz, "
+                         f"{voice[1] * 1000:.0f} ms, so the sub is "
+                         f"{freq:.0f} Hz, {decay * 1000:.0f} ms (was "
+                         f"{subbass.DEFAULT_FREQ_HZ:.0f} Hz, "
+                         f"{subbass.DEFAULT_DECAY_S * 1000:.0f} ms)")
+        notes.append(machine_check(drums, kept, RATE, tagged,
+                                   report["grid_step"]))
+        notes.append(grid_counts(drums, kicks, RATE, tagged, minutes))
+        by_sound, _, sound_report = subbass.select_kicks(
+            drums, RATE, kicks, strengths, tagged, by_sound=True)
+        found[backend + "+sound"] = by_sound
+        if sound_report["grid_bpm"]:
+            against[backend + "+sound"] = (sound_report["grid_bpm"]
+                                           * sound_report["grid_step"])
+        used = (report["grid_bpm"] is None and tagged
+                and sound_report["grid_bpm"] is not None)
+        notes.append(sound_line(drums, by_sound, sound_report, tagged,
+                                minutes, kicks, strengths)
+                     + ("\n        processing uses the sound filter here: no "
+                        "grid fits without it" if used else ""))
+        notes.extend(gaps(drums, kicks, kept, RATE, tagged, x.shape[0]))
+    cells, agree = [], {}
+    for name in columns:
+        kicks = found[name]
+        bpm = implied_bpm(kicks, RATE)
+        cells.append(f"{bpm:>6.1f};{kicks.size / minutes:>4.0f}")
+        if tagged:
+            target = against[name]
+            agree[name] = any(abs(bpm - target * m) <= 0.03 * target * m
+                              for m in ((1.0,) if "+" not in name
+                                        else (1.0, 0.5, 0.25)))
+    label = f"{tagged:>6.1f}" if tagged else f"{'-':>6}"
+    text = (f"{label}  " + "  ".join(f"{c:>14}" for c in cells)
+            + f"   {task['name']}"
+            + "".join(f"\n        {note}" for note in notes))
+    return {"text": text, "agree": agree, "folder": task["folder"]}
+
+
 def measure_files(paths: list[Path], backends: list[str],
-                  cache: Path | None = REPORT_CACHE) -> int:
+                  cache: Path | None = REPORT_CACHE, workers: int = 1) -> int:
     """Each real track, scored against its BPM tag. For every separator two
     columns: the stem as detected, and after `select_kicks` has dropped the
     hits too light to be a kick and the ones off the beat -- which is what
     the sub stage actually uses -- and a third with the kick-sound filter
-    too (`select_kicks(by_sound=True)`), which processing does not use yet."""
-    from loudnesslab import decode
+    too (`select_kicks(by_sound=True)`).
+
+    `workers` tracks are analysed at a time. Decoding, the tag and
+    separating stay here, one track at a time (one Demucs model, on the
+    GPU), overlapped with the analysis in the pool, which was nearly all
+    of a run's time once separations were kept (render.pipeline). The
+    report prints in folder order whatever the width."""
+    from loudnesslab import decode, render
 
     decode.require_tools()
     files = []
     for path in paths:
         found = decode.find_audio(path) if path.is_dir() else [path]
-        files += [(p, path if path.is_dir() else None) for p in found]
+        files += [(p, path if path.is_dir() and len(paths) > 1 else None)
+                  for p in found]
     columns = ["mix"] + [c for b in backends
                          for c in (b, b + "+filter", b + "+sound")]
     print(f"{'tagged':>6}  " + "  ".join(f"{name:>14}" for name in columns)
           + "   (implied BPM; kicks/min)  track")
-    agree: dict[str, list[bool]] = {}
-    folder = None
-    for path, parent in files:
-        if parent is not None and parent != folder and len(paths) > 1:
-            folder = parent
-            print(f"\n{parent.name}")
-        tagged = decode.probe(path).get("bpm")
+
+    def prepare(item):
+        path, parent = item
         x = decode.decode(path, RATE)
-        minutes = x.shape[0] / RATE / 60
-        found = {"mix": subbass.detect_kicks(x, RATE)[0]}
-        # What each column is scored against: the tag, or for a filtered
-        # column the grid the filter settled on (double the tag, sometimes).
-        against = {name: tagged for name in columns}
-        notes = []
-        for backend in backends:
-            parts, _ = separated(x, backend, cache)
-            drums = parts["drums"]
-            kicks, strengths = subbass.detect_kicks(x, RATE, drums)
-            found[backend] = kicks
-            kept, _, report = subbass.select_kicks(drums, RATE, kicks, strengths,
-                                                   tagged)
-            found[backend + "+filter"] = kept
-            if report["grid_bpm"]:
-                against[backend + "+filter"] = report["grid_bpm"] * report["grid_step"]
-            step = {1: "quarters", 2: "eighths", 4: "sixteenths"}.get(
-                report["grid_step"], "none fitted")
-            notes.append(f"dropped {report['not_kick_shaped']} light, "
-                         f"{report['off_grid']} off the grid; grid: {step} "
-                         f"(fit {report['grid_coherence']}); kept kicks vary "
-                         f"{report['strength_spread_db']} dB on the drum stem "
-                         f"(10th to 90th percentile) -- the bursts no longer do")
-            share, pitch, tail = kick_profile(drums, parts["bass"], kept, RATE)
-            notes.append(f"kick low end {share:.0%} in the bass stem; "
-                         f"drums and bass together ~{pitch}, tail {tail}")
-            voice = subbass.kick_voice(drums, RATE, kept)
-            if voice is not None:
-                freq, decay = subbass.tuned_burst(*voice)
-                notes.append(f"on the drum stem the kick is {voice[0]:.0f} Hz, "
-                             f"{voice[1] * 1000:.0f} ms, so the sub is "
-                             f"{freq:.0f} Hz, {decay * 1000:.0f} ms (was "
-                             f"{subbass.DEFAULT_FREQ_HZ:.0f} Hz, "
-                             f"{subbass.DEFAULT_DECAY_S * 1000:.0f} ms)")
-            notes.append(machine_check(drums, kept, RATE, tagged,
-                                       report["grid_step"]))
-            notes.append(grid_counts(drums, kicks, RATE, tagged, minutes))
-            by_sound, _, sound_report = subbass.select_kicks(
-                drums, RATE, kicks, strengths, tagged, by_sound=True)
-            found[backend + "+sound"] = by_sound
-            if sound_report["grid_bpm"]:
-                against[backend + "+sound"] = (sound_report["grid_bpm"]
-                                               * sound_report["grid_step"])
-            used = (report["grid_bpm"] is None and tagged
-                    and sound_report["grid_bpm"] is not None)
-            notes.append(sound_line(drums, by_sound, sound_report, tagged,
-                                    minutes, kicks, strengths)
-                         + ("\n        processing uses the sound filter here: no "
-                            "grid fits without it" if used else ""))
-            notes.extend(gaps(drums, kicks, kept, RATE, tagged, x.shape[0]))
-        cells = []
-        for name in columns:
-            kicks = found[name]
-            bpm = implied_bpm(kicks, RATE)
-            cells.append(f"{bpm:>6.1f};{kicks.size / minutes:>4.0f}")
-            if tagged:
-                target = against[name]
-                ok = any(abs(bpm - target * m) <= 0.03 * target * m
-                         for m in ((1.0,) if "+" not in name
-                                   else (1.0, 0.5, 0.25)))
-                agree.setdefault(name, []).append(ok)
-        label = f"{tagged:>6.1f}" if tagged else f"{'-':>6}"
-        print(f"{label}  " + "  ".join(f"{c:>14}" for c in cells)
-              + f"   {path.name}"
-              + "".join(f"\n        {note}" for note in notes))
+        parts = None
+        if cache is None:
+            parts = {b: separated(x, b, None)[0] for b in backends}
+        else:
+            for b in backends:
+                keep_separation(x, b, cache)
+        return {"x": x, "tagged": decode.probe(path).get("bpm"),
+                "columns": columns, "backends": backends, "cache": cache,
+                "parts": parts, "name": path.name, "folder": parent}
+
+    agree: dict[str, list[bool]] = {}
+    shown = {"folder": None}
+
+    def done(n, total, result):
+        if result["folder"] is not None and result["folder"] != shown["folder"]:
+            shown["folder"] = result["folder"]
+            print(f"\n{result['folder'].name}")
+        print(result["text"], flush=True)
+        for name, ok in result["agree"].items():
+            agree.setdefault(name, []).append(ok)
+
+    render.pipeline(files, _analyse, workers, prepare, done)
     if agree:
         print("\nimplied tempo within 3% of the tag (after the filter: of "
               "the grid it used, 1x, 1/2 or 1/4 -- kicks on 1 and 3, or once "
@@ -634,7 +673,8 @@ def main() -> int:
     backends = (stems.available() if args.backend == "all"
                 else [] if args.backend == "none" else [args.backend])
     if args.files:
-        return measure_files(args.files, backends)
+        from loudnesslab import render
+        return measure_files(args.files, backends, workers=render.default_jobs())
     print(f"backends: {', '.join(backends) or 'none'}\n")
     print(f"{'scenario':<8} {'seed':>4}  {'source':<9} {'recall':>6} "
           f"{'prec':>6} {'offset':>7}  kicks")

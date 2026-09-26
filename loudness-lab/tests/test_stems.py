@@ -528,6 +528,27 @@ class TestTheSeparationPass(unittest.TestCase):
         return {"path": "a.mp3", "name": "a", "amount": 5.0, "skip": None,
                 "stem_kicks": True, **changes}
 
+    def test_the_bar_follows_processing_once_it_has_started(self):
+        """Separating now overlaps processing, and the app has one bar. So
+        separation events are counted only until the first track comes
+        back processed; after that they carry no count and the bar is
+        processing's -- and a failure is still reported."""
+        jobs = [self.job(name=n, path=f"{n}.mp3") for n in "abc"]
+        out = io.StringIO()
+        with mock.patch.object(decode, "decode", return_value=self.mix), \
+                mock.patch.object(decode, "TARGET_RATE", RATE), \
+                mock.patch.object(stems, "separate", self.separate), \
+                contextlib.redirect_stdout(out):
+            prepare = cli._separator(jobs, self.cache, porcelain=True, quiet=True)
+            prepare(jobs[0])
+            prepare.state["processing_started"] = True
+            prepare(jobs[1])
+        first, second = [json.loads(line) for line in out.getvalue().splitlines()]
+        self.assertEqual((first["done"], first["total"]), (1, 3))
+        self.assertNotIn("done", second)
+        self.assertEqual(second["phase"], "separate")
+        self.assertIn("status", second)
+
     def test_each_track_is_separated_once(self):
         events = self.run_pass([self.job()])
         self.assertEqual(self.calls, 1)
@@ -992,6 +1013,46 @@ class TestTheKickReport(unittest.TestCase):
         self.assertAlmostEqual(float(np.std(kept["drums"][middle, 0])),
                                float(np.std(tone[middle])), delta=0.01)
 
+    def test_several_at_a_time_prints_the_same_report(self):
+        """The analysis runs in a pool; the report must not care. Two
+        folders of three tracks each (different kits, so a mix-up would
+        show), on one worker and on three: word for word the same, folder
+        headings and order included, and each track separated once."""
+        from loudnesslab import decode
+        kits = [fixtures.backbeat(seconds=20.0, seed=s)[0] for s in range(3)]
+        by_name = {f"{f}-{i}.mp3": kits[i] for f in "ab" for i in range(3)}
+
+        def run(workers, cache):
+            folders = [cache / "a", cache / "b"]
+            for folder in folders:
+                folder.mkdir()
+            cache = cache / "kept"
+            out = io.StringIO()
+            with mock.patch.object(decode, "require_tools"), \
+                    mock.patch.object(decode, "find_audio",
+                                      side_effect=lambda d: [Path(f"{d.name}-{i}.mp3")
+                                                             for i in range(3)]), \
+                    mock.patch.object(decode, "probe", return_value={"bpm": 104.0}), \
+                    mock.patch.object(decode, "decode",
+                                      side_effect=lambda p, rate: by_name[p.name]), \
+                    mock.patch.object(stems, "separate",
+                                      side_effect=lambda x, rate, b: {
+                                          "drums": x, "bass": np.zeros_like(x),
+                                          "other": np.zeros_like(x),
+                                          "vocals": np.zeros_like(x)}) as separate, \
+                    contextlib.redirect_stdout(out):
+                fixtures.measure_files(folders, ["demucs"],
+                                       cache=cache, workers=workers)
+            return out.getvalue(), separate.call_count
+
+        with tempfile.TemporaryDirectory() as one, tempfile.TemporaryDirectory() as three:
+            alone, separated_alone = run(1, Path(one))
+            pooled, separated_pooled = run(3, Path(three))
+        self.assertEqual(pooled, alone)
+        # Same audio in both folders: kept once per kit, not per track.
+        self.assertEqual((separated_alone, separated_pooled), (3, 3))
+        self.assertLess(alone.index("\na\n"), alone.index("\nb\n"))
+
     def test_it_says_where_processing_uses_the_sound_filter(self):
         with tempfile.TemporaryDirectory() as tmp:
             text, _ = self.run_report(Path(tmp), _tresillo()[0], 110.0)
@@ -1220,6 +1281,77 @@ class TestChoosingTheKicks(unittest.TestCase):
         chosen = subbass.choose_kicks(drums, RATE, kicks, strengths, None)
         self.assertFalse(chosen[2]["by_sound"])
         np.testing.assert_array_equal(plain[0], chosen[0])
+
+
+
+def _slow_then_fast(item):
+    """Earlier items take longer, so a pool finishes them out of order."""
+    import time
+    time.sleep(0.05 * (5 - item))
+    return f"done {item}"
+
+
+class TestThePipeline(unittest.TestCase):
+    """render.pipeline: prepare here, work in the pool, report in order --
+    and the pool is busy while the next item is still being prepared.
+    That overlap is the point: Demucs on one track while the cores process
+    the ones already separated, instead of all separating, then all the
+    rest."""
+
+    def run_it(self, workers, prepare_s=0.0):
+        import time
+        events = []
+
+        def prepare(item):
+            time.sleep(prepare_s)
+            events.append(("prepare", item))
+
+        def done(n, total, result):
+            events.append(("done", n))
+
+        results = render.pipeline(list(range(5)), _slow_then_fast, workers,
+                                  prepare, done)
+        return results, events
+
+    def test_results_come_back_in_order(self):
+        for workers in (1, 3):
+            results, events = self.run_it(workers)
+            self.assertEqual(results, [f"done {i}" for i in range(5)])
+            self.assertEqual([e[1] for e in events if e[0] == "done"],
+                             [1, 2, 3, 4, 5])
+
+    def test_each_item_is_prepared_before_its_work(self):
+        _, events = self.run_it(3)
+        self.assertEqual([e[1] for e in events if e[0] == "prepare"],
+                         list(range(5)))
+
+    def test_no_more_than_ahead_are_in_the_pool(self):
+        # Each item can be a decoded track: preparing must wait for the
+        # pool rather than queue a folder's worth in memory.
+        events = []
+        render.pipeline(list(range(6)), _slow_then_fast, 2,
+                        lambda item: events.append(("prepare", item)),
+                        lambda n, total, result: events.append(("done", n)),
+                        ahead=2)
+        for i, event in enumerate(events):
+            if event[0] == "prepare":
+                prepared = sum(1 for e in events[:i + 1] if e[0] == "prepare")
+                finished = sum(1 for e in events[:i] if e[0] == "done")
+                self.assertLessEqual(prepared - finished, 2 + 1, events)
+
+    def test_what_prepare_returns_is_what_the_work_gets(self):
+        for workers in (1, 2):
+            results = render.pipeline([1, 2, 3], abs, workers,
+                                      prepare=lambda item: -10 * item)
+            self.assertEqual(results, [10, 20, 30])
+
+    def test_work_overlaps_the_preparing(self):
+        # Preparing is slow (as separating is): results arrive before the
+        # last item has been prepared, rather than all after.
+        _, events = self.run_it(2, prepare_s=0.6)
+        last_prepare = max(i for i, e in enumerate(events) if e[0] == "prepare")
+        first_done = min(i for i, e in enumerate(events) if e[0] == "done")
+        self.assertLess(first_done, last_prepare)
 
 
 if __name__ == "__main__":

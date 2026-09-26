@@ -978,9 +978,30 @@ what is heard; it wants an A/B by ear on Domino Dancing.
 **Report speed.** 13 minutes for 35 already-separated tracks, about 22 s
 a track. Profiled on a four-minute synthetic track (17 s): nearly all of
 it is `sosfiltfilt` over full-rate audio -- 21 passes, because the report
-computes every variant side by side. Left as it is while the variants are
-being compared; dropping the comparison columns once settled should
-roughly halve it.
+computes every variant side by side -- and all of it on one core.
+
+**Both runs are now pipelined** (`render.pipeline`): the serial part
+(decoding for the cache key, and Demucs -- one model, on the GPU) runs in
+the parent one track at a time, and each track goes to a pool of workers
+the moment it is ready, so the GPU and the CPU cores work at once instead
+of in turn. Results are reported in order whatever the width, and no more
+than two per worker are in flight, since each can be a whole decoded
+track.
+
+- Processing: `cli._separator` is the per-track step. Before, every track
+  was separated (or, if kept, decoded just to check) before the first
+  worker started. Separation progress events carry a count only until
+  the first track comes back processed; after that the app's one bar is
+  processing's.
+- The report: its analysis moved into a worker (`_analyse`), handed the
+  decoded audio, so no worker needs ffmpeg or Demucs. Measured on four
+  cores, six four-minute tracks already separated: 115 s at one worker,
+  51 s at two, 31 s at four. Half the cores by default, as processing.
+  The report is word for word the same at one worker and three.
+
+The app never ran any of this on its main actor: it runs the command as a
+separate process and reads its progress, which is what keeps the window
+responsive.
 
 ### Air: why none arrived, and air that follows the stems
 

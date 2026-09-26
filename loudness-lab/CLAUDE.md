@@ -612,6 +612,14 @@ BPM tag as a gate -- where the kicks found do not agree with the tag, skip
 the sub for that track and say so. The misses above then become tracks
 left alone rather than tracks processed wrongly.
 
+**The report keeps its separations** (`scans/stems/`, the drum and bass
+parts mono at 8 kHz, a few MB a track), so a folder checked before runs in
+seconds a track instead of a Demucs pass each. Read back, the report is
+the same word for word and every number within 1% -- on the synthetic
+backbeat one figure moved, 1.40 ms to 1.41. 8 kHz because the machine
+check reads to 2 kHz; a test holds a 1.5 kHz tone through the copy (2 kHz
+fails it). The Finder command also takes several folders at once.
+
 ### Built: `subbass --stem-kicks`, "Find kicks on the drum track" in the app
 
 Off by default, in every profile, because it needs Demucs and is slow the

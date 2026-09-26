@@ -424,7 +424,53 @@ def grid_counts(drums: np.ndarray, kicks: np.ndarray, rate: int,
     return f"heavy hits {heavy.size / minutes:.0f}/min; on a grid of " + ", ".join(cells)
 
 
-def measure_files(paths: list[Path], backends: list[str]) -> int:
+# What --files keeps of each separation, so a folder checked before is not
+# separated again -- separating is nearly all of a run's time, and the same
+# folders are re-checked after every change. Only the drum and bass parts,
+# mono, at 8 kHz: nothing the report measures reaches above 2 kHz (the
+# machine check's band is the highest), and 8 kHz holds up to 4. A few MB
+# a track, in scans/ (which git ignores), filed under a hash of the decoded
+# audio as stem-cache/ is.
+REPORT_CACHE = Path(__file__).resolve().parents[1] / "scans" / "stems"
+CACHE_RATE = 8000
+
+
+def separated(x: np.ndarray, backend: str,
+              cache: Path | None = REPORT_CACHE) -> tuple[dict, bool]:
+    """({"drums", "bass"} at RATE, stereo, as long as `x`; whether they came
+    from the cache). A first run keeps what it separated and reads it back
+    the same way a second run will, so the two report the same numbers."""
+    import soxr
+    path = None
+    if cache is not None:
+        path = Path(cache) / f"{stems.audio_key(x)}-{backend}.npz"
+        if not path.exists():
+            parts = stems.separate(x, RATE, backend)
+            small = {name: soxr.resample(parts[name].mean(axis=1).astype(np.float64),
+                                         RATE, CACHE_RATE, quality="VHQ")
+                                  .astype(np.float32)
+                     for name in ("drums", "bass")}
+            path.parent.mkdir(parents=True, exist_ok=True)
+            partial = path.with_name(path.stem + ".partial.npz")
+            np.savez_compressed(partial, **small)
+            partial.replace(path)
+            hit = False
+        else:
+            hit = True
+        with np.load(path) as stored:
+            out = {}
+            for name in ("drums", "bass"):
+                mono = soxr.resample(stored[name].astype(np.float64),
+                                     CACHE_RATE, RATE, quality="VHQ")
+                mono = np.pad(mono, (0, max(0, x.shape[0] - mono.size)))[:x.shape[0]]
+                out[name] = np.column_stack([mono, mono]).astype(np.float32)
+        return out, hit
+    parts = stems.separate(x, RATE, backend)
+    return {"drums": parts["drums"], "bass": parts["bass"]}, False
+
+
+def measure_files(paths: list[Path], backends: list[str],
+                  cache: Path | None = REPORT_CACHE) -> int:
     """Each real track, scored against its BPM tag. For every separator two
     columns: the stem as detected, and after `select_kicks` has dropped the
     hits too light to be a kick and the ones off the beat -- which is what
@@ -435,13 +481,18 @@ def measure_files(paths: list[Path], backends: list[str]) -> int:
     decode.require_tools()
     files = []
     for path in paths:
-        files += decode.find_audio(path) if path.is_dir() else [path]
+        found = decode.find_audio(path) if path.is_dir() else [path]
+        files += [(p, path if path.is_dir() else None) for p in found]
     columns = ["mix"] + [c for b in backends
                          for c in (b, b + "+filter", b + "+sound")]
     print(f"{'tagged':>6}  " + "  ".join(f"{name:>14}" for name in columns)
           + "   (implied BPM; kicks/min)  track")
     agree: dict[str, list[bool]] = {}
-    for path in files:
+    folder = None
+    for path, parent in files:
+        if parent is not None and parent != folder and len(paths) > 1:
+            folder = parent
+            print(f"\n{parent.name}")
         tagged = decode.probe(path).get("bpm")
         x = decode.decode(path, RATE)
         minutes = x.shape[0] / RATE / 60
@@ -451,7 +502,7 @@ def measure_files(paths: list[Path], backends: list[str]) -> int:
         against = {name: tagged for name in columns}
         notes = []
         for backend in backends:
-            parts = stems.separate(x, RATE, backend)
+            parts, _ = separated(x, backend, cache)
             drums = parts["drums"]
             kicks, strengths = subbass.detect_kicks(x, RATE, drums)
             found[backend] = kicks

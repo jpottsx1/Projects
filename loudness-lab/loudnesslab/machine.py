@@ -116,9 +116,20 @@ def grid_jitter_ms(onsets: np.ndarray, rate: int, bpm: float,
 SOUND_BAND_HZ = (30.0, 120.0)
 SOUND_RATE = 2000               # all that band needs, and 24x less to compare
 SOUND_WINDOW_S = 0.06           # the kick's body
-SOUND_SHIFT_S = 0.003           # how far a hit may be moved to line up
+# How far a hit may be moved to line up: more than half a cycle of the
+# lowest kick, 12.5 ms at 40 Hz. At 3 ms, a kick whose onset the detector
+# placed 8 ms early -- as a snare or clap on top of it can make it --
+# matched its own copy at -0.34, half a cycle out. That split
+# four-on-the-floor records into "kicks on 1 and 3" and "kicks on 2 and
+# 4" and kept one: Vogue 89 -> 58 kicks a minute, Push It 110 -> 57,
+# Pump Up the Volume 98 -> 52 (1988/1990 reports). At 12 ms the non-kicks
+# on the synthetic kit match at 0.19-0.50 and a scratch at 0.67.
+SOUND_SHIFT_S = 0.012
 SOUND_SAMPLE = 200              # hits enough to learn the sound from
-MIN_SOUND_MATCH = 0.7           # see the table above; kept well clear of both
+# Between the scratch's 0.67 at that shift and the kick under a loud
+# snare's 0.91; clean records' kept kicks read 0.93-0.98 at the 10th
+# percentile.
+MIN_SOUND_MATCH = 0.8
 
 
 def _sound_windows(drums: np.ndarray, rate: int, hits: np.ndarray,

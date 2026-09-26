@@ -13,6 +13,7 @@ import contextlib
 import importlib.util
 import io
 import json
+import re
 import sys
 import tempfile
 import unittest
@@ -863,6 +864,19 @@ class TestTheKicksOwnSound(unittest.TestCase):
         self.assertLess(fixtures.score(kept, toms)[0], 0.05)
         self.assertGreaterEqual(fixtures.score(kept, truth)[0], 0.98)
 
+    def test_a_kick_found_a_few_ms_early_is_still_the_kick(self):
+        """What the 1988/1990 reports showed: a snare or clap on 2 and 4
+        moves where the detector puts those kicks' start, by more than
+        half a cycle, and at 3 ms of alignment they matched their own
+        copies at -0.34 -- two groups, one kept, half the kicks gone."""
+        from loudnesslab import machine
+        drums, onsets = _played(True, seconds=30.0)
+        hits = (onsets * RATE).astype(int)
+        hits[1::2] -= int(0.008 * RATE)
+        keep, match = machine.sounds_like_the_kick(drums, RATE, hits)
+        self.assertTrue(keep.all())
+        self.assertGreater(float(match.min()), 0.95)
+
     def test_a_drummers_kicks_still_sound_alike(self):
         for ms in (5.0, 20.0):
             drums, onsets = _played(False, jitter_ms=ms, seconds=60.0)
@@ -909,6 +923,11 @@ class TestTheKickReport(unittest.TestCase):
         self.assertIn("demucs+sound", text)
         line = next(l for l in text.splitlines() if "by sound:" in l)
         self.assertIn("then grid: eighths", line)
+        # The backbeat's snares and claps are on beats 2 and 4, its toms
+        # and scratches mostly between: some of the dropped, not all.
+        on_beat = int(re.search(r"\((\d+) of them on a beat\)", line).group(1))
+        dropped = int(re.search(r"dropped (\d+) not the kick", line).group(1))
+        self.assertTrue(0 < on_beat < dropped, line)
         self.assertIn("ms from the grid", line)
         summary = text[text.index("implied tempo"):]
         self.assertRegex(summary, r"demucs\+sound\s+1 of 1")

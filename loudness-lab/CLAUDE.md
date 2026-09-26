@@ -612,6 +612,14 @@ BPM tag as a gate -- where the kicks found do not agree with the tag, skip
 the sub for that track and say so. The misses above then become tracks
 left alone rather than tracks processed wrongly.
 
+**The report keeps its separations** (`scans/stems/`, the drum and bass
+parts mono at 8 kHz, a few MB a track), so a folder checked before runs in
+seconds a track instead of a Demucs pass each. Read back, the report is
+the same word for word and every number within 1% -- on the synthetic
+backbeat one figure moved, 1.40 ms to 1.41. 8 kHz because the machine
+check reads to 2 kHz; a test holds a 1.5 kHz tone through the copy (2 kHz
+fails it). The Finder command also takes several folders at once.
+
 ### Built: `subbass --stem-kicks`, "Find kicks on the drum track" in the app
 
 Off by default, in every profile, because it needs Demucs and is slow the
@@ -892,6 +900,28 @@ scratch 0.67. Every synthetic scenario now keeps every kick, the first
 one in the file included. The report also says how many of the dropped
 hits land on a beat. Domino Dancing's kicks do sound alike (0.956) but
 sit on no 110 BPM grid at all, even sixteenths: its tag is suspect.
+
+**Second real run, 12 ms alignment (1988, 1990, version 8246086).** The
+clean tracks lose nothing: Kylie and Rick Astley drop 0, Bananarama,
+Adamski and Buffalo Stance 1-2 kicks a minute. Domino Dancing now fits a
+sixteenth grid at 110 BPM (0.518) at 0.30 ms -- a machine, and its tag
+was right after all; the "suspect tag" above was the other drums. The
+halved records mostly came back: Vogue 81 of 89, Black Box 100 of 108,
+INXS 98 of 105. Still dropping hits ON a beat: Vogue 45 of 45, INXS 21 of
+21, Black Box 32 of 34, Pump Up the Volume 158 of 205, Push It 49 of 213.
+Tell It to My Heart is unchanged (dropped 7, fit 0.474): its hits all
+sound alike, so its trouble is not other drums.
+
+On-beat hits on four-on-the-floor are probably kicks, so the report now
+says where they are (`dropped_spans`): bunched in one stretch with no kept
+kick inside it -- a section with a kick sound of its own, which the
+filter's one template per track cannot hold -- or spread between kept
+kicks, something on some beats. Both cases are tested; a synthetic clap
+at three times the kick's level on 2 and 4 could not make the filter
+drop a kick, so the second is tested on hit times alone. "On a beat" also
+no longer skips hits with no kept kick within eight beats: those are
+exactly the hits in a section with another kick, and were being counted
+as off the beat.
 
 **Measured only.** The report prints a `+sound` column and a `by sound:`
 line (dropped, grid and fit after, kicks a minute, match, ms from the

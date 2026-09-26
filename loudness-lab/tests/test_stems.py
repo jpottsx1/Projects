@@ -906,9 +906,14 @@ class TestTheKickReport(unittest.TestCase):
     every constant here was checked with; a line that silently stops
     printing is a measurement nobody knows is missing."""
 
-    def test_it_prints_the_sound_column_and_line(self):
+    @classmethod
+    def setUpClass(cls):
+        cls.drums, _, _ = fixtures.backbeat(seconds=40.0)
+
+    def run_report(self, cache):
+        """(the report, how many times it separated)."""
         from loudnesslab import decode
-        drums, _, _ = fixtures.backbeat(seconds=40.0)
+        drums = self.drums
         parts = {"drums": drums, "bass": np.zeros_like(drums),
                  "other": np.zeros_like(drums), "vocals": np.zeros_like(drums)}
         out = io.StringIO()
@@ -916,10 +921,50 @@ class TestTheKickReport(unittest.TestCase):
                 mock.patch.object(decode, "find_audio", return_value=[Path("a.mp3")]), \
                 mock.patch.object(decode, "probe", return_value={"bpm": 104.0}), \
                 mock.patch.object(decode, "decode", return_value=drums), \
-                mock.patch.object(stems, "separate", return_value=parts), \
+                mock.patch.object(stems, "separate", return_value=parts) as separate, \
                 contextlib.redirect_stdout(out):
-            fixtures.measure_files([Path("folder")], ["demucs"])
-        text = out.getvalue()
+            fixtures.measure_files([Path("folder")], ["demucs"], cache=cache)
+        return out.getvalue(), separate.call_count
+
+    def test_a_track_checked_before_is_not_separated_again(self):
+        """Separating is nearly all of a run's time. What is kept is the
+        drum and bass parts at 8 kHz; the report read from them is the
+        same, number for number, as the one read from the full stems."""
+        with tempfile.TemporaryDirectory() as tmp:
+            first, separated = self.run_report(Path(tmp))
+            second, again = self.run_report(Path(tmp))
+        direct, _ = self.run_report(None)
+        self.assertEqual((separated, again), (1, 0))
+        self.assertEqual(first, second)
+        # From the full stems: the same words, and every number within 1%
+        # (or 0.02) -- 1.40 ms against 1.41 on this track, a rounding edge.
+        number = r"-?\d+\.?\d*"
+        self.assertEqual(re.sub(number, "#", first), re.sub(number, "#", direct))
+        for a, b in zip(re.findall(number, first), re.findall(number, direct)):
+            self.assertAlmostEqual(float(a), float(b),
+                                   delta=max(0.02, 0.01 * abs(float(b))))
+
+    def test_the_kept_copy_holds_the_machine_checks_band(self):
+        # The machine check compares kicks up to 2 kHz, where the beater
+        # click is; the synthetic kicks above have little there, so this
+        # asks the kept copy for it directly.
+        from loudnesslab import machine
+        t = np.arange(RATE * 2) / RATE
+        tone = 0.5 * np.sin(2 * np.pi * 0.75 * machine.BAND_HZ[1] * t)
+        x = np.column_stack([tone, tone]).astype(np.float32)
+        parts = {name: x for name in stems.STEMS}
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.object(stems, "separate", return_value=parts):
+            fixtures.separated(x, "demucs", Path(tmp))
+            kept, hit = fixtures.separated(x, "demucs", Path(tmp))
+        self.assertTrue(hit)
+        middle = slice(RATE // 2, -RATE // 2)
+        self.assertAlmostEqual(float(np.std(kept["drums"][middle, 0])),
+                               float(np.std(tone[middle])), delta=0.01)
+
+    def test_it_prints_the_sound_column_and_line(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            text, _ = self.run_report(Path(tmp))
         self.assertIn("demucs+sound", text)
         line = next(l for l in text.splitlines() if "by sound:" in l)
         self.assertIn("then grid: eighths", line)
@@ -931,6 +976,52 @@ class TestTheKickReport(unittest.TestCase):
         self.assertIn("ms from the grid", line)
         summary = text[text.index("implied tempo"):]
         self.assertRegex(summary, r"demucs\+sound\s+1 of 1")
+
+
+
+class TestWhereTheDroppedHitsAre(unittest.TestCase):
+    """The report's answer to "real kicks, or not?" for on-beat hits the
+    sound filter drops: bunched in one stretch with no kept kick inside
+    (a section with its own kick sound), or between kept kicks
+    throughout (something on some beats, changing the kick under it)."""
+
+    period = 0.5 * RATE                            # 120 BPM
+
+    def spans(self, dropped, kept):
+        return fixtures.dropped_spans(np.asarray(dropped, dtype=float),
+                                      np.asarray(kept, dtype=float), RATE, 120.0)
+
+    def test_a_section_with_its_own_kick(self):
+        beats = np.arange(120) * self.period
+        section = (beats >= 20 * RATE) & (beats < 32 * RATE)
+        text = self.spans(beats[section], beats[~section])
+        self.assertIn(f"{section.sum()} dropped, 0 kept among them", text)
+
+    def test_something_on_2_and_4(self):
+        beats = np.arange(120) * self.period
+        text = self.spans(beats[1::2], beats[0::2])
+        # One run the length of the track, the kept kicks between its hits.
+        self.assertIn("60 dropped, 59 kept among them", text)
+        self.assertNotIn("more elsewhere", text)
+
+    def test_the_report_shows_a_section_with_another_kick(self):
+        rng = np.random.default_rng(0)
+        n, beat = int(50 * RATE), 60 / 116
+        track = np.zeros(n)
+        t = np.arange(int(0.3 * RATE)) / RATE
+        boom = (np.sin(2 * np.pi * np.cumsum(75 * (1 + 0.2 * np.exp(-t * 30))) / RATE)
+                * np.exp(-t * 12))
+        for b in np.arange(0.5, 49, beat):
+            fixtures._place(track, b, 0.9 * (boom if 20 <= b < 32
+                                             else fixtures._kick(t.size, rng)))
+        track = track / np.abs(track).max() * 0.8
+        drums = np.stack([track, track], axis=1).astype(np.float32)
+        kicks, strengths = subbass.detect_kicks(drums, RATE, drums)
+        kept, _, report = subbass.select_kicks(drums, RATE, kicks, strengths,
+                                               116.0, by_sound=True)
+        line = fixtures.sound_line(drums, kept, report, 116.0, 50 / 60,
+                                   kicks, strengths)
+        self.assertRegex(line, r"where: 0:(19|20)\.\d-0:3[12]\.\d \d+ dropped, 0 kept")
 
 
 if __name__ == "__main__":

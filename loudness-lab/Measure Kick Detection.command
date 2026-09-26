@@ -42,22 +42,39 @@ if ! .venv/bin/python -c "import demucs, torch" 2>/dev/null; then
         || fail "The install failed. The errors above are the whole story -- copy them and send them on."
 fi
 
-FOLDER="$(osascript -e 'POSIX path of (choose folder with prompt "Which folder should be checked? Four-on-the-floor tracks with a BPM tag work best.")' 2>/dev/null)" \
+# Several folders at once (Cmd-click them), one per line, so a run over a
+# few folders can be left alone.
+FOLDERS="$(osascript \
+    -e 'set chosen to choose folder with prompt "Which folders should be checked? Cmd-click to choose several. Tracks with a BPM tag work best." with multiple selections allowed' \
+    -e 'set out to ""' \
+    -e 'repeat with f in chosen' \
+    -e 'set out to out & POSIX path of f & linefeed' \
+    -e 'end repeat' \
+    -e 'return out' 2>/dev/null)" \
     || fail "No folder chosen."
+[ -n "$FOLDERS" ] || fail "No folder chosen."
+# One argument per folder, spaces and brackets in the names intact.
+set --
+while IFS= read -r line; do
+    [ -n "$line" ] && set -- "$@" "$line"
+done <<END_OF_FOLDERS
+$FOLDERS
+END_OF_FOLDERS
 
 mkdir -p scans
-REPORT="scans/kick-detection-$(date +%Y-%m-%d-%H%M).txt"
+REPORT="scans/kick-detection-$(date +%Y-%m-%d-%H%M%S).txt"
 echo
-echo "Checking $FOLDER"
+echo "Checking:"
+for f in "$@"; do echo "  $f"; done
 echo "Loudness Lab version ${VERSION:-unknown}" | tee "$REPORT"
-echo "Each track is separated first, which takes a while. The first one also"
-echo "downloads the Demucs model."
+echo "A track is separated the first time it is checked, which takes a while."
+echo "Tracks checked before are read from what was kept, in seconds."
 echo
 
 # -u: piped into tee, Python would otherwise hold every line back until the
 # whole folder was done, and a window that says nothing for twenty minutes
 # looks exactly like one that has hung.
-.venv/bin/python -u tools/measure_stem_kicks.py --files "$FOLDER" --backend demucs 2>&1 | tee -a "$REPORT" \
+.venv/bin/python -u tools/measure_stem_kicks.py --files "$@" --backend demucs 2>&1 | tee -a "$REPORT" \
     || fail "The check stopped. The errors above are the whole story -- copy them and send them on."
 
 echo

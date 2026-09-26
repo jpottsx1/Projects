@@ -357,20 +357,50 @@ def machine_check(drums: np.ndarray, kept: np.ndarray, rate: int,
                else "no tag, no grid"))
 
 
-def on_a_beat(hits: np.ndarray, kept: np.ndarray, rate: int, bpm: float) -> int:
-    """How many of `hits` land within 12% of a beat, the beat placed from
-    the kept kicks within eight beats either side."""
+def on_a_beat(hits: np.ndarray, kept: np.ndarray, rate: int, bpm: float,
+              which: bool = False):
+    """How many of `hits` land within 12% of a beat (or, with `which`,
+    which ones), the beat placed from the kept kicks within eight beats
+    either side -- or, where none are that near, from the nearest ones."""
     period = 60.0 / bpm * rate
     angle = np.exp(2j * np.pi * (kept / period))
-    count = 0
-    for h in hits:
+    on = np.zeros(hits.size, dtype=bool)
+    for i, h in enumerate(hits):
         near = np.abs(kept - h) <= 8 * period
         if not near.any():
-            continue
+            near = np.argsort(np.abs(kept - h))[:8]
         centre = np.angle(angle[near].mean()) / (2 * np.pi)
         offset = ((h / period) - centre + 0.5) % 1.0 - 0.5
-        count += abs(offset) <= subbass.GRID_TOLERANCE
-    return int(count)
+        on[i] = abs(offset) <= subbass.GRID_TOLERANCE
+    return on if which else int(on.sum())
+
+
+def dropped_spans(dropped: np.ndarray, kept: np.ndarray, rate: int,
+                  bpm: float, limit: int = 3) -> str:
+    """Where the on-beat hits the sound filter dropped are: runs of them
+    (no more than two beats apart), with how many kept kicks fall inside
+    each run. A run with no kept kicks inside is a stretch where the kick
+    itself sounds different -- a breakdown's own kick; a run with kept
+    kicks between its hits is something on some beats -- a snare or clap
+    on 2 and 4 heavy enough to change the kick under it."""
+    if dropped.size == 0:
+        return ""
+    period = 60.0 / bpm * rate
+    hits = np.sort(dropped)
+    runs, start = [], 0
+    for i in range(1, hits.size + 1):
+        if i == hits.size or hits[i] - hits[i - 1] > 2.2 * period:
+            runs.append((hits[start], hits[i - 1], i - start))
+            start = i
+    runs.sort(key=lambda r: -r[2])
+    parts = []
+    for a, b, n in runs[:limit]:
+        inside = int(((kept >= a) & (kept <= b)).sum())
+        parts.append(f"{_clock(a, rate)}-{_clock(b, rate)} {n} dropped, "
+                     f"{inside} kept among them")
+    rest = sum(n for _, _, n in runs[limit:])
+    return ("; where: " + "; ".join(parts)
+            + (f"; {rest} more elsewhere" if rest else ""))
 
 
 def sound_line(drums: np.ndarray, kept: np.ndarray, report: dict,
@@ -383,26 +413,30 @@ def sound_line(drums: np.ndarray, kept: np.ndarray, report: dict,
     in with the kick."""
     step = {1: "quarters", 2: "eighths", 4: "sixteenths"}.get(
         report["grid_step"], "none fitted")
-    beat = ""
+    beat = spans = ""
     if bpm and found is not None and report["not_the_kick"] and kept.size:
         # The hits the sound filter itself dropped: heavy enough to pass
         # the weight filter, then not the kick. Many of them on a beat, on
         # a four-on-the-floor record, would mean kicks are being lost.
         heavy, _, _ = subbass.select_kicks(drums, RATE, found, strengths, None)
         same, _ = machine.sounds_like_the_kick(drums, RATE, heavy)
-        beat = f" ({on_a_beat(heavy[~same], kept, RATE, bpm)} of them on a beat)"
+        dropped = heavy[~same]
+        on = on_a_beat(dropped, kept, RATE, bpm, which=True)
+        beat = f" ({on.sum()} of them on a beat)"
+        spans = dropped_spans(dropped[on], kept, RATE, bpm)
     line = (f"by sound: dropped {report['not_the_kick']} not the kick's sound{beat}, "
             f"then grid: {step} (fit {report['grid_coherence']}); "
             f"{kept.size / minutes:.0f} kicks/min")
     found = machine.kick_template(drums, RATE, kept)
     if found is None:
-        return line
+        return line + spans
     _, similarity, onsets = found
     jitter = (machine.grid_jitter_ms(onsets, RATE, bpm, report["grid_step"] or 1)
               if bpm else None)
     return (line + f"; match {np.median(similarity):.3f} "
             f"(10th percentile {np.percentile(similarity, 10):.3f})"
-            + (f", {jitter:.2f} ms from the grid" if jitter is not None else ""))
+            + (f", {jitter:.2f} ms from the grid" if jitter is not None else "")
+            + spans)
 
 
 def grid_counts(drums: np.ndarray, kicks: np.ndarray, rate: int,
@@ -424,7 +458,53 @@ def grid_counts(drums: np.ndarray, kicks: np.ndarray, rate: int,
     return f"heavy hits {heavy.size / minutes:.0f}/min; on a grid of " + ", ".join(cells)
 
 
-def measure_files(paths: list[Path], backends: list[str]) -> int:
+# What --files keeps of each separation, so a folder checked before is not
+# separated again -- separating is nearly all of a run's time, and the same
+# folders are re-checked after every change. Only the drum and bass parts,
+# mono, at 8 kHz: nothing the report measures reaches above 2 kHz (the
+# machine check's band is the highest), and 8 kHz holds up to 4. A few MB
+# a track, in scans/ (which git ignores), filed under a hash of the decoded
+# audio as stem-cache/ is.
+REPORT_CACHE = Path(__file__).resolve().parents[1] / "scans" / "stems"
+CACHE_RATE = 8000
+
+
+def separated(x: np.ndarray, backend: str,
+              cache: Path | None = REPORT_CACHE) -> tuple[dict, bool]:
+    """({"drums", "bass"} at RATE, stereo, as long as `x`; whether they came
+    from the cache). A first run keeps what it separated and reads it back
+    the same way a second run will, so the two report the same numbers."""
+    import soxr
+    path = None
+    if cache is not None:
+        path = Path(cache) / f"{stems.audio_key(x)}-{backend}.npz"
+        if not path.exists():
+            parts = stems.separate(x, RATE, backend)
+            small = {name: soxr.resample(parts[name].mean(axis=1).astype(np.float64),
+                                         RATE, CACHE_RATE, quality="VHQ")
+                                  .astype(np.float32)
+                     for name in ("drums", "bass")}
+            path.parent.mkdir(parents=True, exist_ok=True)
+            partial = path.with_name(path.stem + ".partial.npz")
+            np.savez_compressed(partial, **small)
+            partial.replace(path)
+            hit = False
+        else:
+            hit = True
+        with np.load(path) as stored:
+            out = {}
+            for name in ("drums", "bass"):
+                mono = soxr.resample(stored[name].astype(np.float64),
+                                     CACHE_RATE, RATE, quality="VHQ")
+                mono = np.pad(mono, (0, max(0, x.shape[0] - mono.size)))[:x.shape[0]]
+                out[name] = np.column_stack([mono, mono]).astype(np.float32)
+        return out, hit
+    parts = stems.separate(x, RATE, backend)
+    return {"drums": parts["drums"], "bass": parts["bass"]}, False
+
+
+def measure_files(paths: list[Path], backends: list[str],
+                  cache: Path | None = REPORT_CACHE) -> int:
     """Each real track, scored against its BPM tag. For every separator two
     columns: the stem as detected, and after `select_kicks` has dropped the
     hits too light to be a kick and the ones off the beat -- which is what
@@ -435,13 +515,18 @@ def measure_files(paths: list[Path], backends: list[str]) -> int:
     decode.require_tools()
     files = []
     for path in paths:
-        files += decode.find_audio(path) if path.is_dir() else [path]
+        found = decode.find_audio(path) if path.is_dir() else [path]
+        files += [(p, path if path.is_dir() else None) for p in found]
     columns = ["mix"] + [c for b in backends
                          for c in (b, b + "+filter", b + "+sound")]
     print(f"{'tagged':>6}  " + "  ".join(f"{name:>14}" for name in columns)
           + "   (implied BPM; kicks/min)  track")
     agree: dict[str, list[bool]] = {}
-    for path in files:
+    folder = None
+    for path, parent in files:
+        if parent is not None and parent != folder and len(paths) > 1:
+            folder = parent
+            print(f"\n{parent.name}")
         tagged = decode.probe(path).get("bpm")
         x = decode.decode(path, RATE)
         minutes = x.shape[0] / RATE / 60
@@ -451,7 +536,7 @@ def measure_files(paths: list[Path], backends: list[str]) -> int:
         against = {name: tagged for name in columns}
         notes = []
         for backend in backends:
-            parts = stems.separate(x, RATE, backend)
+            parts, _ = separated(x, backend, cache)
             drums = parts["drums"]
             kicks, strengths = subbass.detect_kicks(x, RATE, drums)
             found[backend] = kicks

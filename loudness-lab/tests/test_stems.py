@@ -961,7 +961,7 @@ class TestTheKickReport(unittest.TestCase):
     def setUpClass(cls):
         cls.drums, _, _ = fixtures.backbeat(seconds=40.0)
 
-    def run_report(self, cache, drums=None, bpm=104.0):
+    def run_report(self, cache, drums=None, bpm=104.0, legacy=None):
         """(the report, how many times it separated)."""
         from loudnesslab import decode
         drums = self.drums if drums is None else drums
@@ -974,7 +974,8 @@ class TestTheKickReport(unittest.TestCase):
                 mock.patch.object(decode, "decode", return_value=drums), \
                 mock.patch.object(stems, "separate", return_value=parts) as separate, \
                 contextlib.redirect_stdout(out):
-            fixtures.measure_files([Path("folder")], ["demucs"], cache=cache)
+            fixtures.measure_files([Path("folder")], ["demucs"], cache=cache,
+                                   legacy=legacy)
         return out.getvalue(), separate.call_count
 
     def test_a_track_checked_before_is_not_separated_again(self):
@@ -994,6 +995,66 @@ class TestTheKickReport(unittest.TestCase):
         for a, b in zip(re.findall(number, first), re.findall(number, direct)):
             self.assertAlmostEqual(float(a), float(b),
                                    delta=max(0.02, 0.01 * abs(float(b))))
+
+    def test_a_song_processing_separated_is_not_separated_again(self):
+        """One store for both: what processing kept is what the report
+        reads, so checking a processed folder separates nothing."""
+        from loudnesslab import decode
+        quiet = np.zeros_like(self.drums)
+        parts = {"drums": self.drums, "bass": 0.5 * self.drums,
+                 "vocals": quiet, "other": quiet}
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch.object(decode, "decode", return_value=self.drums), \
+                    mock.patch.object(stems, "separate", return_value=parts), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                cli._separate_for_kicks([{"path": "a.mp3", "name": "a", "amount": 5.0,
+                                          "skip": None, "stem_kicks": True}],
+                                        Path(tmp), porcelain=True, quiet=True)
+            _, separated = self.run_report(Path(tmp))
+        self.assertEqual(separated, 0)
+
+    def test_a_song_the_report_separated_is_ready_for_processing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            _, separated = self.run_report(Path(tmp))
+            self.assertEqual(separated, 1)
+            self.assertTrue(stems.has_kick_source(Path(tmp), self.drums, guide=True))
+            self.assertIsNotNone(stems.load_kick_source(Path(tmp), self.drums, RATE))
+
+    def test_what_the_report_kept_before_is_moved_over_not_redone(self):
+        """The songs already separated for the report, in its old place,
+        are not separated again: read once, moved into the shared store."""
+        import soxr
+        with tempfile.TemporaryDirectory() as old, tempfile.TemporaryDirectory() as tmp:
+            mono = self.drums.mean(axis=1).astype(np.float64)
+            small = soxr.resample(mono, RATE, fixtures.LEGACY_RATE).astype(np.float32)
+            np.savez_compressed(Path(old) / f"{stems.audio_key(self.drums)}-demucs.npz",
+                                drums=small, bass=np.zeros_like(small))
+            moved, separated = self.run_report(Path(tmp), legacy=Path(old))
+            fresh, _ = self.run_report(Path(tempfile.mkdtemp(dir=tmp)))
+            self.assertEqual(separated, 0)
+            self.assertTrue(stems.has_kick_source(Path(tmp), self.drums, report=True))
+        # Read from the moved copy, the report says what a fresh one says.
+        number = r"-?\d+\.?\d*"
+        self.assertEqual(re.sub(number, "#", moved), re.sub(number, "#", fresh))
+
+    def test_adding_the_reports_parts_keeps_the_air_guide(self):
+        # Processing kept the drums and the air guide; the report's old
+        # copy is then moved over, which brings no guide of its own. The
+        # guide must survive the rewrite, and nothing is separated.
+        import soxr
+        quiet = np.zeros_like(self.drums)
+        with tempfile.TemporaryDirectory() as old, tempfile.TemporaryDirectory() as tmp:
+            stems.store_kick_source(Path(tmp), self.drums, RATE, self.drums,
+                                    [quiet, 0.1 * self.drums])
+            small = soxr.resample(self.drums.mean(axis=1).astype(np.float64), RATE,
+                                  fixtures.LEGACY_RATE).astype(np.float32)
+            np.savez_compressed(Path(old) / f"{stems.audio_key(self.drums)}-demucs.npz",
+                                drums=small, bass=np.zeros_like(small))
+            with mock.patch.object(stems, "separate") as separate:
+                fixtures.keep_separation(self.drums, "demucs", Path(tmp), Path(old))
+            separate.assert_not_called()
+            self.assertTrue(stems.has_kick_source(Path(tmp), self.drums,
+                                                  guide=True, report=True))
 
     def test_the_kept_copy_holds_the_machine_checks_band(self):
         # The machine check compares kicks up to 2 kHz, where the beater

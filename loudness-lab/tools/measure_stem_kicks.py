@@ -477,53 +477,77 @@ def grid_counts(drums: np.ndarray, kicks: np.ndarray, rate: int,
     return f"heavy hits {heavy.size / minutes:.0f}/min; on a grid of " + ", ".join(cells)
 
 
-# What --files keeps of each separation, so a folder checked before is not
-# separated again -- separating is nearly all of a run's time, and the same
-# folders are re-checked after every change. Only the drum and bass parts,
-# mono, at 8 kHz: nothing the report measures reaches above 2 kHz (the
-# machine check's band is the highest), and 8 kHz holds up to 4. A few MB
-# a track, in scans/ (which git ignores), filed under a hash of the decoded
-# audio as stem-cache/ is.
-REPORT_CACHE = Path(__file__).resolve().parents[1] / "scans" / "stems"
-CACHE_RATE = 8000
+# Where --files keeps what it separated: the same place, and the same
+# files, as processing (stems.SHARED_CACHE), so a song is separated once
+# whichever runs first. Separating is nearly all of a first run's time.
+REPORT_CACHE = stems.SHARED_CACHE
+# Where the report kept them before they were shared -- the drum and bass
+# parts, mono, at 8 kHz. Read once and moved over, so nothing already
+# separated is separated again; the only way to keep other separators'
+# (Spleeter's) parts, which processing never uses.
+LEGACY_CACHE = Path(__file__).resolve().parents[1] / "scans" / "stems"
+LEGACY_RATE = 8000
 
 
-def keep_separation(x: np.ndarray, backend: str, cache: Path) -> tuple[Path, bool]:
-    """Separate `x` and keep its drum and bass parts, unless that was done
-    before. (where it is kept, whether it already was)."""
+def _legacy(x: np.ndarray, backend: str, legacy: Path | None) -> Path | None:
+    return None if legacy is None else Path(legacy) / f"{stems.audio_key(x)}-{backend}.npz"
+
+
+def _read_legacy(path: Path, n: int) -> dict:
     import soxr
-    path = Path(cache) / f"{stems.audio_key(x)}-{backend}.npz"
-    if path.exists():
-        return path, True
+    with np.load(path) as stored:
+        out = {}
+        for name in ("drums", "bass"):
+            mono = soxr.resample(stored[name].astype(np.float64),
+                                 LEGACY_RATE, RATE, quality="VHQ")
+            mono = np.pad(mono, (0, max(0, n - mono.size)))[:n]
+            out[name] = np.column_stack([mono, mono]).astype(np.float32)
+    return out
+
+
+def keep_separation(x: np.ndarray, backend: str, cache: Path,
+                    legacy: Path | None = LEGACY_CACHE) -> bool:
+    """Separate `x` and keep what the report reads, unless that was done
+    before -- by the report or by processing. Whether it already was."""
+    import soxr
+    if backend != "demucs":
+        path = _legacy(x, backend, legacy or cache)
+        if path.exists():
+            return True
+        parts = stems.separate(x, RATE, backend)
+        small = {name: soxr.resample(parts[name].mean(axis=1).astype(np.float64),
+                                     RATE, LEGACY_RATE, quality="VHQ").astype(np.float32)
+                 for name in ("drums", "bass")}
+        path.parent.mkdir(parents=True, exist_ok=True)
+        partial = path.with_name(path.stem + ".partial.npz")
+        np.savez_compressed(partial, **small)
+        partial.replace(path)
+        return False
+    if stems.has_kick_source(cache, x, report=True):
+        return True
+    old = _legacy(x, backend, legacy)
+    if old is not None and old.exists():
+        parts = _read_legacy(old, x.shape[0])
+        stems.store_kick_source(cache, x, RATE, parts["drums"], bass=parts["bass"])
+        return True
     parts = stems.separate(x, RATE, backend)
-    small = {name: soxr.resample(parts[name].mean(axis=1).astype(np.float64),
-                                 RATE, CACHE_RATE, quality="VHQ").astype(np.float32)
-             for name in ("drums", "bass")}
-    path.parent.mkdir(parents=True, exist_ok=True)
-    partial = path.with_name(path.stem + ".partial.npz")
-    np.savez_compressed(partial, **small)
-    partial.replace(path)
-    return path, False
+    stems.store_kick_source(cache, x, RATE, parts["drums"],
+                            [parts["vocals"], parts["other"]], bass=parts["bass"])
+    return False
 
 
-def separated(x: np.ndarray, backend: str,
-              cache: Path | None = REPORT_CACHE) -> tuple[dict, bool]:
-    """({"drums", "bass"} at RATE, stereo, as long as `x`; whether they came
-    from the cache). A first run keeps what it separated and reads it back
+def separated(x: np.ndarray, backend: str, cache: Path | None = REPORT_CACHE,
+              legacy: Path | None = LEGACY_CACHE) -> tuple[dict, bool]:
+    """({"drums", "bass"} at RATE, stereo, as long as `x`; whether they were
+    kept already). A first run keeps what it separated and reads it back
     the same way a second run will, so the two report the same numbers."""
-    import soxr
-    if cache is not None:
-        path, hit = keep_separation(x, backend, cache)
-        with np.load(path) as stored:
-            out = {}
-            for name in ("drums", "bass"):
-                mono = soxr.resample(stored[name].astype(np.float64),
-                                     CACHE_RATE, RATE, quality="VHQ")
-                mono = np.pad(mono, (0, max(0, x.shape[0] - mono.size)))[:x.shape[0]]
-                out[name] = np.column_stack([mono, mono]).astype(np.float32)
-        return out, hit
-    parts = stems.separate(x, RATE, backend)
-    return {"drums": parts["drums"], "bass": parts["bass"]}, False
+    if cache is None:
+        parts = stems.separate(x, RATE, backend)
+        return {"drums": parts["drums"], "bass": parts["bass"]}, False
+    hit = keep_separation(x, backend, cache, legacy)
+    if backend != "demucs":
+        return _read_legacy(_legacy(x, backend, legacy or cache), x.shape[0]), hit
+    return stems.load_report_parts(cache, x, RATE), hit
 
 
 def _analyse(task: dict) -> dict:
@@ -541,7 +565,7 @@ def _analyse(task: dict) -> dict:
     notes = []
     for backend in task["backends"]:
         parts = (task["parts"][backend] if task["parts"]
-                 else separated(x, backend, task["cache"])[0])
+                 else separated(x, backend, task["cache"], task["legacy"])[0])
         drums = parts["drums"]
         kicks, strengths = subbass.detect_kicks(x, RATE, drums)
         found[backend] = kicks
@@ -602,7 +626,8 @@ def _analyse(task: dict) -> dict:
 
 
 def measure_files(paths: list[Path], backends: list[str],
-                  cache: Path | None = REPORT_CACHE, workers: int = 1) -> int:
+                  cache: Path | None = REPORT_CACHE, workers: int = 1,
+                  legacy: Path | None = LEGACY_CACHE) -> int:
     """Each real track, scored against its BPM tag. For every separator two
     columns: the stem as detected, and after `select_kicks` has dropped the
     hits too light to be a kick and the ones off the beat -- which is what
@@ -635,9 +660,10 @@ def measure_files(paths: list[Path], backends: list[str],
             parts = {b: separated(x, b, None)[0] for b in backends}
         else:
             for b in backends:
-                keep_separation(x, b, cache)
+                keep_separation(x, b, cache, legacy)
         return {"x": x, "tagged": decode.probe(path).get("bpm"),
                 "columns": columns, "backends": backends, "cache": cache,
+                "legacy": legacy,
                 "parts": parts, "name": path.name, "folder": parent}
 
     agree: dict[str, list[bool]] = {}

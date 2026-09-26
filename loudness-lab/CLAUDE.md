@@ -612,9 +612,24 @@ BPM tag as a gate -- where the kicks found do not agree with the tag, skip
 the sub for that track and say so. The misses above then become tracks
 left alone rather than tracks processed wrongly.
 
-**The report keeps its separations** (`scans/stems/`, the drum and bass
-parts mono at 8 kHz, a few MB a track), so a folder checked before runs in
-seconds a track instead of a Demucs pass each. Read back, the report is
+**One separation per song, for both tools.** The report and processing
+keep what they separated in the same files: `stems.SHARED_CACHE`,
+`~/Music/LoudnessLab/stem-cache`, which is where the app's database puts
+processing's. Each file holds processing's kick source (2 kHz) and air
+guide, and the report's drum part (8 kHz) and bass part (2 kHz -- it reads
+bass only below 120 Hz), the report's in float16: measured, never heard.
+8.1 MB for five minutes of noisy synthetic parts, the worst case for the
+compression, against 2.5 for processing's alone and up to about 19 for the
+report's old copies. Whichever runs first separates; the other reads.
+Storing merges into what is there, so the report adding its parts to a
+file processing wrote keeps the air guide. What the report kept before
+(`scans/stems/`, drum and bass at 8 kHz float32) is moved over the first
+time a song is needed, not separated again. Other separators (Spleeter)
+still keep their parts there, as processing never reads them.
+
+Before that, **the report kept its separations** (`scans/stems/`), so a
+folder checked before ran in seconds a track instead of a Demucs pass
+each. Read back, the report is
 the same word for word and every number within 1% -- on the synthetic
 backbeat one figure moved, 1.40 ms to 1.41. 8 kHz because the machine
 check reads to 2 kHz; a test holds a 1.5 kHz tone through the copy (2 kHz

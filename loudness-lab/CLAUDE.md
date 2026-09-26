@@ -1050,7 +1050,7 @@ lift is what was asked for, only shared.
 
 The report prints what it would do per track ("bassline: a note N% of the
 track, around F Hz; a tone around S Hz ...; the bass carries X% of the
-low end"). 21 tests; eight breakages each caught. `check_profiles.py`
+low end"). 17 tests, plus a report check; eight breakages each caught. `check_profiles.py`
 now also fails on a setting either side that its name table misses --
 bass_sub passed it silently before it was added. Not yet compiled on the
 Mac, and not yet heard: the first run wants an A/B on She Blinded Me With

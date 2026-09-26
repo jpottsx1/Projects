@@ -706,5 +706,92 @@ class TestFixedAir(unittest.TestCase):
         self.assertEqual(profiles.FIELDS["sub_offset"], 0.0)
 
 
+def _played(by_machine: bool, jitter_ms: float = 12.0, seconds: float = 30.0,
+            bpm: float = 120.0, seed: int = 0):
+    """Kicks on every beat with a snare on 2 and 4 and off-beat hats. A
+    machine plays one kick recording exactly on the grid; a drummer's kicks
+    vary a little in pitch, length and level, and land `jitter_ms` (one
+    standard deviation) either side of it."""
+    rng = np.random.default_rng(seed)
+    n, beat = int(seconds * RATE), 60 / bpm
+    track = np.zeros(n)
+    t = np.arange(int(0.3 * RATE)) / RATE
+
+    def kick(f, decay, level):
+        return (np.sin(2 * np.pi * np.cumsum(f * (1 + 0.8 * np.exp(-t * 60))) / RATE)
+                * np.exp(-t * decay) + 0.3 * rng.standard_normal(t.size)
+                * np.exp(-t * 400)) * level
+
+    sample = kick(55.0, 20.0, 1.0)
+    onsets = []
+    for i, b in enumerate(np.arange(0, seconds - 1, beat)):
+        at = b if by_machine else b + rng.normal(0, jitter_ms / 1000)
+        hit = sample if by_machine else kick(55 * (1 + rng.normal(0, 0.04)),
+                                            20 * (1 + rng.normal(0, 0.2)),
+                                            10 ** (rng.normal(0, 3) / 20))
+        fixtures._place(track, at, hit)
+        onsets.append(at)
+        if i % 2 == 1:
+            fixtures._place(track, b, 0.4 * fixtures._snare(int(0.25 * RATE), rng))
+        fixtures._place(track, b + beat / 2, 0.2 * fixtures._hat(int(0.08 * RATE), rng))
+    track = track / np.abs(track).max() * 0.8
+    return np.stack([track, track], axis=1).astype(np.float32), np.array(onsets)
+
+
+class TestMachineCheck(unittest.TestCase):
+    """The two numbers meant to tell a drum machine from a drummer."""
+
+    def measure(self, drums):
+        from loudnesslab import machine
+        kicks, strengths = subbass.detect_kicks(drums, RATE, drums)
+        kept, _, _ = subbass.select_kicks(drums, RATE, kicks, strengths, 120.0)
+        _, similarity, onsets = machine.kick_template(drums, RATE, kept)
+        return similarity, machine.grid_jitter_ms(onsets, RATE, 120.0)
+
+    def test_a_machine_is_one_sample_exactly_on_the_grid(self):
+        similarity, jitter = self.measure(_played(True)[0])
+        self.assertGreater(float(np.percentile(similarity, 10)), 0.98)
+        self.assertLess(jitter, 0.5)
+
+    def test_a_drummer_is_neither(self):
+        similarity, jitter = self.measure(_played(False, jitter_ms=12.0)[0])
+        self.assertLess(float(np.percentile(similarity, 10)), 0.95)
+        self.assertGreater(jitter, 3.0)
+
+    def test_the_grid_distance_follows_the_timing(self):
+        # Median |x| of a normal is about 0.67 sigma; the measure should
+        # track the drummer's timing, not the detector's.
+        for ms in (5.0, 12.0, 20.0):
+            _, jitter = self.measure(_played(False, jitter_ms=ms)[0])
+            self.assertAlmostEqual(jitter, 0.67 * ms, delta=0.35 * ms)
+
+    def test_a_tag_slightly_off_the_real_tempo_is_not_timing(self):
+        """A BPM tag is rarely exact. A machine at 120.4 BPM tagged 120
+        drifts ~3 ms a bar off a fixed grid; the grid is placed locally so
+        that drift is followed and the machine still reads as exact."""
+        from loudnesslab import machine
+        drums, _ = _played(True, bpm=120.4, seconds=60.0)
+        kicks, strengths = subbass.detect_kicks(drums, RATE, drums)
+        kept, _, _ = subbass.select_kicks(drums, RATE, kicks, strengths, 120.0)
+        _, _, onsets = machine.kick_template(drums, RATE, kept)
+        self.assertLess(machine.grid_jitter_ms(onsets, RATE, 120.0), 1.0)
+
+    def test_alignment_undoes_the_detectors_looseness(self):
+        from loudnesslab import machine
+        drums, onsets = _played(True)
+        truth = (onsets * RATE).astype(int)
+        kicks, strengths = subbass.detect_kicks(drums, RATE, drums)
+        kept, _, _ = subbass.select_kicks(drums, RATE, kicks, strengths, 120.0)
+        # Shift every onset by a different few samples, as a loose detector
+        # would: the aligned onsets come back to one consistent offset.
+        wobble = np.random.default_rng(1).integers(-60, 60, kept.size)
+        _, _, aligned = machine.kick_template(drums, RATE, kept + wobble)
+        offsets = np.array([a - truth[np.argmin(np.abs(truth - a))] for a in aligned])
+        # One consistent offset (where the detector puts an attack's start),
+        # to within a few samples, for nearly every kick.
+        close = np.abs(offsets - np.median(offsets)) <= 3
+        self.assertGreaterEqual(float(close.mean()), 0.95)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -151,14 +151,8 @@ def _sound_windows(drums: np.ndarray, rate: int, hits: np.ndarray,
     return windows / np.maximum(norms, 1e-30), room
 
 
-def _matches(windows: np.ndarray, template: np.ndarray) -> np.ndarray:
-    """Each hit's best cosine against `template` over the shifts."""
-    unit = template / max(float(np.linalg.norm(template)), 1e-30)
-    return (windows @ unit).max(axis=1)
-
-
-def sounds_like_the_kick(drums: np.ndarray, rate: int, hits: np.ndarray
-                         ) -> tuple[np.ndarray, np.ndarray]:
+def sounds_like_the_kick(drums: np.ndarray, rate: int, hits: np.ndarray,
+                         shifts: bool = False):
     """(keep, match): which hits sound like the track's kick, and how much.
 
     The kick's sound is learned from the hits themselves: the one that
@@ -173,15 +167,20 @@ def sounds_like_the_kick(drums: np.ndarray, rate: int, hits: np.ndarray
 
     Fewer than 8 hits, or none with room either side: everything is kept,
     as there is nothing to learn a sound from.
+
+    With `shifts`, a third array: how far (ms) each hit was moved to line
+    up best. A hit at the limit (SOUND_SHIFT_S) may have wanted further.
     """
     keep = np.ones(hits.size, dtype=bool)
     match = np.ones(hits.size)
+    moved = np.zeros(hits.size)
+    done = (lambda: (keep, match, moved)) if shifts else (lambda: (keep, match))
     if hits.size < 8:
-        return keep, match
+        return done()
     shift = int(round(SOUND_SHIFT_S * SOUND_RATE))
     windows, room = _sound_windows(drums, rate, hits, shift)
     if windows.shape[0] < 8:
-        return keep, match
+        return done()
     centred = windows[:, shift]
     sample = np.arange(windows.shape[0])
     if sample.size > SOUND_SAMPLE:
@@ -194,7 +193,10 @@ def sounds_like_the_kick(drums: np.ndarray, rate: int, hits: np.ndarray
     # Line each up to that hit before averaging, or the template blurs.
     best = np.argmax(windows[like] @ centred[sample[kick]], axis=1)
     template = windows[like, best].mean(axis=0)
-    scored = _matches(windows, template)
+    unit = template / max(float(np.linalg.norm(template)), 1e-30)
+    every = windows @ unit
+    scored = every.max(axis=1)
     match[room] = scored
+    moved[room] = (np.argmax(every, axis=1) - shift) * 1000.0 / SOUND_RATE
     keep[room] = scored >= MIN_SOUND_MATCH
-    return keep, match
+    return done()

@@ -419,10 +419,20 @@ def sound_line(drums: np.ndarray, kept: np.ndarray, report: dict,
         # the weight filter, then not the kick. Many of them on a beat, on
         # a four-on-the-floor record, would mean kicks are being lost.
         heavy, _, _ = subbass.select_kicks(drums, RATE, found, strengths, None)
-        same, _ = machine.sounds_like_the_kick(drums, RATE, heavy)
+        same, match, moved = machine.sounds_like_the_kick(drums, RATE, heavy,
+                                                          shifts=True)
         dropped = heavy[~same]
         on = on_a_beat(dropped, kept, RATE, bpm, which=True)
-        beat = f" ({on.sum()} of them on a beat)"
+        beat = f" ({on.sum()} of them on a beat"
+        if on.any():
+            # Kicks that almost match, or another sound? And did lining
+            # them up run out of room (a kick found further off than 12 ms)?
+            m = match[~same][on]
+            edge = np.abs(moved[~same][on]) >= machine.SOUND_SHIFT_S * 1000 - 0.5
+            beat += (f", matching {np.percentile(m, 10):.2f}-"
+                     f"{np.percentile(m, 90):.2f} (median {np.median(m):.2f}), "
+                     f"{edge.sum()} at the alignment limit")
+        beat += ")"
         spans = dropped_spans(dropped[on], kept, RATE, bpm)
     line = (f"by sound: dropped {report['not_the_kick']} not the kick's sound{beat}, "
             f"then grid: {step} (fit {report['grid_coherence']}); "

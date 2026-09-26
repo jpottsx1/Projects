@@ -877,6 +877,25 @@ class TestTheKicksOwnSound(unittest.TestCase):
         self.assertTrue(keep.all())
         self.assertGreater(float(match.min()), 0.95)
 
+    def test_it_says_how_far_each_hit_was_moved(self):
+        # Kicks found 8 ms early are moved 8 ms and match; kicks found
+        # 20 ms early, beyond the 12 ms allowed, stop at the limit -- which
+        # is what the report counts, to tell that case from another sound.
+        from loudnesslab import machine
+        drums, onsets = _played(True, seconds=30.0)
+        hits = (onsets * RATE).astype(int)
+        hits[1::4] -= int(0.008 * RATE)
+        hits[3::4] -= int(0.020 * RATE)
+        keep, match, moved = machine.sounds_like_the_kick(drums, RATE, hits,
+                                                          shifts=True)
+        limit = machine.SOUND_SHIFT_S * 1000
+        self.assertTrue(keep[1::4].all())
+        # Against the usual move of an unshifted kick (the first, at
+        # 0.000 s, has no room either side and is not moved at all).
+        np.testing.assert_allclose(moved[1::4] - np.median(moved[0::4]),
+                                   8.0, atol=1.0)
+        self.assertTrue((np.abs(moved[3::4]) >= limit - 0.5).all())
+
     def test_a_drummers_kicks_still_sound_alike(self):
         for ms in (5.0, 20.0):
             drums, onsets = _played(False, jitter_ms=ms, seconds=60.0)
@@ -970,9 +989,11 @@ class TestTheKickReport(unittest.TestCase):
         self.assertIn("then grid: eighths", line)
         # The backbeat's snares and claps are on beats 2 and 4, its toms
         # and scratches mostly between: some of the dropped, not all.
-        on_beat = int(re.search(r"\((\d+) of them on a beat\)", line).group(1))
+        on_beat = int(re.search(r"\((\d+) of them on a beat", line).group(1))
         dropped = int(re.search(r"dropped (\d+) not the kick", line).group(1))
         self.assertTrue(0 < on_beat < dropped, line)
+        self.assertRegex(line, r"matching \d\.\d\d-\d\.\d\d \(median \d\.\d\d\), "
+                               r"\d+ at the alignment limit\)")
         self.assertIn("ms from the grid", line)
         summary = text[text.index("implied tempo"):]
         self.assertRegex(summary, r"demucs\+sound\s+1 of 1")

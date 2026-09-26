@@ -923,6 +923,17 @@ no longer skips hits with no kept kick within eight beats: those are
 exactly the hits in a section with another kick, and were being counted
 as off the beat.
 
+**Third run, with `where:` (version 4b33ac5).** The dropped on-beat hits
+on Vogue, Black Box, INXS, Push It and Pump Up the Volume are scattered
+between kept kicks, not bunched: e.g. Vogue 2:15.1-2:17.7, 4 dropped with
+2 kept among them, and 35 more elsewhere. So not a section with its own
+kick -- something on certain beats. The clean records lose 5-9% (Vogue
+81 of 89, Black Box 99 of 108, INXS 100 of 105); Pump Up the Volume and
+Push It about a third, and they are sample collages whose "kick" may be
+several drums. Next question, now in the report: do those hits nearly
+match (just under 0.8) or not at all, and how many ran out of alignment
+at 12 ms.
+
 **Measured only.** The report prints a `+sound` column and a `by sound:`
 line (dropped, grid and fit after, kicks a minute, match, ms from the
 grid); processing does not use it. It goes in if Domino Dancing and Tell

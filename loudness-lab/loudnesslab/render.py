@@ -325,32 +325,74 @@ def one(job: dict) -> dict:
     }
 
 
-def run(jobs: list[dict], workers: int | None = None, progress=None) -> list[dict]:
+def pipeline(items: list, work, workers: int, prepare=None, done=None,
+             ahead: int | None = None) -> list:
+    """`work(item)` for every item, `workers` at a time, results in order.
+
+    `prepare(item)`, if given, runs here in this process first, one item
+    at a time, and each item goes to the pool the moment it is prepared --
+    so the serial part (Demucs, on the GPU, one model) overlaps the
+    parallel part (the rest, on the CPU cores) instead of finishing before
+    it starts. `done(n, total, result)` is called in order as results
+    arrive, so a progress count only goes up and a report prints in the
+    order it was asked for, whichever width is used.
+
+    If `prepare` returns something, that is what `work` is given instead of
+    the item -- the kick report hands over the decoded audio this way, so
+    no worker needs ffmpeg or Demucs. And no more than `ahead` items (two
+    per worker by default) are in the pool at once: each can carry a whole
+    decoded track, a few hundred megabytes, and a fast `prepare` must not
+    queue up a folder's worth of them in memory.
+
+    One worker, or a single item, runs in this process: no pool to start.
+    """
+    results: list = []
+    total = len(items)
+
+    def finished(result):
+        results.append(result)
+        if done:
+            done(len(results), total, result)
+
+    def payload(item):
+        given = prepare(item) if prepare else None
+        return item if given is None else given
+
+    if workers <= 1 or total <= 1:
+        for item in items:
+            finished(work(payload(item)))
+        return results
+    ahead = ahead or 2 * workers
+    # "spawn" explicitly rather than the platform default, for the same
+    # reason the analysis pass pins it: forking a process that has already
+    # loaded numpy/Accelerate is not safe on macOS, and the behaviour under
+    # test on Linux should be the behaviour users get.
+    pool = ProcessPoolExecutor(max_workers=workers,
+                               mp_context=multiprocessing.get_context("spawn"))
+    futures = []
+    try:
+        for item in items:
+            while len(futures) - len(results) >= ahead:
+                finished(futures[len(results)].result())
+            futures.append(pool.submit(work, payload(item)))
+            # Report whatever has finished, in order, without waiting.
+            while len(results) < len(futures) and futures[len(results)].done():
+                finished(futures[len(results)].result())
+        for future in futures[len(results):]:
+            finished(future.result())
+    finally:
+        pool.shutdown()
+    return results
+
+
+def run(jobs: list[dict], workers: int | None = None, progress=None,
+        prepare=None) -> list[dict]:
     """Work through `jobs`, in order, `workers` at a time.
 
     Results come back in the order given whichever width is used, so the
     per-track table reads the same on one core as on eight and a caller
-    driving a progress bar sees a count that only goes up.
+    driving a progress bar sees a count that only goes up. `prepare` is
+    the per-job step that must happen here first -- separating -- and is
+    overlapped with the pool (see `pipeline`).
     """
-    workers = workers or default_jobs()
-    results, pool = [], None
-    if workers == 1 or len(jobs) <= 1:
-        produced = map(one, jobs)
-    else:
-        # "spawn" explicitly rather than the platform default, for the same
-        # reason the analysis pass pins it: forking a process that has
-        # already loaded numpy/Accelerate is not safe on macOS, and the
-        # behaviour under test on Linux should be the behaviour users get.
-        pool = ProcessPoolExecutor(
-            max_workers=workers,
-            mp_context=multiprocessing.get_context("spawn"))
-        produced = pool.map(one, jobs, chunksize=1)
-    try:
-        for done, result in enumerate(produced, 1):
-            results.append(result)
-            if progress:
-                progress(done, len(jobs), result)
-    finally:
-        if pool is not None:
-            pool.shutdown()
-    return results
+    return pipeline(jobs, one, workers or default_jobs(), prepare, progress)

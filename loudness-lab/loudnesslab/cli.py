@@ -188,9 +188,12 @@ def _variant(kind: str, path: Path, label: str, audio) -> dict:
     }
 
 
-def _separate_for_kicks(jobs: list[dict], cache_dir: Path, porcelain: bool,
-                        quiet: bool) -> None:
-    """Split every track that will get a sub, once, before the pool starts.
+def _separator(jobs: list[dict], cache_dir: Path, porcelain: bool,
+               quiet: bool):
+    """The per-track separation step, as a function the pool pipeline
+    calls on each job just before handing it to a worker (render.run's
+    `prepare`), so Demucs works on the next track while the workers
+    process the ones already done.
 
     Here in the parent, one track at a time, rather than in the workers:
     each worker would load its own copy of the model, and Demucs on a
@@ -202,6 +205,11 @@ def _separate_for_kicks(jobs: list[dict], cache_dir: Path, porcelain: bool,
     A track that cannot be separated is not failed here. The job carries
     the reason, and the worker skips the sub on it and says why -- the
     de-clipping and dynamics it may also want still happen.
+
+    Progress: `phase: "separate"` events, counted, until the first track
+    comes back processed (`processing_started`); after that they carry no
+    count, so the one progress bar follows processing rather than jumping
+    between the two. A failure is reported either way.
     """
     def kicks(job):
         return job.get("stem_kicks") and float(job["amount"]) > 0
@@ -211,7 +219,13 @@ def _separate_for_kicks(jobs: list[dict], cache_dir: Path, porcelain: bool,
 
     wanted = [job for job in jobs
               if job.get("skip") is None and (kicks(job) or guide(job))]
-    for done, job in enumerate(wanted, 1):
+    ids = {id(job) for job in wanted}
+    state = {"done": 0, "processing_started": False}
+
+    def prepare(job):
+        if id(job) not in ids:
+            return
+        state["done"] += 1
         status, reason = "ok", None
         try:
             audio = decode.decode(Path(job["path"]))
@@ -229,15 +243,29 @@ def _separate_for_kicks(jobs: list[dict], cache_dir: Path, porcelain: bool,
             reason = f"{type(exc).__name__}: {exc}"[:300]
             job["stem_error"] = reason
         if porcelain:
-            _emit({"event": "progress", "phase": "separate", "done": done,
-                   "total": len(wanted), "name": job["name"],
-                   "path": job["path"], "status": status, "reason": reason})
+            event = {"event": "progress", "phase": "separate",
+                     "name": job["name"], "path": job["path"],
+                     "status": status, "reason": reason}
+            if not state["processing_started"]:
+                event.update(done=state["done"], total=len(wanted))
+            _emit(event)
         elif not quiet:
-            sys.stderr.write(f"\r  separating {done}/{len(wanted)}  "
+            sys.stderr.write(f"\r  separating {state['done']}/{len(wanted)}  "
                              f"{job['name'][:50]:<50s}")
+            if state["done"] == len(wanted):
+                sys.stderr.write("\n")
             sys.stderr.flush()
-    if wanted and not porcelain and not quiet:
-        sys.stderr.write("\n")
+
+    prepare.state = state
+    return prepare
+
+
+def _separate_for_kicks(jobs: list[dict], cache_dir: Path, porcelain: bool,
+                        quiet: bool) -> None:
+    """Every job's separation step in turn, with nothing overlapping it."""
+    prepare = _separator(jobs, cache_dir, porcelain, quiet)
+    for job in jobs:
+        prepare(job)
 
 
 def _write_manifest(path: Path, args: argparse.Namespace,
@@ -733,10 +761,17 @@ def cmd_subbass(args: argparse.Namespace) -> int:
                      if args.air > 0 else "")
                   + note)
 
+    prepare = None
     if args.stem_kicks or (args.air_stems and args.air > 0):
-        _separate_for_kicks(jobs, Path(jobs[0]["stem_cache"]), porcelain,
-                            args.quiet)
-    results = render.run(jobs, workers=workers, progress=report_one)
+        prepare = _separator(jobs, Path(jobs[0]["stem_cache"]), porcelain,
+                             args.quiet)
+
+        def reported(done, total, result, _report=report_one, _state=prepare.state):
+            _state["processing_started"] = True
+            _report(done, total, result)
+    results = render.run(jobs, workers=workers,
+                         progress=reported if prepare else report_one,
+                         prepare=prepare)
 
     written = sum(1 for r in results if r["status"] == "ok")
     outcomes = [(r["folder"], r["amount"], r.get("reason") if r["status"] != "ok"

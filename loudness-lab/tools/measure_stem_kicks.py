@@ -357,6 +357,28 @@ def machine_check(drums: np.ndarray, kept: np.ndarray, rate: int,
                else "no tag, no grid"))
 
 
+def sound_line(drums: np.ndarray, kept: np.ndarray, report: dict,
+               bpm: float | None, minutes: float) -> str:
+    """What the kick-sound filter did: how many hits it dropped as not the
+    kick's sound, the grid fitted to what was left, and the machine check
+    on that -- the numbers that said which tracks were mixing other drums
+    in with the kick."""
+    step = {1: "quarters", 2: "eighths", 4: "sixteenths"}.get(
+        report["grid_step"], "none fitted")
+    line = (f"by sound: dropped {report['not_the_kick']} not the kick's sound, "
+            f"then grid: {step} (fit {report['grid_coherence']}); "
+            f"{kept.size / minutes:.0f} kicks/min")
+    found = machine.kick_template(drums, RATE, kept)
+    if found is None:
+        return line
+    _, similarity, onsets = found
+    jitter = (machine.grid_jitter_ms(onsets, RATE, bpm, report["grid_step"] or 1)
+              if bpm else None)
+    return (line + f"; match {np.median(similarity):.3f} "
+            f"(10th percentile {np.percentile(similarity, 10):.3f})"
+            + (f", {jitter:.2f} ms from the grid" if jitter is not None else ""))
+
+
 def grid_counts(drums: np.ndarray, kicks: np.ndarray, rate: int,
                 bpm: float | None, minutes: float) -> str:
     """Kicks a minute that a grid of quarters, eighths and sixteenths would
@@ -380,14 +402,16 @@ def measure_files(paths: list[Path], backends: list[str]) -> int:
     """Each real track, scored against its BPM tag. For every separator two
     columns: the stem as detected, and after `select_kicks` has dropped the
     hits too light to be a kick and the ones off the beat -- which is what
-    the sub stage actually uses."""
+    the sub stage actually uses -- and a third with the kick-sound filter
+    too (`select_kicks(by_sound=True)`), which processing does not use yet."""
     from loudnesslab import decode
 
     decode.require_tools()
     files = []
     for path in paths:
         files += decode.find_audio(path) if path.is_dir() else [path]
-    columns = ["mix"] + [c for b in backends for c in (b, b + "+filter")]
+    columns = ["mix"] + [c for b in backends
+                         for c in (b, b + "+filter", b + "+sound")]
     print(f"{'tagged':>6}  " + "  ".join(f"{name:>14}" for name in columns)
           + "   (implied BPM; kicks/min)  track")
     agree: dict[str, list[bool]] = {}
@@ -431,6 +455,14 @@ def measure_files(paths: list[Path], backends: list[str]) -> int:
             notes.append(machine_check(drums, kept, RATE, tagged,
                                        report["grid_step"]))
             notes.append(grid_counts(drums, kicks, RATE, tagged, minutes))
+            by_sound, _, sound_report = subbass.select_kicks(
+                drums, RATE, kicks, strengths, tagged, by_sound=True)
+            found[backend + "+sound"] = by_sound
+            if sound_report["grid_bpm"]:
+                against[backend + "+sound"] = (sound_report["grid_bpm"]
+                                               * sound_report["grid_step"])
+            notes.append(sound_line(drums, by_sound, sound_report, tagged,
+                                    minutes))
             notes.extend(gaps(drums, kicks, kept, RATE, tagged, x.shape[0]))
         cells = []
         for name in columns:
@@ -440,7 +472,7 @@ def measure_files(paths: list[Path], backends: list[str]) -> int:
             if tagged:
                 target = against[name]
                 ok = any(abs(bpm - target * m) <= 0.03 * target * m
-                         for m in ((1.0,) if "+filter" not in name
+                         for m in ((1.0,) if "+" not in name
                                    else (1.0, 0.5, 0.25)))
                 agree.setdefault(name, []).append(ok)
         label = f"{tagged:>6.1f}" if tagged else f"{'-':>6}"

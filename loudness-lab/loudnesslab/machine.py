@@ -99,3 +99,91 @@ def grid_jitter_ms(onsets: np.ndarray, rate: int, bpm: float,
         offset = (phase[i] - centre + 0.5) % 1.0 - 0.5
         offsets.append(abs(offset) * period / rate * 1000)
     return float(np.median(offsets))
+
+
+# "Does this hit sound like the kick?" -- asked of every hit, machine or
+# drummer. On the 1988 and 1990 reports the tracks that went wrong were the
+# ones whose kept "kicks" did not sound alike (Domino Dancing 0.69, Tell It
+# to My Heart 0.75, What Time Is Love 0.47, against 0.97-0.99 on the clean
+# ones): percussion, toms and stabs heavy enough to pass the weight filter.
+#
+# Compared only in the kick's own band, so a snare landing on a kick does
+# not make it a different sound. Measured on the synthetic kit, in 30-120
+# Hz: a kick again 1.00, with a LinnDrum-style snare on top 1.00, with a
+# noise snare 0.96; toms 0.12-0.41 (the lowest, 64 Hz, the highest), a
+# scratch 0.26, a clap 0.05, a snare alone 0.19. At 30-250 Hz the kick
+# with the thumping snare fell to 0.85.
+SOUND_BAND_HZ = (30.0, 120.0)
+SOUND_RATE = 2000               # all that band needs, and 24x less to compare
+SOUND_WINDOW_S = 0.06           # the kick's body
+SOUND_SHIFT_S = 0.003           # how far a hit may be moved to line up
+SOUND_SAMPLE = 200              # hits enough to learn the sound from
+MIN_SOUND_MATCH = 0.7           # see the table above; kept well clear of both
+
+
+def _sound_windows(drums: np.ndarray, rate: int, hits: np.ndarray,
+                   shift: int) -> tuple[np.ndarray, np.ndarray]:
+    """Per hit, the kick-band window at each shift -- (hits, shifts, length),
+    unit-normalised -- and which hits had room for one."""
+    from scipy.signal import resample_poly
+    mono = drums.mean(axis=1) if drums.ndim == 2 else drums
+    band = sosfiltfilt(butter(4, SOUND_BAND_HZ, btype="band", fs=rate,
+                              output="sos"), np.asarray(mono, dtype=np.float64))
+    low = resample_poly(band, SOUND_RATE, rate)
+    at = np.round(hits * SOUND_RATE / rate).astype(int)
+    length = int(SOUND_WINDOW_S * SOUND_RATE)
+    room = (at - shift >= 0) & (at + shift + length <= low.size)
+    offsets = np.arange(-shift, shift + 1)
+    idx = at[room, None, None] + offsets[None, :, None] + np.arange(length)[None, None, :]
+    windows = low[idx]
+    norms = np.linalg.norm(windows, axis=2, keepdims=True)
+    return windows / np.maximum(norms, 1e-30), room
+
+
+def _matches(windows: np.ndarray, template: np.ndarray) -> np.ndarray:
+    """Each hit's best cosine against `template` over the shifts."""
+    unit = template / max(float(np.linalg.norm(template)), 1e-30)
+    return (windows @ unit).max(axis=1)
+
+
+def sounds_like_the_kick(drums: np.ndarray, rate: int, hits: np.ndarray
+                         ) -> tuple[np.ndarray, np.ndarray]:
+    """(keep, match): which hits sound like the track's kick, and how much.
+
+    The kick's sound is learned from the hits themselves: the one that
+    sounds like the most others (a match of MIN_SOUND_MATCH or better) is
+    taken as the kick, those that sound like it are averaged into a
+    template, and every hit is scored against that. So the kick is the
+    most common sound among the hits heavy enough to be one -- it need not
+    be the heaviest. A first version took it from the heaviest half, and a
+    low tom that rang longer than the kick, half as often, became the
+    template; that is `test_a_tom_as_heavy_as_the_kick_is_not_the_kick`.
+    Nor need it be most of the hits, only the largest group of alike ones.
+
+    Fewer than 8 hits, or none with room either side: everything is kept,
+    as there is nothing to learn a sound from.
+    """
+    keep = np.ones(hits.size, dtype=bool)
+    match = np.ones(hits.size)
+    if hits.size < 8:
+        return keep, match
+    shift = int(round(SOUND_SHIFT_S * SOUND_RATE))
+    windows, room = _sound_windows(drums, rate, hits, shift)
+    if windows.shape[0] < 8:
+        return keep, match
+    centred = windows[:, shift]
+    sample = np.arange(windows.shape[0])
+    if sample.size > SOUND_SAMPLE:
+        sample = sample[np.linspace(0, sample.size - 1, SOUND_SAMPLE).astype(int)]
+    # Pairwise, over the shifts: how much each sampled hit sounds like each.
+    pair = np.einsum("isl,jl->ijs", windows[sample], centred[sample]).max(axis=2)
+    alike = pair >= MIN_SOUND_MATCH
+    kick = int(np.argmax(alike.sum(axis=0)))
+    like = sample[alike[:, kick]]
+    # Line each up to that hit before averaging, or the template blurs.
+    best = np.argmax(windows[like] @ centred[sample[kick]], axis=1)
+    template = windows[like, best].mean(axis=0)
+    scored = _matches(windows, template)
+    match[room] = scored
+    keep[room] = scored >= MIN_SOUND_MATCH
+    return keep, match

@@ -159,7 +159,7 @@ every machine but the one that made it for a while.
 loudnesslab/     the Python: bs1770, spectrum, subbass, declip, expand,
                  air, mp3gain, decode, db, report, render, write, cli,
                  stems (Demucs: a drum stem for kicks, a guide for air),
-                 machine (is this kick a drum machine? measured only)
+                 machine (drum machine? the kick's own sound; measured only)
 tests/           its tests
 tools/           make_golden.py, the five checkers, measure_stem_kicks.py
 macapp/
@@ -824,6 +824,60 @@ separates them by about eighty times; the median similarity barely does
 -- my synthetic drummer varies only a little -- and real records add
 bleed over the kicks that will pull a machine's similarity down. Which
 number holds up is for the 1983, 1988 and a disco folder to say.
+
+**Measured on 48 records (1977, 1983, 1988, 1990): timing tells a machine
+from a drummer only up to the mid-80s, and similarity never does.**
+
+- 1983 and 1977 split cleanly: every drum machine 0.48-1.32 ms from the
+  grid (Holiday, Sweet Dreams, Blue Monday, Flashdance, Safety Dance),
+  every drummer 3.0 ms or more. Stayin' Alive, a tape loop of one bar,
+  1.88. I Feel Love 3.55 -- its sequencer is a machine, its kick was
+  overdubbed by hand, and the measure heard that.
+- 1988-90 fill the gap in: Rick Astley 1.75, INXS 2.08, Technotronic
+  2.40, Opposites Attract 2.70, Vogue 3.18 -- all machines -- beside
+  Black Box and Deee-Lite at 4.3-4.6 on sampled loops. Samplers under
+  sequencers slop by milliseconds and a sampled break keeps its drummer's
+  timing. The third time here that a clean gap dissolved when more of the
+  library arrived; no machine/drummer switch was built on it.
+- Kicks matching their average: machines 0.95-0.99, and so were the Bee
+  Gees (0.985) and I Feel Love (0.991). No use for machine vs drummer.
+
+**What the match DID pick out is the tracks that go wrong.** Clean tracks:
+0.97-0.99, kept kicks varying 1-3 dB. Troubled ones: Domino Dancing 0.69
+and 12.2 dB, Tell It to My Heart 0.75 and 14.2, Push It 0.70, Pump Up the
+Volume 0.74 and 13.2, What Time Is Love 0.47 and 18.1, Unbelievable 0.67
+and 11.0, Maniac 0.89 with a 10th percentile of 0.23 and 12.3 dB. What
+passes the weight filter there is kicks plus other heavy drums --
+percussion, toms, stabs -- and the grid is fitted to that mixture, which
+is why none fits Domino Dancing or Tell It to My Heart.
+
+### The kick's own sound: `select_kicks(by_sound=True)`
+
+`machine.sounds_like_the_kick` keeps a hit only if it sounds like the
+track's kick, and runs between the weight filter and the grid, so the grid
+is fitted to kicks. Machine or drummer does not matter.
+
+- **Compared in 30-120 Hz only**, at 2 kHz, over 60 ms, lined up within
+  3 ms. On the synthetic kit: a kick again 1.00, a kick with a LinnDrum
+  snare on top 0.91-1.00 even with the snare half as loud again as the
+  kick, toms 0.12-0.41, a scratch 0.26, a clap 0.05, a snare 0.19. Across
+  30-2000 Hz that loud snare takes the kick to 0.53 -- the mistake the
+  first weight filter made, and a test holds it.
+- **The kick is the most common sound, not the heaviest.** The hit that
+  sounds like the most others (0.7 or better, `MIN_SOUND_MATCH`) is the
+  kick; the ones like it make the template. A first version learned from
+  the heaviest half, and a low tom that rang longer than the kick, half
+  as often, became the template.
+- Synthetic results: the backbeat's precision 0.77 -> 1.00 with recall
+  1.00 -> 0.98, and its grid from sixteenths to eighths, which is what its
+  kicks are on; every other scenario keeps its kicks. The one kick lost
+  in each is the first in the file, at 0.000 s, whose onset the detector
+  places 10 ms late -- with a second of lead-in it matches at 0.9997.
+
+**Measured only.** The report prints a `+sound` column and a `by sound:`
+line (dropped, grid and fit after, kicks a minute, match, ms from the
+grid); processing does not use it. It goes in if Domino Dancing and Tell
+It to My Heart get a grid that fits, and the clean tracks lose nothing.
 
 ### Air: why none arrived, and air that follows the stems
 

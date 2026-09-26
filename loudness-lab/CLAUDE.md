@@ -143,6 +143,11 @@ every machine but the one that made it for a while.
   name, so `"Building $CONFIG…"` looked up `CONFIG?` and `set -u` stopped
   the build with `CONFIG?: unbound variable`. Linux does not, so nothing
   here catches it: write `${CONFIG}…`.
+- **A report from a stale checkout reads as current.** The 2026-09-26
+  kick reports came from code two merges old -- no machine check, Maniac's
+  sub still at 63 Hz -- and nothing in them said so. `Measure Kick
+  Detection.command` now pulls first, stops if it cannot, and writes the
+  version at the top of the report.
 - **Folder grouping uses `Library.folderLabels`,** not the parent's name:
   two compilations each with a CD1 otherwise merge into one corpus, and a
   corpus silently averaged with another is a wrong number that looks

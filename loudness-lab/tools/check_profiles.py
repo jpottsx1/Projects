@@ -25,7 +25,7 @@ NAMES = {
     "targetLRA": "target_lra", "maxAttenuation": "max_attenuation",
     "transient": "transient", "minCrest": "min_crest",
     "air": "air", "airTune": "air_tune", "stemKicks": "stem_kicks",
-    "airFixed": "air_fixed", "airStems": "air_stems",
+    "airFixed": "air_fixed", "airStems": "air_stems", "bassSub": "bass_sub",
     "target": "target", "estimator": "estimator", "peakCeiling": "peak_ceiling",
     "auto": "auto", "reference": "reference", "amount": "amount",
     "maxAmount": "max_amount", "minActivity": "min_activity",
@@ -81,6 +81,15 @@ def main() -> int:
     defaults = swift_defaults(source)
     built = swift_profiles(source)
     problems: list[str] = []
+
+    # A setting on either side that NAMES does not map would otherwise be
+    # compared nowhere and pass: bass_sub did, until this was here.
+    for field in sorted(set(profiles.FIELDS) - set(NAMES.values()) - {"description"}):
+        problems.append(f"Python setting {field} is not in NAMES, so it is "
+                        f"never compared with the Swift")
+    for field in sorted(set(defaults) - set(NAMES) - {"description"}):
+        problems.append(f"Swift setting {field} is not in NAMES, so it is "
+                        f"never compared with the Python")
 
     for name in sorted(set(profiles.BUILT_IN) | set(built)):
         if name not in built:

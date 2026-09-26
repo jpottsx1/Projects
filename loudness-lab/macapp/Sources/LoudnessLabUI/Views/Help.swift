@@ -541,6 +541,34 @@ enum Help {
 
     // MARK: - Punch
 
+    static let bassSub = HelpEntry(
+        title: "Sub follows the bassline too",
+        summary: "Put part of the sub under the bass notes, where the bass carries the low end.",
+        detail: """
+        On some records the low end is the bass line, not the kick -- She \
+        Blinded Me With Science, Blue Monday. A sub laid only under kicks \
+        cannot follow that. With this on, the notes of the separated bass \
+        part are tracked and a tone is added an octave under each one, as \
+        loud as the bass is there, so it follows the line note for note and \
+        stops where the bass stops.
+
+        An octave under, never on the note: a tone on the bass's own pitch \
+        would add to it on one note and cancel it on the next. A note \
+        already under 56 Hz is left alone -- it is in the sub band already, \
+        and an octave below it is too low to hear. A note above 150 Hz gets \
+        a tone two octaves down.
+
+        How much of the sub goes under the bass and how much under the \
+        kicks follows where the track's low end already is: mostly the bass \
+        on a record whose bass carries it, mostly the kicks on disco. The \
+        total added is the same as without this setting; only where it goes \
+        changes. As with the kicks, the separated bass only decides the \
+        notes: the tone is made fresh and added to the untouched original.
+
+        Needs "Find kicks on the drum track". Tracks separated before this \
+        setting existed are separated once more, to keep their bass part.
+        """)
+
     static let punch = HelpEntry(
         title: "Punch",
         summary: "Attack emphasis on each kick, in 2-6 kHz. Adds no energy.",
@@ -721,7 +749,7 @@ enum Help {
         HelpSection("Clipped peaks", [declip, declipMax]),
         HelpSection("Sub bass", [amount, auto, reference, maxAmount, subOffset,
                                  minActivity,
-                                 stemKicks]),
+                                 stemKicks, bassSub]),
         HelpSection("Attack", [punch, punchDecay]),
         HelpSection("Dynamics", [targetLRA, maxAttenuation, transient, minCrest]),
         HelpSection("Air", [air, airFixed, airStems, airTune]),

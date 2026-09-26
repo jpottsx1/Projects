@@ -61,6 +61,10 @@ FIELDS = {
     # Air where vocals and instruments carry the top end, and not where
     # hi-hats and cymbals do. Needs Demucs, like `stem_kicks`.
     "air_stems": False,
+    # With `stem_kicks`: part of the sub follows the bassline -- a tone an
+    # octave under the bass notes -- in proportion to how much of the low
+    # end the bass carries (bassline.py).
+    "bass_sub": False,
 }
 
 BUILT_IN = {

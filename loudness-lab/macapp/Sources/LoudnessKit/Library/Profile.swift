@@ -47,6 +47,9 @@ public struct Profile: Codable, Equatable, Sendable {
     // that follows the vocals and instruments rather than the hi-hats.
     public var airFixed: Bool = false
     public var airStems: Bool = false
+    // With stemKicks: part of the sub follows the bassline, a tone an
+    // octave under the bass notes.
+    public var bassSub: Bool = false
 
     public init() {}
 
@@ -69,6 +72,7 @@ public struct Profile: Codable, Equatable, Sendable {
         case stemKicks = "stem_kicks"
         case airFixed = "air_fixed"
         case airStems = "air_stems"
+        case bassSub = "bass_sub"
     }
 
     /// Tolerant of a key that is not there, which the synthesised decoder
@@ -116,6 +120,8 @@ public struct Profile: Codable, Equatable, Sendable {
             ?? fallback.airFixed
         airStems = try values.decodeIfPresent(Bool.self, forKey: .airStems)
             ?? fallback.airStems
+        bassSub = try values.decodeIfPresent(Bool.self, forKey: .bassSub)
+            ?? fallback.bassSub
     }
 
     public static let estimators = ["lufs_i", "s_p50", "s_p90", "s_p95", "s_max"]

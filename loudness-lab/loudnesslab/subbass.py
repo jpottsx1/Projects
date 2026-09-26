@@ -656,7 +656,20 @@ def _blank_report(amount_db: float) -> dict:
     return {"kicks": 0, "kicks_per_minute": 0.0, "requested_db": amount_db,
             "applied_db": 0.0, "polarity_flipped": False,
             "safety_trim_db": 0.0, "punch_db": 0.0, "sustain_trim_db": 0.0,
-            "band_level_change_db": 0.0, "note": None}
+            "band_level_change_db": 0.0, "note": None, "bass_share": 0.0}
+
+
+def _share_out(bursts: np.ndarray, tone: np.ndarray, share: float,
+               rate: int) -> np.ndarray:
+    """Bursts and tone mixed so the tone carries `share` of the energy in
+    the sub band. They are at different moments and pitches, so their
+    energies add; each is first brought to unit energy in the band."""
+    def unit(y):
+        energy = float(np.mean(_band(y, rate, SUB_LOW_HZ, SUB_HIGH_HZ) ** 2))
+        return y / np.sqrt(energy) if energy > 0 else y * 0.0
+    share = float(np.clip(share, 0.0, 1.0))
+    return (np.sqrt(1 - share) * unit(bursts)
+            + np.sqrt(share) * unit(tone[:bursts.size])).astype(np.float32)
 
 
 def enhance(x: np.ndarray, rate: int, amount_db: float = 5.0,
@@ -665,7 +678,8 @@ def enhance(x: np.ndarray, rate: int, amount_db: float = 5.0,
             punch_db: float = 0.0,
             punch_decay_ms: float = DEFAULT_PUNCH_DECAY_MS,
             drums: np.ndarray | None = None,
-            kicks: tuple[np.ndarray, np.ndarray] | None = None
+            kicks: tuple[np.ndarray, np.ndarray] | None = None,
+            bassline: tuple[np.ndarray, float] | None = None
             ) -> tuple[np.ndarray, dict]:
     """Add `amount_db` of energy to the 31.5-63 Hz octave, under the kicks.
 
@@ -674,6 +688,13 @@ def enhance(x: np.ndarray, rate: int, amount_db: float = 5.0,
     stem, so nothing the separator got wrong reaches the audio. `kicks`, if
     given, is (offsets, strengths) already found and filtered -- see
     `select_kicks` -- and is used as it is.
+
+    `bassline`, if given, is (tone, share): a tone under the bass notes
+    (`bassline.tone`) and the part of the added energy it gets. The kick
+    bursts and the tone are each brought to the same energy in the band,
+    mixed share to share, and the one gain then sized for `amount_db` as
+    before -- so the lift is what was asked for, only split. A track with
+    too few kicks for bursts can still take the whole of it on the tone.
 
     Returns the new audio and a report of what was actually done, because the
     point of a prototype is to be checked rather than believed.
@@ -691,7 +712,10 @@ def enhance(x: np.ndarray, rate: int, amount_db: float = 5.0,
     report["kicks"] = int(kicks.size)
     report["kicks_per_minute"] = (kicks.size / (x.shape[0] / rate / 60)
                                   if x.shape[0] else 0.0)
-    if kicks.size < 8:
+    tone, share = bassline if bassline is not None else (None, 0.0)
+    has_tone = tone is not None and float(np.mean(np.square(tone))) > 0
+    report["bass_share"] = float(share) if has_tone else 0.0
+    if kicks.size < 8 and (not has_tone or amount_db <= 0):
         report["note"] = "too few kick onsets to work from"
         return x, report
 
@@ -701,7 +725,11 @@ def enhance(x: np.ndarray, rate: int, amount_db: float = 5.0,
         report.update(punch_info)
         return out, report
 
-    sub = _lay_bursts(x.shape[0], rate, kicks, strengths, freq, decay_s)
+    sub = (_lay_bursts(x.shape[0], rate, kicks, strengths, freq, decay_s)
+           if kicks.size >= 8 else np.zeros(x.shape[0], dtype=np.float32))
+    if has_tone:
+        sub = _share_out(sub, tone, share if kicks.size >= 8 else 1.0, rate)
+        report["bass_share"] = float(share if kicks.size >= 8 else 1.0)
     if float(np.mean(sub ** 2)) <= 0:
         report["note"] = "synthesis produced nothing"
         return x, report

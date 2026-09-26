@@ -418,6 +418,17 @@ class TestTheStageUsesTheStem(unittest.TestCase):
         used = result["kicks_per_minute"] * seconds / 60
         self.assertLess(used, 1.2 * truth.size)
 
+    def test_where_no_grid_fits_the_stage_sets_other_drums_aside_by_sound(self):
+        drums, truth, _ = _tresillo()
+        rng = np.random.default_rng(3)
+        self.mix = (drums + 0.05 * rng.standard_normal(drums.shape)).astype(np.float32)
+        stems.store_kick_source(self.cache, self.mix, RATE, drums)
+        result = self.run_one(self.job(bpm=110.0))
+        self.assertEqual(result["status"], "ok", result.get("reason"))
+        self.assertIn("not the kick's sound", result["reason"])
+        used = result["kicks_per_minute"] * self.mix.shape[0] / RATE / 60
+        self.assertAlmostEqual(used, truth.size, delta=0.1 * truth.size)
+
     def test_the_sub_is_tuned_to_a_70_hz_kick(self):
         """Stage level: a 70 Hz kick gets its sub at 35 Hz, and the energy
         that goes in is there -- not at the old fixed 45."""
@@ -929,16 +940,16 @@ class TestTheKickReport(unittest.TestCase):
     def setUpClass(cls):
         cls.drums, _, _ = fixtures.backbeat(seconds=40.0)
 
-    def run_report(self, cache):
+    def run_report(self, cache, drums=None, bpm=104.0):
         """(the report, how many times it separated)."""
         from loudnesslab import decode
-        drums = self.drums
+        drums = self.drums if drums is None else drums
         parts = {"drums": drums, "bass": np.zeros_like(drums),
                  "other": np.zeros_like(drums), "vocals": np.zeros_like(drums)}
         out = io.StringIO()
         with mock.patch.object(decode, "require_tools"), \
                 mock.patch.object(decode, "find_audio", return_value=[Path("a.mp3")]), \
-                mock.patch.object(decode, "probe", return_value={"bpm": 104.0}), \
+                mock.patch.object(decode, "probe", return_value={"bpm": bpm}), \
                 mock.patch.object(decode, "decode", return_value=drums), \
                 mock.patch.object(stems, "separate", return_value=parts) as separate, \
                 contextlib.redirect_stdout(out):
@@ -981,9 +992,16 @@ class TestTheKickReport(unittest.TestCase):
         self.assertAlmostEqual(float(np.std(kept["drums"][middle, 0])),
                                float(np.std(tone[middle])), delta=0.01)
 
+    def test_it_says_where_processing_uses_the_sound_filter(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            text, _ = self.run_report(Path(tmp), _tresillo()[0], 110.0)
+        self.assertIn("processing uses the sound filter here", text)
+
     def test_it_prints_the_sound_column_and_line(self):
         with tempfile.TemporaryDirectory() as tmp:
             text, _ = self.run_report(Path(tmp))
+        # The backbeat fits a grid on weight alone: no sound filter there.
+        self.assertNotIn("processing uses the sound filter", text)
         self.assertIn("demucs+sound", text)
         line = next(l for l in text.splitlines() if "by sound:" in l)
         self.assertIn("then grid: eighths", line)
@@ -1121,6 +1139,87 @@ class TestAKickUnderAnotherSound(unittest.TestCase):
         kept, _, report = self.select(drums, 116.0)
         self.assertEqual(report["kick_under_another_sound"], 0)
         self.assertLess(fixtures.score(kept, layers)[0], 0.05)
+
+
+
+def _tresillo(scattered_per_beat: float = 1.5, seconds: float = 40.0,
+              bpm: float = 110.0, seed: int = 0):
+    """Domino Dancing's case: a sparse, syncopated kick -- three a bar on
+    the sixteenths, 3-3-2 -- among heavy low percussion landing anywhere,
+    often enough that no grid fits until it is set aside.
+    Returns (drums, kick times, percussion times)."""
+    rng = np.random.default_rng(seed)
+    n, beat = int(seconds * RATE), 60 / bpm
+    track = np.zeros(n)
+    kicks, other = [], []
+    for bar in np.arange(0.5, seconds - 2, 4 * beat):
+        for sixteenth in (0, 3, 6):
+            at = bar + sixteenth * beat / 4
+            fixtures._place(track, at, 0.9 * fixtures._kick(int(0.3 * RATE), rng))
+            kicks.append(at)
+    for _ in range(int(scattered_per_beat * (seconds - 2) / beat)):
+        at = rng.uniform(0.5, seconds - 1.5)
+        if np.min(np.abs(np.array(kicks) - at)) < 0.13:
+            continue
+        fixtures._place(track, at, 0.9 * fixtures._tom(int(0.35 * RATE),
+                                                      rng.choice([64, 72, 85])))
+        other.append(at)
+    track = track / np.abs(track).max() * 0.8
+    return (np.stack([track, track], axis=1).astype(np.float32),
+            np.array(kicks), np.array(sorted(other)))
+
+
+class TestChoosingTheKicks(unittest.TestCase):
+    """`choose_kicks`, what processing uses: the kick-sound filter only
+    where no grid fits without it."""
+
+    def test_it_steps_in_where_no_grid_fits(self):
+        drums, truth, other = _tresillo()
+        kicks, strengths = subbass.detect_kicks(drums, RATE, drums)
+        _, _, plain = subbass.select_kicks(drums, RATE, kicks, strengths, 110.0)
+        self.assertIsNone(plain["grid_bpm"])
+        kept, _, report = subbass.choose_kicks(drums, RATE, kicks, strengths, 110.0)
+        self.assertTrue(report["by_sound"])
+        self.assertEqual(report["grid_step"], 4)
+        recall, precision, _ = fixtures.score(kept, truth)
+        self.assertGreaterEqual(precision, 0.98)
+        self.assertGreaterEqual(recall, 0.9)
+        self.assertLess(fixtures.score(kept, other)[0], 0.05)
+        self.assertIn("not the kick's sound",
+                      subbass.describe_selection(report, 110.0))
+
+    def test_where_a_grid_fits_nothing_changes(self):
+        # Vogue's kind: the grid fits on weight alone, so the result is
+        # exactly what it was before the sound filter existed.
+        for drums in (_layered(True)[0], fixtures.backbeat(seconds=30.0)[0]):
+            kicks, strengths = subbass.detect_kicks(drums, RATE, drums)
+            bpm = 116.0 if drums.shape[0] == int(40.0 * RATE) else 104.0
+            plain = subbass.select_kicks(drums, RATE, kicks, strengths, bpm)
+            chosen = subbass.choose_kicks(drums, RATE, kicks, strengths, bpm)
+            self.assertIsNotNone(plain[2]["grid_bpm"])
+            self.assertFalse(chosen[2]["by_sound"])
+            np.testing.assert_array_equal(plain[0], chosen[0])
+
+    def test_no_grid_either_way_keeps_what_weight_chose(self):
+        # Tell It to My Heart's case: the sound filter finds no grid
+        # either, so it is not used -- weight alone decides, as before.
+        drums, _, _ = _tresillo()
+        kicks, strengths = subbass.detect_kicks(drums, RATE, drums)
+        plain = subbass.select_kicks(drums, RATE, kicks, strengths, 97.0)
+        by_sound = subbass.select_kicks(drums, RATE, kicks, strengths, 97.0,
+                                        by_sound=True)
+        self.assertIsNone(by_sound[2]["grid_bpm"])
+        chosen = subbass.choose_kicks(drums, RATE, kicks, strengths, 97.0)
+        self.assertFalse(chosen[2]["by_sound"])
+        np.testing.assert_array_equal(plain[0], chosen[0])
+
+    def test_no_tag_no_sound_filter(self):
+        drums, _, _ = _tresillo()
+        kicks, strengths = subbass.detect_kicks(drums, RATE, drums)
+        plain = subbass.select_kicks(drums, RATE, kicks, strengths, None)
+        chosen = subbass.choose_kicks(drums, RATE, kicks, strengths, None)
+        self.assertFalse(chosen[2]["by_sound"])
+        np.testing.assert_array_equal(plain[0], chosen[0])
 
 
 if __name__ == "__main__":

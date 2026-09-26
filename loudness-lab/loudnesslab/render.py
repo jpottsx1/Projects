@@ -126,10 +126,12 @@ def one(job: dict) -> dict:
                         + (f" ({job['stem_error']})" if job.get("stem_error") else ""))
             elif amount > 0:
                 # Every drum hit with an attack in the kick band, then only
-                # the ones heavy enough to be a kick and on the beat.
+                # the ones heavy enough to be a kick and on the beat -- and,
+                # where no beat grid fits that way, the ones that sound like
+                # the kick (subbass.choose_kicks).
                 kicks, strengths = subbass.detect_kicks(
                     audio, decode.TARGET_RATE, drums)
-                kicks, strengths, selection = subbass.select_kicks(
+                kicks, strengths, selection = subbass.choose_kicks(
                     drums, decode.TARGET_RATE, kicks, strengths, job.get("bpm"))
                 found = (kicks, strengths)
                 # Tune the burst to this track's kick, measured where the

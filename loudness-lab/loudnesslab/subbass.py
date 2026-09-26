@@ -353,6 +353,36 @@ def select_kicks(drums: np.ndarray, rate: int, kicks: np.ndarray,
     return kicks, strengths, report
 
 
+def choose_kicks(drums: np.ndarray, rate: int, kicks: np.ndarray,
+                 strengths: np.ndarray, tagged_bpm: float | None
+                 ) -> tuple[np.ndarray, np.ndarray, dict]:
+    """`select_kicks` as processing uses it: weight and grid, and the
+    kick-sound filter only where no grid fits without it.
+
+    Measured on 35 records (1980, 1988, 1990 reports, 2026-09-26): where
+    a grid already fits, the sound filter mostly takes kicks away -- Vogue
+    8 a minute, Celebration 26, Another One Bites the Dust 17 -- hits that
+    hold only 0.3-0.5 of a kick and that the reports could not settle as
+    kick or not. Where no grid fits, it is what makes one fit: Domino
+    Dancing 0.315 -> 0.609, What Time Is Love 0.349 -> 0.624, both on
+    sixteenths, because the other heavy drums had been pulling the fit.
+    If the sound filter finds no grid either (Tell It to My Heart), the
+    track keeps what weight alone chose, as before.
+
+    `report["by_sound"]` says which was used."""
+    kept, kept_strengths, report = select_kicks(drums, rate, kicks, strengths,
+                                                tagged_bpm)
+    report["by_sound"] = False
+    if (report["grid_bpm"] is None and tagged_bpm is not None
+            and np.isfinite(tagged_bpm) and tagged_bpm > 0):
+        by_sound = select_kicks(drums, rate, kicks, strengths, tagged_bpm,
+                                by_sound=True)
+        if by_sound[2]["grid_bpm"] is not None:
+            kept, kept_strengths, report = by_sound
+            report["by_sound"] = True
+    return kept, kept_strengths, report
+
+
 def describe_selection(report: dict, tagged_bpm: float | None) -> str | None:
     """One line on what select_kicks did, or None if it changed nothing
     worth saying. For the log, so a track whose sub went under fewer hits
@@ -365,11 +395,15 @@ def describe_selection(report: dict, tagged_bpm: float | None) -> str | None:
     elif report["grid_step"] and report["grid_step"] > 1:
         grid = (f"; on a grid of {('', '', 'eighths', '', 'sixteenths')[report['grid_step']]} "
                 f"at {report['grid_bpm']:.0f} BPM")
-    if not (report["not_kick_shaped"] or report["off_grid"] or grid):
+    sound = ""
+    if report.get("by_sound"):
+        sound = (f", {report['not_the_kick']} not the kick's sound -- no beat "
+                 f"grid fitted until they were set aside")
+    if not (report["not_kick_shaped"] or report["off_grid"] or grid or sound):
         return None
     return (f"kicks: kept {kept} of {report['found']} drum hits "
             f"({report['not_kick_shaped']} too light, "
-            f"{report['off_grid']} off the beat){grid}")
+            f"{report['off_grid']} off the beat{sound}){grid}")
 
 
 def _backtrack(peaks: np.ndarray, fast: np.ndarray, rate: int) -> np.ndarray:

@@ -591,8 +591,12 @@ def measure_files(paths: list[Path], backends: list[str],
             if sound_report["grid_bpm"]:
                 against[backend + "+sound"] = (sound_report["grid_bpm"]
                                                * sound_report["grid_step"])
+            used = (report["grid_bpm"] is None and tagged
+                    and sound_report["grid_bpm"] is not None)
             notes.append(sound_line(drums, by_sound, sound_report, tagged,
-                                    minutes, kicks, strengths))
+                                    minutes, kicks, strengths)
+                         + ("\n        processing uses the sound filter here: no "
+                            "grid fits without it" if used else ""))
             notes.extend(gaps(drums, kicks, kept, RATE, tagged, x.shape[0]))
         cells = []
         for name in columns:

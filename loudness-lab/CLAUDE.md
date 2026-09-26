@@ -954,10 +954,33 @@ without a tag; four breakages each caught. The report counts them ("kept
 back as a kick under another sound") and gives the kick in what is
 still dropped.
 
-**Measured only.** The report prints a `+sound` column and a `by sound:`
-line (dropped, grid and fit after, kicks a minute, match, ms from the
-grid); processing does not use it. It goes in if Domino Dancing and Tell
-It to My Heart get a grid that fits, and the clean tracks lose nothing.
+**Fifth run (b6b707f, 35 records): in processing only where no grid fits.**
+Putting back on-grid hits with the whole kick in them fixed INXS (13 put
+back, 104 of 105 kicks a minute) and Straight Up (10). It did nothing for
+Vogue or Celebration: their dropped hits hold only 0.3-0.5 of a kick, so
+they are not kicks with a layer but another low sound at kick level (or,
+on Celebration's live kit, kicks played very differently). The reports
+cannot settle which. Where a grid fits on weight alone the sound filter
+mostly takes kicks away (Vogue 8 a minute, Celebration 26, Another One
+Bites the Dust 17); where none fits it is what makes one fit (Domino
+Dancing 0.315 -> 0.609, What Time Is Love 0.349 -> 0.624).
+
+So processing uses `subbass.choose_kicks`: weight and grid as before, and
+the sound filter only when no grid fits without it AND one fits with it;
+otherwise weight alone, as before (Tell It to My Heart). The log names the
+hits set aside by sound; the report says "processing uses the sound
+filter here". Tested on a synthetic tresillo (three kicks a bar on the
+sixteenths among heavy percussion landing anywhere): no grid on weight
+(0.42), sixteenths at 0.987 by sound, precision 1.00 and every tom gone.
+Five breakages caught. The first thing from the stems work that changes
+what is heard; it wants an A/B by ear on Domino Dancing.
+
+**Report speed.** 13 minutes for 35 already-separated tracks, about 22 s
+a track. Profiled on a four-minute synthetic track (17 s): nearly all of
+it is `sosfiltfilt` over full-rate audio -- 21 passes, because the report
+computes every variant side by side. Left as it is while the variants are
+being compared; dropping the comparison columns once settled should
+roughly halve it.
 
 ### Air: why none arrived, and air that follows the stems
 

@@ -419,21 +419,30 @@ def sound_line(drums: np.ndarray, kept: np.ndarray, report: dict,
         # the weight filter, then not the kick. Many of them on a beat, on
         # a four-on-the-floor record, would mean kicks are being lost.
         heavy, _, _ = subbass.select_kicks(drums, RATE, found, strengths, None)
-        same, match, moved = machine.sounds_like_the_kick(drums, RATE, heavy,
-                                                          shifts=True)
-        dropped = heavy[~same]
+        sound = machine.sounds_like_the_kick(drums, RATE, heavy, detail=True)
+        # Dropped: not the kick's sound, and not taken back as a kick under
+        # another sound either.
+        out = ~sound["keep"] & ~np.isin(heavy, kept)
+        dropped = heavy[out]
         on = on_a_beat(dropped, kept, RATE, bpm, which=True)
         beat = f" ({on.sum()} of them on a beat"
         if on.any():
-            # Kicks that almost match, or another sound? And did lining
-            # them up run out of room (a kick found further off than 12 ms)?
-            m = match[~same][on]
-            edge = np.abs(moved[~same][on]) >= machine.SOUND_SHIFT_S * 1000 - 0.5
+            # Kicks that almost match, or another sound? Is the kick in
+            # them? And did lining them up run out of room (a kick found
+            # further off than 12 ms)?
+            m = sound["match"][out][on]
+            c = sound["content"][out][on]
+            edge = np.abs(sound["moved"][out][on]) >= machine.SOUND_SHIFT_S * 1000 - 0.5
             beat += (f", matching {np.percentile(m, 10):.2f}-"
                      f"{np.percentile(m, 90):.2f} (median {np.median(m):.2f}), "
+                     f"kick in them {np.percentile(c, 10):.2f}-"
+                     f"{np.percentile(c, 90):.2f}, "
                      f"{edge.sum()} at the alignment limit")
         beat += ")"
         spans = dropped_spans(dropped[on], kept, RATE, bpm)
+    if report.get("kick_under_another_sound"):
+        beat += (f"; {report['kick_under_another_sound']} kept back as a kick "
+                 f"under another sound")
     line = (f"by sound: dropped {report['not_the_kick']} not the kick's sound{beat}, "
             f"then grid: {step} (fit {report['grid_coherence']}); "
             f"{kept.size / minutes:.0f} kicks/min")

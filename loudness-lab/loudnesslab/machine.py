@@ -131,11 +131,23 @@ SOUND_SAMPLE = 200              # hits enough to learn the sound from
 # percentile.
 MIN_SOUND_MATCH = 0.8
 
+# A hit ON the grid that does not sound like the kick may still be one,
+# with something sampled on top: Vogue, INXS and Celebration dropped
+# 17-73 on-beat hits each, all matching the kick at a steady 0.38-0.51 --
+# one layered sound, every time. How much of the kick is in the hit tells:
+# on a synthetic kit with a layer tuned to Vogue's 0.51, the kick with the
+# layer holds 1.27 of a kick, the layer alone 0.67 (0.35 at half that
+# level). Only for hits on the grid fitted to the clean kicks, so toms and
+# scratches between the beats cannot come back this way.
+MIN_KICK_CONTENT = 0.85
+CONTENT_NEIGHBOURS = 16
+
 
 def _sound_windows(drums: np.ndarray, rate: int, hits: np.ndarray,
-                   shift: int) -> tuple[np.ndarray, np.ndarray]:
+                   shift: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Per hit, the kick-band window at each shift -- (hits, shifts, length),
-    unit-normalised -- and which hits had room for one."""
+    unit-normalised -- which hits had room for one, and each window's
+    level before normalising (hits, shifts)."""
     from scipy.signal import resample_poly
     mono = drums.mean(axis=1) if drums.ndim == 2 else drums
     band = sosfiltfilt(butter(4, SOUND_BAND_HZ, btype="band", fs=rate,
@@ -148,11 +160,11 @@ def _sound_windows(drums: np.ndarray, rate: int, hits: np.ndarray,
     idx = at[room, None, None] + offsets[None, :, None] + np.arange(length)[None, None, :]
     windows = low[idx]
     norms = np.linalg.norm(windows, axis=2, keepdims=True)
-    return windows / np.maximum(norms, 1e-30), room
+    return windows / np.maximum(norms, 1e-30), room, norms[..., 0]
 
 
 def sounds_like_the_kick(drums: np.ndarray, rate: int, hits: np.ndarray,
-                         shifts: bool = False):
+                         detail: bool = False):
     """(keep, match): which hits sound like the track's kick, and how much.
 
     The kick's sound is learned from the hits themselves: the one that
@@ -168,17 +180,29 @@ def sounds_like_the_kick(drums: np.ndarray, rate: int, hits: np.ndarray,
     Fewer than 8 hits, or none with room either side: everything is kept,
     as there is nothing to learn a sound from.
 
-    With `shifts`, a third array: how far (ms) each hit was moved to line
-    up best. A hit at the limit (SOUND_SHIFT_S) may have wanted further.
+    With `detail`, a dict instead, adding per hit:
+    - `moved`: how far (ms) it was moved to line up best. A hit at the
+      limit (SOUND_SHIFT_S) may have wanted further.
+    - `content`: how much of the kick is IN it, against the kept kicks
+      nearest it -- the template's component of the hit, at its best
+      alignment. A kick with a clap sampled on top keeps its whole kick
+      (about 1 or more) though its match falls; a clap alone has little
+      (see MIN_KICK_CONTENT).
     """
     keep = np.ones(hits.size, dtype=bool)
     match = np.ones(hits.size)
     moved = np.zeros(hits.size)
-    done = (lambda: (keep, match, moved)) if shifts else (lambda: (keep, match))
+    content = np.ones(hits.size)
+
+    def done():
+        if detail:
+            return {"keep": keep, "match": match, "moved": moved,
+                    "content": content}
+        return keep, match
     if hits.size < 8:
         return done()
     shift = int(round(SOUND_SHIFT_S * SOUND_RATE))
-    windows, room = _sound_windows(drums, rate, hits, shift)
+    windows, room, levels = _sound_windows(drums, rate, hits, shift)
     if windows.shape[0] < 8:
         return done()
     centred = windows[:, shift]
@@ -196,7 +220,18 @@ def sounds_like_the_kick(drums: np.ndarray, rate: int, hits: np.ndarray,
     unit = template / max(float(np.linalg.norm(template)), 1e-30)
     every = windows @ unit
     scored = every.max(axis=1)
+    at = np.argmax(every, axis=1)
     match[room] = scored
-    moved[room] = (np.argmax(every, axis=1) - shift) * 1000.0 / SOUND_RATE
+    moved[room] = (at - shift) * 1000.0 / SOUND_RATE
     keep[room] = scored >= MIN_SOUND_MATCH
+    # The kick's component of each hit, against the kept kicks nearest it,
+    # so a quiet verse's kicks are measured against the verse.
+    component = scored * levels[np.arange(at.size), at]
+    placed = hits[room]
+    kicks_at, kicks_of = placed[scored >= MIN_SOUND_MATCH], component[scored >= MIN_SOUND_MATCH]
+    if kicks_at.size:
+        near = np.argsort(np.abs(placed[:, None] - kicks_at[None, :]), axis=1)
+        near = near[:, :CONTENT_NEIGHBOURS]
+        typical = np.median(kicks_of[near], axis=1)
+        content[room] = component / np.maximum(typical, 1e-30)
     return done()

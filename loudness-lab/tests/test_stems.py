@@ -886,8 +886,8 @@ class TestTheKicksOwnSound(unittest.TestCase):
         hits = (onsets * RATE).astype(int)
         hits[1::4] -= int(0.008 * RATE)
         hits[3::4] -= int(0.020 * RATE)
-        keep, match, moved = machine.sounds_like_the_kick(drums, RATE, hits,
-                                                          shifts=True)
+        sound = machine.sounds_like_the_kick(drums, RATE, hits, detail=True)
+        keep, moved = sound["keep"], sound["moved"]
         limit = machine.SOUND_SHIFT_S * 1000
         self.assertTrue(keep[1::4].all())
         # Against the usual move of an unshifted kick (the first, at
@@ -993,6 +993,7 @@ class TestTheKickReport(unittest.TestCase):
         dropped = int(re.search(r"dropped (\d+) not the kick", line).group(1))
         self.assertTrue(0 < on_beat < dropped, line)
         self.assertRegex(line, r"matching \d\.\d\d-\d\.\d\d \(median \d\.\d\d\), "
+                               r"kick in them \d\.\d\d-\d\.\d\d, "
                                r"\d+ at the alignment limit\)")
         self.assertIn("ms from the grid", line)
         summary = text[text.index("implied tempo"):]
@@ -1043,6 +1044,83 @@ class TestWhereTheDroppedHitsAre(unittest.TestCase):
         line = fixtures.sound_line(drums, kept, report, 116.0, 50 / 60,
                                    kicks, strengths)
         self.assertRegex(line, r"where: 0:(19|20)\.\d-0:3[12]\.\d \d+ dropped, 0 kept")
+
+
+
+def _layered(kick_under_it: bool, seconds: float = 40.0, bpm: float = 116.0,
+             seed: int = 0, between_beats: bool = False):
+    """Vogue's pattern, as the reports measured it: a kick on 1 and 3,
+    and on 2 and 4 a heavy layered sound -- a low body and a snare -- with
+    (or without) the kick under it. The layer is set so the kick under it
+    matches the kick alone at about 0.5, where Vogue's read 0.46-0.51.
+    `between_beats` moves every layered hit (kick and all) half a beat
+    later, off the quarter grid, and puts a plain kick on every beat.
+    Returns (drums, kick times, layer times)."""
+    rng = np.random.default_rng(seed)
+    n, beat = int(seconds * RATE), 60 / bpm
+    t = np.arange(int(0.3 * RATE)) / RATE
+    body = (np.sin(2 * np.pi * np.cumsum(95 * (1 + 0.3 * np.exp(-t * 40))) / RATE)
+            * np.exp(-t * 30))
+    track = np.zeros(n)
+    kicks, layers = [], []
+    for i, b in enumerate(np.arange(0.5, seconds - 1, beat)):
+        at = b + beat / 2 if between_beats else b
+        if between_beats:
+            fixtures._place(track, b, 0.9 * fixtures._kick(t.size, rng))
+            kicks.append(b)
+        if (i % 2 == 0 and not between_beats) or (i % 2 == 1 and kick_under_it):
+            fixtures._place(track, at, 0.9 * fixtures._kick(t.size, rng))
+            kicks.append(at)
+        if i % 2 == 1:
+            fixtures._place(track, at, 3.0 * body + 0.5 * fixtures._snare(t.size, rng))
+            layers.append(at)
+    track = track / np.abs(track).max() * 0.8
+    return (np.stack([track, track], axis=1).astype(np.float32),
+            np.array(sorted(kicks)), np.array(layers))
+
+
+class TestAKickUnderAnotherSound(unittest.TestCase):
+    """On the beat, the whole kick in it, something else on top: kept."""
+
+    def select(self, drums, bpm):
+        kicks, strengths = subbass.detect_kicks(drums, RATE, drums)
+        return subbass.select_kicks(drums, RATE, kicks, strengths, bpm,
+                                    by_sound=True)
+
+    def test_the_kicks_under_the_layer_are_kept(self):
+        drums, truth, layers = _layered(True)
+        from loudnesslab import machine
+        hits = (truth * RATE).astype(int)
+        _, match = machine.sounds_like_the_kick(drums, RATE, hits)
+        # The pattern reproduced: the layered kicks sound half like the kick.
+        self.assertAlmostEqual(float(np.median(match[1::2])), 0.5, delta=0.1)
+        kept, _, report = self.select(drums, 116.0)
+        recall, precision, _ = fixtures.score(kept, truth)
+        self.assertGreaterEqual(recall, 0.98)
+        self.assertGreaterEqual(precision, 0.98)
+        self.assertGreaterEqual(report["kick_under_another_sound"], 0.9 * layers.size)
+
+    def test_the_layer_alone_is_not(self):
+        drums, truth, layers = _layered(False)
+        kept, _, report = self.select(drums, 116.0)
+        self.assertLess(fixtures.score(kept, layers)[0], 0.05)
+        self.assertGreaterEqual(fixtures.score(kept, truth)[0], 0.98)
+        self.assertEqual(report["kick_under_another_sound"], 0)
+
+    def test_only_on_the_grid(self):
+        # The heavy toms on the "and" are off a quarter grid, whatever is
+        # in them; and with no tag there is no grid to put anything back on.
+        drums, truth, toms = _kit_with_heavy_toms()
+        kept, _, _ = self.select(drums, 110.0)
+        self.assertLess(fixtures.score(kept, toms)[0], 0.05)
+        drums, truth, layers = _layered(True)
+        _, _, report = self.select(drums, None)
+        self.assertEqual(report["kick_under_another_sound"], 0)
+        # The whole kick in it, but between the beats: stays out.
+        drums, truth, layers = _layered(True, between_beats=True)
+        kept, _, report = self.select(drums, 116.0)
+        self.assertEqual(report["kick_under_another_sound"], 0)
+        self.assertLess(fixtures.score(kept, layers)[0], 0.05)
 
 
 if __name__ == "__main__":

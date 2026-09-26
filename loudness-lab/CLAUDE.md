@@ -934,6 +934,26 @@ several drums. Next question, now in the report: do those hits nearly
 match (just under 0.8) or not at all, and how many ran out of alignment
 at 12 ms.
 
+**Fourth run (be49ea3, 1988, 1990 and 1980): what the dropped on-beat
+hits are.** Vogue's 45 match the kick at 0.46-0.51, INXS's 17 at
+0.38-0.46, Celebration's 73 at 0.43-0.51 -- tight, one recurring sound,
+half like the kick, and hardly any at the alignment limit: a kick with
+something sampled on it, every time. Pump Up the Volume's are 0.05-0.42,
+median 0.11: other sounds from the collage, rightly dropped. The saved
+separations were confirmed too: the 1988 section came out identical,
+number for number, to the run that separated it.
+
+So a hit ON the fitted grid that does not sound like the kick is kept
+anyway when the whole kick is in it (`MIN_KICK_CONTENT` 0.85: the kick's
+component of the hit against the kept kicks nearest it). Loosening the
+match would not do: a snare alone reads 0.35 and a layered kick 0.5. On a
+synthetic kit reproducing Vogue's 0.5, the layered kick holds 1.27 of a
+kick and the layer alone 0.67. Tested: the layered kicks kept, the layer
+alone not, the whole kick between the beats not, and nothing put back
+without a tag; four breakages each caught. The report counts them ("kept
+back as a kick under another sound") and gives the kick in what is
+still dropped.
+
 **Measured only.** The report prints a `+sound` column and a `by sound:`
 line (dropped, grid and fit after, kicks a minute, match, ms from the
 grid); processing does not use it. It goes in if Domino Dancing and Tell

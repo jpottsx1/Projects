@@ -245,6 +245,29 @@ def _on_grid(kicks: np.ndarray, rate: int, bpm: float,
     return keep, float(np.median(firmness))
 
 
+def _on_grid_of(hits: np.ndarray, reference: np.ndarray, rate: int,
+                bpm: float, subdivision: int) -> np.ndarray:
+    """Which `hits` land within GRID_TOLERANCE of the grid that the
+    `reference` kicks sit on -- placed, as `_on_grid` places it, from the
+    reference kicks near each hit (the nearest eight beats' worth, or the
+    nearest eight kicks where none are that close)."""
+    period = 60.0 / bpm * rate / subdivision
+    tolerance = min(GRID_TOLERANCE, 0.25 / subdivision) * subdivision
+    angle = np.exp(2j * np.pi * ((reference / period) % 1.0))
+    reach = GRID_WINDOW_BEATS * period * subdivision
+    on = np.zeros(hits.size, dtype=bool)
+    if reference.size == 0:
+        return on
+    for i, h in enumerate(hits):
+        near = np.abs(reference - h) <= reach
+        if not near.any():
+            near = np.argsort(np.abs(reference - h))[:8]
+        centre = np.angle(angle[near].mean()) / (2 * np.pi)
+        offset = ((h / period) % 1.0 - centre + 0.5) % 1.0 - 0.5
+        on[i] = abs(offset) <= tolerance
+    return on
+
+
 def select_kicks(drums: np.ndarray, rate: int, kicks: np.ndarray,
                  strengths: np.ndarray, tagged_bpm: float | None,
                  by_sound: bool = False
@@ -272,15 +295,18 @@ def select_kicks(drums: np.ndarray, rate: int, kicks: np.ndarray,
     """
     report = {"found": int(kicks.size), "not_kick_shaped": 0, "off_grid": 0,
               "grid_bpm": None, "grid_step": None, "grid_coherence": None,
-              "strength_spread_db": None, "not_the_kick": 0}
+              "strength_spread_db": None, "not_the_kick": 0,
+              "kick_under_another_sound": 0}
     if kicks.size == 0:
         return kicks, strengths, report
     shaped = _kick_level_db(drums, rate, kicks) >= MIN_KICK_LEVEL_DB
     report["not_kick_shaped"] = int((~shaped).sum())
     kicks, strengths = kicks[shaped], strengths[shaped]
+    heavy = kicks
     if by_sound:
         from loudnesslab import machine
-        same, _ = machine.sounds_like_the_kick(drums, rate, kicks)
+        sound = machine.sounds_like_the_kick(drums, rate, kicks, detail=True)
+        same = sound["keep"]
         report["not_the_kick"] = int((~same).sum())
         kicks, strengths = kicks[same], strengths[same]
     if (kicks.size >= 8 and tagged_bpm is not None
@@ -295,6 +321,19 @@ def select_kicks(drums: np.ndarray, rate: int, kicks: np.ndarray,
         if coherence >= MIN_GRID_COHERENCE:
             report["grid_bpm"] = float(tagged_bpm)
             report["grid_step"] = step
+            if by_sound and (~same).any():
+                # Back in: hits on this grid with the whole kick in them,
+                # under something else (machine.MIN_KICK_CONTENT).
+                candidates = heavy[~same & (sound["content"] >= machine.MIN_KICK_CONTENT)]
+                back = candidates[_on_grid_of(candidates, kicks[grid], rate,
+                                              float(tagged_bpm), step)]
+                if back.size:
+                    report["kick_under_another_sound"] = int(back.size)
+                    report["not_the_kick"] -= int(back.size)
+                    order = np.argsort(np.concatenate([kicks, back]))
+                    kicks = np.concatenate([kicks, back])[order]
+                    strengths = np.concatenate([strengths, np.ones(back.size)])[order]
+                    grid = np.concatenate([grid, np.ones(back.size, dtype=bool)])[order]
             report["off_grid"] = int((~grid).sum())
             kicks, strengths = kicks[grid], strengths[grid]
     # Every kept kick gets the same burst. They were scaled by how hard

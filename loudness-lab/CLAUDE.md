@@ -858,21 +858,40 @@ track's kick, and runs between the weight filter and the grid, so the grid
 is fitted to kicks. Machine or drummer does not matter.
 
 - **Compared in 30-120 Hz only**, at 2 kHz, over 60 ms, lined up within
-  3 ms. On the synthetic kit: a kick again 1.00, a kick with a LinnDrum
-  snare on top 0.91-1.00 even with the snare half as loud again as the
-  kick, toms 0.12-0.41, a scratch 0.26, a clap 0.05, a snare 0.19. Across
+  12 ms (see below). On the synthetic kit: a kick again 1.00, a kick
+  with a LinnDrum snare on top 0.91-1.00 even with the snare half as loud
+  again as the kick; at 12 ms of alignment, toms 0.19-0.50, a clap 0.43,
+  a snare 0.35, a scratch 0.67 (at 3 ms they read lower). Across
   30-2000 Hz that loud snare takes the kick to 0.53 -- the mistake the
   first weight filter made, and a test holds it.
 - **The kick is the most common sound, not the heaviest.** The hit that
-  sounds like the most others (0.7 or better, `MIN_SOUND_MATCH`) is the
+  sounds like the most others (0.8 or better, `MIN_SOUND_MATCH`) is the
   kick; the ones like it make the template. A first version learned from
   the heaviest half, and a low tom that rang longer than the kick, half
   as often, became the template.
 - Synthetic results: the backbeat's precision 0.77 -> 1.00 with recall
-  1.00 -> 0.98, and its grid from sixteenths to eighths, which is what its
-  kicks are on; every other scenario keeps its kicks. The one kick lost
-  in each is the first in the file, at 0.000 s, whose onset the detector
-  places 10 ms late -- with a second of lead-in it matches at 0.9997.
+  still 1.00, and its grid from sixteenths to eighths, which is what its
+  kicks are on; every other scenario keeps every kick. (At 3 ms of
+  alignment each lost its first kick, at 0.000 s, whose onset the
+  detector places 10 ms late -- the same failure as below, in miniature.)
+
+**First real run (1988, 1990): it halved clean records.** Vogue 89 -> 58
+kicks a minute, Push It 110 -> 57, Pump Up the Volume 98 -> 52, Step By
+Step 97 -> 50, Unbelievable 142 -> 71; Kylie, Bananarama, Adamski and
+Buffalo Stance lost almost nothing, and Domino Dancing still fitted no
+grid (0.365). Exactly half, on four-on-the-floor, meant kicks on 2 and 4
+were one group and kicks on 1 and 3 another. Not the snare's sound: a
+synthetic sampled snare with a 110 Hz body at twice the kick's level
+left the kick under it matching at 0.95. The clue was the negative
+matches in the machine check (Robyn -0.19): a kick lined up half a
+cycle out of its own copy. A snare on top moves where the detector puts
+a kick's start, and a kick 8 ms off matched itself at -0.34 with the 3
+ms of alignment allowed. Now 12 ms (half a cycle at 40 Hz) and a match
+of 0.8: kicks 8 or 12 ms off read 1.00, the non-kicks 0.19-0.50, a
+scratch 0.67. Every synthetic scenario now keeps every kick, the first
+one in the file included. The report also says how many of the dropped
+hits land on a beat. Domino Dancing's kicks do sound alike (0.956) but
+sit on no 110 BPM grid at all, even sixteenths: its tag is suspect.
 
 **Measured only.** The report prints a `+sound` column and a `by sound:`
 line (dropped, grid and fit after, kicks a minute, match, ms from the

@@ -357,15 +357,41 @@ def machine_check(drums: np.ndarray, kept: np.ndarray, rate: int,
                else "no tag, no grid"))
 
 
+def on_a_beat(hits: np.ndarray, kept: np.ndarray, rate: int, bpm: float) -> int:
+    """How many of `hits` land within 12% of a beat, the beat placed from
+    the kept kicks within eight beats either side."""
+    period = 60.0 / bpm * rate
+    angle = np.exp(2j * np.pi * (kept / period))
+    count = 0
+    for h in hits:
+        near = np.abs(kept - h) <= 8 * period
+        if not near.any():
+            continue
+        centre = np.angle(angle[near].mean()) / (2 * np.pi)
+        offset = ((h / period) - centre + 0.5) % 1.0 - 0.5
+        count += abs(offset) <= subbass.GRID_TOLERANCE
+    return int(count)
+
+
 def sound_line(drums: np.ndarray, kept: np.ndarray, report: dict,
-               bpm: float | None, minutes: float) -> str:
+               bpm: float | None, minutes: float,
+               found: np.ndarray | None = None,
+               strengths: np.ndarray | None = None) -> str:
     """What the kick-sound filter did: how many hits it dropped as not the
     kick's sound, the grid fitted to what was left, and the machine check
     on that -- the numbers that said which tracks were mixing other drums
     in with the kick."""
     step = {1: "quarters", 2: "eighths", 4: "sixteenths"}.get(
         report["grid_step"], "none fitted")
-    line = (f"by sound: dropped {report['not_the_kick']} not the kick's sound, "
+    beat = ""
+    if bpm and found is not None and report["not_the_kick"] and kept.size:
+        # The hits the sound filter itself dropped: heavy enough to pass
+        # the weight filter, then not the kick. Many of them on a beat, on
+        # a four-on-the-floor record, would mean kicks are being lost.
+        heavy, _, _ = subbass.select_kicks(drums, RATE, found, strengths, None)
+        same, _ = machine.sounds_like_the_kick(drums, RATE, heavy)
+        beat = f" ({on_a_beat(heavy[~same], kept, RATE, bpm)} of them on a beat)"
+    line = (f"by sound: dropped {report['not_the_kick']} not the kick's sound{beat}, "
             f"then grid: {step} (fit {report['grid_coherence']}); "
             f"{kept.size / minutes:.0f} kicks/min")
     found = machine.kick_template(drums, RATE, kept)
@@ -462,7 +488,7 @@ def measure_files(paths: list[Path], backends: list[str]) -> int:
                 against[backend + "+sound"] = (sound_report["grid_bpm"]
                                                * sound_report["grid_step"])
             notes.append(sound_line(drums, by_sound, sound_report, tagged,
-                                    minutes))
+                                    minutes, kicks, strengths))
             notes.extend(gaps(drums, kicks, kept, RATE, tagged, x.shape[0]))
         cells = []
         for name in columns:

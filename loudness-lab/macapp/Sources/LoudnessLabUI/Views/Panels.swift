@@ -262,6 +262,10 @@ struct SettingsPanel: View {
                          sweet: 16...22)
                 Toggle("Find kicks on the drum track", isOn: $profile.stemKicks)
                     .help(Help.stemKicks.summary)
+                if profile.stemKicks {
+                    Toggle("Sub follows the bassline too", isOn: $profile.bassSub)
+                        .help(Help.bassSub.summary)
+                }
 
                 Divider()
 

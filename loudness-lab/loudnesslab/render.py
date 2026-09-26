@@ -19,8 +19,8 @@ from pathlib import Path
 
 import numpy as np
 
-from . import (air, bs1770, declip, decode, expand, spectrum, stems,
-               subbass, write)
+from . import (air, bassline, bs1770, declip, decode, expand, spectrum,
+               stems, subbass, write)
 
 
 def default_jobs() -> int:
@@ -118,6 +118,7 @@ def one(job: dict) -> dict:
         # parent had in hand when it separated.
         drums, found, selection = None, None, None
         freq, decay, voice = job["freq"], job["decay"], None
+        following, bass_note = None, None
         if job.get("stem_kicks"):
             drums = stems.load_kick_source(Path(job["stem_cache"]), original,
                                            decode.TARGET_RATE)
@@ -140,6 +141,32 @@ def one(job: dict) -> dict:
                 voice = subbass.kick_voice(drums, decode.TARGET_RATE, kicks)
                 if voice is not None:
                     freq, decay = subbass.tuned_burst(*voice)
+                # Part of the sub under the bass notes, where the bass
+                # carries the low end (bassline.py).
+                if job.get("bass_sub"):
+                    parts = stems.load_report_parts(
+                        Path(job["stem_cache"]), original, decode.TARGET_RATE)
+                    if parts is None:
+                        bass_note = ("no bass part kept for this track, so the "
+                                     "sub is under the kicks only")
+                    else:
+                        tone, heard = bassline.tone(parts["bass"],
+                                                    decode.TARGET_RATE,
+                                                    audio.shape[0])
+                        share = bassline.share(drums, parts["bass"],
+                                               decode.TARGET_RATE)
+                        following = (tone, share)
+                        if heard["median_sub_hz"] is None:
+                            bass_note = ("no bass notes above 56 Hz to put a "
+                                         "tone under, so the sub is under the "
+                                         "kicks only")
+                        else:
+                            bass_note = (
+                                f"{share:.0%} of the sub under the bassline: a "
+                                f"tone around {heard['median_sub_hz']:.0f} Hz "
+                                f"under notes around "
+                                f"{heard['median_note_hz']:.0f} Hz, "
+                                f"{heard['with_tone']:.0%} of the track")
                 # No whole-track verdict: the filters have already dropped
                 # every hit that does not belong. Too few left is the one
                 # reason to go without, and enhance() says that itself.
@@ -189,7 +216,8 @@ def one(job: dict) -> dict:
                                       freq=freq, decay_s=decay,
                                       punch_db=job["punch"],
                                       punch_decay_ms=job["punch_decay"],
-                                      drums=drums, kicks=found)
+                                      drums=drums, kicks=found,
+                                      bassline=following)
         # Air last of the spectral stages, because it generates from what
         # is there and by this point what is there is finished. It is also
         # the only one that can push the file above full scale on its own,
@@ -296,6 +324,7 @@ def one(job: dict) -> dict:
             notes.append(f"sub tuned to {freq:.0f} Hz, {decay * 1000:.0f} ms "
                          f"(kick at {voice[0]:.0f} Hz, "
                          f"{voice[1] * 1000:.0f} ms)")
+        notes.append(bass_note)
         reason = "; ".join(n for n in notes if n) or None
 
     manifest = None
@@ -314,6 +343,7 @@ def one(job: dict) -> dict:
         "clip": clip, "manifest": manifest,
         "range": ranged, "transient": shaped, "air": aired,
         "kicks_per_minute": float(info["kicks_per_minute"]),
+        "bass_share": float(info.get("bass_share", 0.0)),
         "shape_before": float(_mean_low(before_bands)),
         "shape_after": float(_mean_low(after_bands)),
         "applied_db": float(info["applied_db"]),

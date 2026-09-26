@@ -550,6 +550,26 @@ def separated(x: np.ndarray, backend: str, cache: Path | None = REPORT_CACHE,
     return stems.load_report_parts(cache, x, RATE), hit
 
 
+def bassline_line(drums: np.ndarray, bass: np.ndarray, n: int) -> str:
+    """What "Sub follows the bassline too" would do here: how much of the
+    time a bass note was found and around what pitch, the tone it would
+    get, and the share of the sub that would follow the bass."""
+    from loudnesslab import bassline
+    _, heard = bassline.tone(bass, RATE, n)
+    share = bassline.share(drums, bass, RATE)
+    if heard["median_note_hz"] is None:
+        return (f"bassline: no notes found; the bass carries {share:.0%} of "
+                f"the low end")
+    tone = (f"a tone around {heard['median_sub_hz']:.0f} Hz "
+            f"{heard['with_tone']:.0%} of the track"
+            if heard["median_sub_hz"] is not None
+            else "no tone (every note already under 56 Hz)")
+    return (f"bassline: a note {heard['voiced']:.0%} of the track, around "
+            f"{heard['median_note_hz']:.0f} Hz; {tone}; the bass carries "
+            f"{share:.0%} of the low end, so {share:.0%} of the sub would "
+            f"follow it")
+
+
 def _analyse(task: dict) -> dict:
     """One track's analysis, from its decoded audio: everything the report
     prints for it, and whether each column's tempo agreed with the tag.
@@ -607,6 +627,7 @@ def _analyse(task: dict) -> dict:
                                 minutes, kicks, strengths)
                      + ("\n        processing uses the sound filter here: no "
                         "grid fits without it" if used else ""))
+        notes.append(bassline_line(drums, parts["bass"], x.shape[0]))
         notes.extend(gaps(drums, kicks, kept, RATE, tagged, x.shape[0]))
     cells, agree = [], {}
     for name in columns:

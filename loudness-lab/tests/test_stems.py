@@ -1124,6 +1124,9 @@ class TestTheKickReport(unittest.TestCase):
             text, _ = self.run_report(Path(tmp))
         # The backbeat fits a grid on weight alone: no sound filter there.
         self.assertNotIn("processing uses the sound filter", text)
+        # A silent bass part: no notes, and none of the low end.
+        self.assertIn("bassline: no notes found; the bass carries 0% of the low end",
+                      text)
         self.assertIn("demucs+sound", text)
         line = next(l for l in text.splitlines() if "by sound:" in l)
         self.assertIn("then grid: eighths", line)

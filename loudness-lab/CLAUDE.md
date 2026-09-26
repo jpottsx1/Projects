@@ -159,7 +159,8 @@ every machine but the one that made it for a while.
 loudnesslab/     the Python: bs1770, spectrum, subbass, declip, expand,
                  air, mp3gain, decode, db, report, render, write, cli,
                  stems (Demucs: a drum stem for kicks, a guide for air),
-                 machine (drum machine? the kick's own sound; measured only)
+                 machine (drum machine? the kick's own sound; measured only),
+                 bassline (a sub tone under the bass notes)
 tests/           its tests
 tools/           make_golden.py, the five checkers, measure_stem_kicks.py
 macapp/
@@ -786,9 +787,9 @@ of those records:
   kept**, with times and why the hits in it were dropped, to hold against
   where a bottom-out was heard.
 
-Not yet done: the bassline. On She Blinded Me With Science and Blue
-Monday the low end is carried by the bass, and a sub laid only under
-kicks cannot follow it.
+The bassline: on She Blinded Me With Science and Blue Monday the low end
+is carried by the bass, and a sub laid only under kicks cannot follow it.
+See "A sub that follows the bassline", below.
 
 ### Every kick the same burst, and more or less than the reference
 
@@ -1017,6 +1018,43 @@ track.
 The app never ran any of this on its main actor: it runs the command as a
 separate process and reads its progress, which is what keeps the window
 responsive.
+
+### A sub that follows the bassline: `--bass-sub`
+
+"Sub follows the bassline too" in the app, shown under "Find kicks on the
+drum track" and needing it. `bassline.py` tracks the notes of the bass
+part kept with each separation (the report's 2 kHz bass, now in every
+shared file) and builds a tone under them; `subbass.enhance(bassline=)`
+mixes it with the kick bursts and sizes the one gain as before, so the
+lift is what was asked for, only shared.
+
+- **Tracking:** YIN at 2 kHz, a pitch every 10 ms, 35-250 Hz, with a
+  level gate 30 dB under the part's loud frames and a 5-frame median. On
+  a synthetic plucked line: 92% of frames well inside a note found, pitch
+  within 0.15% (median) and 0.48% (95th), no rest frames taken for notes,
+  18 s of bass tracked in 0.1 s.
+- **An octave under the note, never on it**, two octaves above 150 Hz,
+  and nothing under a note below 56 Hz (its octave would be under 28 Hz).
+  A tone on the note's own pitch would sum with the bass in whatever phase
+  they met: a boost on one note, a hole on the next.
+- **As loud as the bass is there**, rising and falling over 15 ms: the
+  half-level note gets a tone 6 dB down, a rest gets none, no click.
+- **The share** is where the low end already is: the bass part's 30-120
+  Hz energy against the drum part's. Too few kicks for bursts puts all of
+  it on the tone.
+- As with the kicks, only the notes are read: a 3 kHz whistle on the bass
+  part does not reach the audio (under 1e-4 of what is added, above 1
+  kHz).
+- A separation kept before the bass part existed is redone once when the
+  setting is on; the log says when a track had no bass part kept.
+
+The report prints what it would do per track ("bassline: a note N% of the
+track, around F Hz; a tone around S Hz ...; the bass carries X% of the
+low end"). 21 tests; eight breakages each caught. `check_profiles.py`
+now also fails on a setting either side that its name table misses --
+bass_sub passed it silently before it was added. Not yet compiled on the
+Mac, and not yet heard: the first run wants an A/B on She Blinded Me With
+Science and Blue Monday.
 
 ### Air: why none arrived, and air that follows the stems
 

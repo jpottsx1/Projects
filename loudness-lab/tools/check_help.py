@@ -50,6 +50,7 @@ DOCUMENTED_BY = {
     "stemKicks": "stemKicks",
     "airFixed": "airFixed",
     "airStems": "airStems",
+    "bassSub": "bassSub",
 }
 
 

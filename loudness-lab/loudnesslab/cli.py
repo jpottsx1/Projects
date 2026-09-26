@@ -229,7 +229,8 @@ def _separator(jobs: list[dict], cache_dir: Path, porcelain: bool,
         status, reason = "ok", None
         try:
             audio = decode.decode(Path(job["path"]))
-            if stems.has_kick_source(cache_dir, audio, guide=True):
+            if stems.has_kick_source(cache_dir, audio, guide=True,
+                                     report=bool(job.get("bass_sub"))):
                 reason = "already separated"
             else:
                 # Keep everything anything reads: separating is the cost.
@@ -634,6 +635,7 @@ def cmd_subbass(args: argparse.Namespace) -> int:
             "transient": args.transient, "min_crest": args.min_crest,
             "air": air_amount, "air_tune": args.air_tune,
             "stem_kicks": bool(args.stem_kicks), "bpm": row["bpm"],
+            "bass_sub": bool(args.stem_kicks and args.bass_sub),
             "air_stems": bool(args.air_stems),
             "stem_cache": str(args.stem_cache or database.parent / "stem-cache"),
             "target": args.target, "estimator": args.estimator,
@@ -681,7 +683,8 @@ def cmd_subbass(args: argparse.Namespace) -> int:
         + (f"  attack+{args.transient:.0f} dB" if args.transient > 0 else "")
         + (f"  {air_heading} from {args.air_tune / 1000:.1f}k"
            if args.air > 0 else "")
-        + ("  kicks from the drum stem" if args.stem_kicks else ""))
+        + ("  kicks from the drum stem" if args.stem_kicks else "")
+        + (", and the bassline" if args.stem_kicks and args.bass_sub else ""))
     out("=" * 104)
     out("  Lossy and irreversible, unlike the gain pass. Originals are never")
     out(f"  touched; these are new {write.label(args.format)} files to "
@@ -1410,6 +1413,10 @@ def build_parser() -> argparse.ArgumentParser:
                           "than sizing it against the reference. Without "
                           "this a folder brighter than the reference gets "
                           "no air at any setting")
+    sub.add_argument("--bass-sub", action="store_true", default=None,
+                     help="--stem-kicks: part of the sub follows the bassline, "
+                          "a tone an octave under the bass notes, shared with "
+                          "the kicks as the low end already is")
     sub.add_argument("--air-stems", action="store_true", default=None,
                      help="--air: put the air where vocals and instruments "
                           "carry the top end, not hi-hats and cymbals, from "

@@ -67,6 +67,21 @@ GUIDE_BAND_HZ = (2000.0, 10000.0)
 GUIDE_RATE = 100                # frames a second
 GUIDE_SMOOTH_HZ = 8.0           # envelope smoothing: ~20 ms rise and fall
 
+# What the kick report reads besides: the drum part fine enough for the
+# machine check, which compares kicks up to 2 kHz (8 kHz holds to 4), and
+# the bass part, which it reads only below 120 Hz (the kick source's 2 kHz
+# is plenty). Half precision: these are measured, never heard, and float16
+# keeps some 60 dB of detail at any level. Kept in the SAME file as what
+# processing reads, so a song is separated once, by whichever runs first.
+REPORT_DRUMS_RATE = 8000
+REPORT_BASS_RATE = KICK_SOURCE_RATE
+
+# Where the app keeps them: stem-cache/ beside its database, which it
+# keeps in ~/Music/LoudnessLab (ContentView.databaseURL). The kick report
+# uses the same place by default, so a folder checked there is not
+# separated again when it is processed, or the other way round.
+SHARED_CACHE = Path.home() / "Music" / "LoudnessLab" / "stem-cache"
+
 _loaded: dict[str, object] = {}
 
 
@@ -189,13 +204,19 @@ def _band_envelope(y: np.ndarray, rate: int) -> np.ndarray:
     return np.maximum(env[::step], 0.0).astype(np.float32)
 
 
+def _mono(y: np.ndarray) -> np.ndarray:
+    y = np.asarray(y, dtype=np.float64)
+    return y.mean(axis=1) if y.ndim == 2 else y
+
+
 def store_kick_source(cache_dir: Path, x: np.ndarray, rate: int,
                       drums: np.ndarray,
-                      others: list[np.ndarray] | None = None) -> Path:
+                      others: list[np.ndarray] | None = None,
+                      bass: np.ndarray | None = None) -> Path:
     """Keep what `detect_kicks` needs from a drum stem of `x` -- and, given
-    the other stems (`others`: vocals, other), the air guide too."""
-    mono = np.asarray(drums, dtype=np.float64)
-    mono = mono.mean(axis=1) if mono.ndim == 2 else mono
+    the other stems (`others`: vocals, other), the air guide too, and given
+    the `bass`, what the kick report reads (`load_report_parts`)."""
+    mono = _mono(drums)
     small = soxr.resample(mono, rate, KICK_SOURCE_RATE, quality="VHQ")
     path = _cache_path(cache_dir, audio_key(x))
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -206,9 +227,21 @@ def store_kick_source(cache_dir: Path, x: np.ndarray, rate: int,
     if others is not None:
         extra = {"guide_drums": _band_envelope(drums, rate),
                  "guide_tonal": _band_envelope(sum(others), rate)}
-    np.savez_compressed(partial, drums=small.astype(np.float32),
-                        length=np.int64(x.shape[0]), rate=np.int64(rate),
-                        **extra)
+    if bass is not None:
+        extra["report_drums"] = soxr.resample(
+            mono, rate, REPORT_DRUMS_RATE, quality="VHQ").astype(np.float16)
+        extra["report_bass"] = soxr.resample(
+            _mono(bass), rate, REPORT_BASS_RATE, quality="VHQ").astype(np.float16)
+    # What was kept before and is not given now -- the air guide, when the
+    # report adds its parts to what processing separated -- is kept.
+    earlier = {}
+    if path.exists():
+        with np.load(path) as stored:
+            earlier = {k: stored[k] for k in stored.files}
+    np.savez_compressed(partial, **{**earlier, **extra,
+                                    "drums": small.astype(np.float32),
+                                    "length": np.int64(x.shape[0]),
+                                    "rate": np.int64(rate)})
     partial.replace(path)
     return path
 
@@ -228,17 +261,40 @@ def load_kick_source(cache_dir: Path, x: np.ndarray,
     return np.column_stack([mono, mono]).astype(np.float32)
 
 
-def has_kick_source(cache_dir: Path, x: np.ndarray, guide: bool = False) -> bool:
+def has_kick_source(cache_dir: Path, x: np.ndarray, guide: bool = False,
+                    report: bool = False) -> bool:
     """Whether `x` was separated -- and, with `guide`, whether the air guide
-    was kept too. Separations from before the guide existed have only the
-    drums, so asking for air on them separates once more."""
+    was kept too, and with `report`, what the kick report reads. What was
+    kept before either existed has only the drums, so asking for them
+    separates once more."""
     path = _cache_path(cache_dir, audio_key(x))
     if not path.exists():
         return False
-    if not guide:
+    if not (guide or report):
         return True
     with np.load(path) as stored:
-        return "guide_tonal" in stored.files
+        return ((not guide or "guide_tonal" in stored.files)
+                and (not report or "report_bass" in stored.files))
+
+
+def load_report_parts(cache_dir: Path, x: np.ndarray,
+                      rate: int) -> dict[str, np.ndarray] | None:
+    """{"drums", "bass"} for the kick report, each (n, 2) at `rate` exactly
+    as long as `x`, or None if not kept."""
+    path = _cache_path(cache_dir, audio_key(x))
+    if not path.exists():
+        return None
+    with np.load(path) as stored:
+        if "report_bass" not in stored.files:
+            return None
+        kept = {"drums": (stored["report_drums"], REPORT_DRUMS_RATE),
+                "bass": (stored["report_bass"], REPORT_BASS_RATE)}
+        out = {}
+        for name, (small, at) in kept.items():
+            mono = soxr.resample(small.astype(np.float64), at, rate, quality="VHQ")
+            mono = np.pad(mono, (0, max(0, x.shape[0] - mono.size)))[:x.shape[0]]
+            out[name] = np.column_stack([mono, mono]).astype(np.float32)
+    return out
 
 
 def load_air_guide(cache_dir: Path, x: np.ndarray,

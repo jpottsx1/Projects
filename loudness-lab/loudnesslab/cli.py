@@ -232,12 +232,14 @@ def _separator(jobs: list[dict], cache_dir: Path, porcelain: bool,
             if stems.has_kick_source(cache_dir, audio, guide=True):
                 reason = "already separated"
             else:
-                # Always keep both: separating is the cost, and the guide is
-                # a few hundred kilobytes on top of what the kicks need.
+                # Keep everything anything reads: separating is the cost.
+                # The guide, and the kick report's parts, so checking this
+                # folder in the report later separates nothing.
                 parts = stems.separate(audio, decode.TARGET_RATE, "demucs")
                 stems.store_kick_source(cache_dir, audio, decode.TARGET_RATE,
                                         parts["drums"],
-                                        [parts["vocals"], parts["other"]])
+                                        [parts["vocals"], parts["other"]],
+                                        bass=parts["bass"])
         except Exception as exc:  # per track, like every other stage
             status = "error"
             reason = f"{type(exc).__name__}: {exc}"[:300]

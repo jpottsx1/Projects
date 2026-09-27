@@ -12,6 +12,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 import wave
 from pathlib import Path
 
@@ -324,6 +325,33 @@ class TestSchemaMigration(unittest.TestCase):
                          "stereo re-measures for nothing -- it did not change")
         self.assertEqual(status["/broken.mp3"], "error",
                          "a failure was overwritten by the migration")
+
+    def test_somewhere_new_to_look_for_a_tempo_measures_again_once(self):
+        """decode.TEMPO_READER: a database read with an older way of finding
+        tempos measures its rows without one again, once."""
+        from loudnesslab import decode
+        conn = db.connect(self.path)
+        for path, bpm in (("/tagged.mp3", 118.0), ("/untagged.mp3", None)):
+            conn.execute("INSERT INTO tracks (path, status, source_channels, "
+                         "tool_version, bpm) VALUES (?, 'ok', 2, '0.1.0', ?)", (path, bpm))
+        conn.commit()
+        conn.close()
+
+        def status():
+            conn = db.connect(self.path)
+            try:
+                return {r["path"]: r["status"] for r in
+                        conn.execute("SELECT path, status FROM tracks")}
+            finally:
+                conn.close()
+        self.assertEqual(status()["/untagged.mp3"], "ok", "nothing new to look in")
+        with mock.patch.object(db, "TEMPO_READER", decode.TEMPO_READER + 1):
+            self.assertEqual(status(), {"/tagged.mp3": "ok", "/untagged.mp3": "stale"})
+            conn = db.connect(self.path)
+            conn.execute("UPDATE tracks SET status = 'ok'")
+            conn.commit()
+            conn.close()
+            self.assertEqual(status()["/untagged.mp3"], "ok", "only once")
 
     def test_v8_measures_again_the_rows_with_no_tempo(self):
         """TEMPO fields were not read before v8: rows without a tempo are

@@ -167,6 +167,20 @@ every machine but the one that made it for a while.
   `TEMPO`, which was not read either; `decode.BPM_TAGS` now lists it and
   MixMeister's `fBPM`, checked against real ffprobe. Schema v8 marks
   rows with no tempo stale once more (v6 for the frame, v7 the library).
+  **Third Disc 4 report (95ca4e2) settled where it is not:** 11 ID3
+  frames, no Serato frame of any kind -- Serato has never written to those
+  files -- and a library of 1059 tracks with a BPM, none at that path. So
+  the BPMs Jeff sees belong to another copy of the songs. The library is
+  now also searched by FILE NAME (`serato_library_match`): one BPM for
+  every track of that name, anywhere, is taken; a name with two BPMs is
+  two songs and gives none. The report says where a tempo that is not a
+  tag came from ("tempo from Serato's library, the same file name at
+  ..."), and a missing one now lists the file's frames (free-text ones by
+  name). If Disc 4 is still empty, the copy Serato analysed has a
+  different name, or the BPMs are in another program's library.
+  From here, a new place to look is `decode.TEMPO_READER`, recorded in
+  the database's meta table: bumping it re-measures rows with no tempo
+  once, without a schema change (and so without touching the Swift).
 - **`git pull --ff-only` stops for good once the Mac has a commit GitHub
   lacks.** A report ran at f48b3bf, a version GitHub never had, and no
   update would ever have arrived. Both Finder commands now source

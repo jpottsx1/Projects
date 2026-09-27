@@ -57,12 +57,15 @@ def default_jobs() -> int:
     # GB, 45 tracks, 2026-09-27): four at a time, up to 3.7 GB a track,
     # and processing took 96 s a track where the same work takes about 42
     # without swapping. Separating (38 s a track) set that run's pace, so
-    # two at a time loses nothing there.
+    # two at a time loses nothing there. Then with the leaner exciter (50
+    # tracks, 45 already separated, afc10da): up to 2.8 GB a track, 80 s a
+    # track two at a time, no swapping -- and processing the slow half. So
+    # 3.0: three at a time on 16 GB, 9 GB beside the reserve.
     by_memory = max(1, int((memory - RESERVE_GB) // WORKER_GB))
     return min(by_cores, by_memory)
 
 
-WORKER_GB = 4.0
+WORKER_GB = 3.0
 RESERVE_GB = 5.0
 
 
@@ -149,6 +152,17 @@ def _one(job: dict) -> dict:
 
     amount = float(job["amount"])
     note_skip = None
+    # The same finished audio was measured twice, by air for its report and
+    # here for the levelling: measure each array once. The array is kept
+    # with its measurement, so a new one can never reuse a stale entry.
+    measured_arrays: dict = {}
+
+    def measure_once(audio_array):
+        kept = measured_arrays.get(id(audio_array))
+        if kept is None or kept[0] is not audio_array:
+            kept = (audio_array, bs1770.measure(audio_array))
+            measured_arrays[id(audio_array)] = kept
+        return kept[1]
     try:
         audio = original = decode.decode(source)
         # First, on the file as it arrived. De-clipping puts peaks BACK, so
@@ -278,7 +292,7 @@ def _one(job: dict) -> dict:
                                           amount_db=job["air"],
                                           tune_hz=job.get("air_tune",
                                                           air.DEFAULT_TUNE_HZ),
-                                          guide=guide)
+                                          guide=guide, measure=measure_once)
 
         kicks = (found[0] if found is not None
                  else subbass.detect_kicks(audio, decode.TARGET_RATE, drums)[0])
@@ -292,7 +306,7 @@ def _one(job: dict) -> dict:
                         for b in spectrum.analyse(original, decode.TARGET_RATE)}
         after_bands = {b["band_hz"]: b["shape_db"]
                        for b in spectrum.analyse(after, decode.TARGET_RATE)}
-        processed = bs1770.measure(after)
+        processed = measure_once(after)
         peak = processed["true_peak_dbtp"]
         out_dir = Path(job["out_dir"])
         fmt = job["fmt"]

@@ -1071,12 +1071,11 @@ chip, seconds a track processing and how many at a time, which one set
 the pace, the peak memory a track against the machine's, and whether
 that will have swapped. A Demucs run whose graphics chip fails once goes
 to the processor for the rest of the run instead of failing first on
-every track (`stems.gpu_failure`). Not done, and measured: scipy's
-`sosfiltfilt` is 3.1 s on a four-minute stereo band filter where one
-`sosfilt` pass is 0.25 s (its initial-state path and copies) -- a faster
-zero-phase filter would help every stage, but moves numbers the golden
-vectors hold, so it waits for the timing note to say processing is the
-slow half.
+every track (`stems.gpu_failure`). A claim made here and
+withdrawn: that scipy's `sosfiltfilt` was 3.1 s on a four-minute stereo
+band filter against 0.25 s for one `sosfilt` pass. That was one cold
+run, the cost of touching fresh memory; best of three it is 0.71 s, two
+passes and their copies, and there is nothing in it to win.
 
 **The timing note's first real run (Jeff's Mac, 16 GB, 45 new tracks,
 58d654e):** 33.8 min, 45 s a track overall (against about 106 before
@@ -1089,6 +1088,14 @@ them and works out the band's "after" from the three sums already in
 hand: 1318 MB -> 879 MB at its peak, 18 s -> 13 s, output unchanged.
 Separating is the one-time cost per song; a second run over the same
 songs goes at processing speed.
+
+**Third timed run (afc10da, reference by path):** 50 tracks, 45 already
+separated: 33.7 min, 40 s a track. Processing 80 s a track two at a time,
+up to 2.8 GB a track, no swapping -- processing the slow half now.
+`WORKER_GB` 3.0: three at a time on 16 GB. And the finished track was
+measured twice -- by air for its report and by the chain for levelling --
+so `render.one` hands air a measure that remembers each array: a
+four-minute track 42 s -> 37.7 s here (52 s before #29).
 
 **"+0.00 dB" with no reason (2026-09-27).** Jeff was surprised by small
 or zero sub on Prince-era and 90s tracks (Mary Jane Girls, Basement Jaxx,

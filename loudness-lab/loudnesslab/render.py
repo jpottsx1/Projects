@@ -150,23 +150,15 @@ def one(job: dict) -> dict:
                         bass_note = ("no bass part kept for this track, so the "
                                      "sub is under the kicks only")
                     else:
-                        tone, heard = bassline.tone(parts["bass"],
-                                                    decode.TARGET_RATE,
-                                                    audio.shape[0])
+                        # The deep notes' tone takes its phase from the
+                        # track itself, so it lands in step with the note.
+                        free, locked, heard = bassline.tones(
+                            parts["bass"], decode.TARGET_RATE,
+                            audio.shape[0], mix=audio)
                         share = bassline.share(drums, parts["bass"],
                                                decode.TARGET_RATE)
-                        following = (tone, share)
-                        if heard["median_sub_hz"] is None:
-                            bass_note = ("no bass notes above 56 Hz to put a "
-                                         "tone under, so the sub is under the "
-                                         "kicks only")
-                        else:
-                            bass_note = (
-                                f"{share:.0%} of the sub under the bassline: a "
-                                f"tone around {heard['median_sub_hz']:.0f} Hz "
-                                f"under notes around "
-                                f"{heard['median_note_hz']:.0f} Hz, "
-                                f"{heard['with_tone']:.0%} of the track")
+                        following = (free, share, locked)
+                        bass_note = bassline.what_it_did(heard, share)
                 # No whole-track verdict: the filters have already dropped
                 # every hit that does not belong. Too few left is the one
                 # reason to go without, and enhance() says that itself.

@@ -213,52 +213,94 @@ def _bpm(value) -> float | None:
 
 
 def serato_bpm(path: Path) -> float | None:
-    """The tempo Serato keeps in its own "Serato Autotags" frame, or None.
+    """The tempo Serato keeps for a track, when there is no TBPM tag: its
+    "Serato Autotags" frame in the file, then its library (`database V2`).
 
     Serato shows a BPM for every analysed track, but writes it to the
-    standard TBPM tag only with a setting on; the Autotags frame it always
-    writes. A whole disc of the New Romantics set read no tempo from TBPM
-    while Serato showed one for every track. MP3 (ID3v2.3/2.4) only: read
-    straight from the tag at the head of the file, nothing decoded.
-
-    The frame is a GEOB: encoding byte, MIME type, file name and
-    description (each terminated), then the object -- two version bytes
-    (1, 1) and the BPM as ASCII, zero-terminated, then the auto-gain.
+    standard TBPM tag only with a setting on. A whole disc of the New
+    Romantics set read no tempo from TBPM while Serato showed one for every
+    track -- and then none from the Autotags frame either, so the library
+    is read too: it lists every track Serato knows with the BPM it shows.
     """
+    return _autotags_in_file(path) or serato_library_bpm(path)
+
+
+def _autotags_in_file(path: Path) -> float | None:
+    for frame_id, body in _id3_frames(path)[1]:
+        if frame_id == b"GEOB":
+            description, data = _geob(body)
+            if description == "Serato Autotags" and len(data) >= 3:
+                # Two version bytes (1, 1), then the BPM as ASCII,
+                # zero-terminated, then the auto-gain.
+                found = _bpm(data[2:].split(b"\0", 1)[0].decode("ascii", "replace"))
+                if found is not None:
+                    return found
+    return None
+
+
+def _id3_frames(path: Path) -> tuple[int | None, list[tuple[bytes, bytes]]]:
+    """(ID3v2 major version or None, [(frame id, body)]) from the tag at the
+    head of an MP3. Read leniently, as taggers write it: whole-tag and
+    per-frame unsynchronisation, the v2.4 data-length indicator, and v2.4
+    frame sizes written as plain integers (an old iTunes habit) where
+    reading them syncsafe would walk off the frames."""
     try:
         with open(path, "rb") as f:
             head = f.read(10)
-            if len(head) < 10 or head[:3] != b"ID3" or head[3] not in (3, 4):
-                return None
+            if len(head) < 10 or head[:3] != b"ID3":
+                return None, []
             major, flags = head[3], head[5]
-            size = _syncsafe(head[6:10])
-            tag = f.read(size)
+            tag = f.read(_syncsafe(head[6:10]))
     except OSError:
-        return None
+        return None, []
+    if major not in (3, 4):
+        return major, []
+    if major == 3 and flags & 0x80:
+        tag = tag.replace(b"\xff\x00", b"\xff")
     at = 0
     if flags & 0x40:                          # extended header, skipped
         at = _syncsafe(tag[:4]) if major == 4 else 4 + int.from_bytes(tag[:4], "big")
-    while at + 10 <= len(tag):
-        frame_id = tag[at:at + 4]
-        if not frame_id.strip(b"\0"):
-            break                              # padding
+    frames = []
+    while at + 10 <= len(tag) and _frame_id(tag[at:at + 4]):
         raw = tag[at + 4:at + 8]
-        length = _syncsafe(raw) if major == 4 else int.from_bytes(raw, "big")
-        body = tag[at + 10:at + 10 + length]
-        at += 10 + length
-        if frame_id != b"GEOB" or not body:
-            continue
-        found = _autotags_bpm(body)
-        if found is not None:
-            return found
-    return None
+        size = int.from_bytes(raw, "big")
+        if major == 4 and not any(b & 0x80 for b in raw):
+            safe = _syncsafe(raw)
+            if safe == size or _frame_follows(tag, at + 10 + safe) \
+                    or not _frame_follows(tag, at + 10 + size):
+                size = safe
+        body = tag[at + 10:at + 10 + size]
+        frame_flags = tag[at + 9]
+        if major == 4:
+            if frame_flags & 0x01:            # data-length indicator
+                body = body[4:]
+            if frame_flags & 0x02 or flags & 0x80:
+                body = body.replace(b"\xff\x00", b"\xff")
+        frames.append((tag[at:at + 4], body))
+        at += 10 + size
+    return major, frames
+
+
+def _frame_id(four: bytes) -> bool:
+    return len(four) == 4 and all(48 <= c <= 57 or 65 <= c <= 90 for c in four)
+
+
+def _frame_follows(tag: bytes, at: int) -> bool:
+    """Whether a frame boundary at `at` is plausible: the end of the tag,
+    padding, or another frame's id."""
+    return (at == len(tag) or (at < len(tag) and not tag[at:at + 4].strip(b"\0"))
+            or _frame_id(tag[at:at + 4]))
 
 
 def _syncsafe(four: bytes) -> int:
     return (four[0] << 21) | (four[1] << 14) | (four[2] << 7) | four[3]
 
 
-def _autotags_bpm(body: bytes) -> float | None:
+def _geob(body: bytes) -> tuple[str, bytes]:
+    """(description, object) of a GEOB frame: encoding byte, MIME type, file
+    name and description, each terminated, then the object."""
+    if not body:
+        return "", b""
     encoding, rest = body[0], body[1:]
     wide = encoding in (1, 2)                 # UTF-16: two-byte terminators
     end = b"\0\0" if wide else b"\0"
@@ -269,18 +311,125 @@ def _autotags_bpm(body: bytes) -> float | None:
             i = data.find(terminator, i)
             if i < 0:
                 return data, b""
-            if not wide or i % 2 == 0:
+            if len(terminator) == 1 or i % 2 == 0:
                 return data[:i], data[i + len(terminator):]
             i += 1
 
     _, rest = cut(rest, b"\0")               # MIME type: always Latin-1
     _, rest = cut(rest, end)                  # file name
     description, rest = cut(rest, end)
-    text = description.decode("utf-16" if wide else "latin-1", "replace")
-    if text.strip("\ufeff").strip() != "Serato Autotags" or len(rest) < 3:
+    if wide:
+        text = description.decode("utf-16" if description[:2] in (b"\xff\xfe", b"\xfe\xff")
+                                  else "utf-16-be", "replace")
+    else:
+        text = description.decode("latin-1", "replace")
+    return text.strip("﻿").strip(), rest
+
+
+# Serato's library. On the Mac's own disk it is ~/Music/_Serato_, and its
+# paths are from the root without the leading "/"; on an external drive it
+# is <drive>/_Serato_, and its paths are from the drive's root.
+SERATO_DATABASE = "database V2"
+
+
+def _serato_databases(path: Path) -> list[tuple[Path, str]]:
+    """[(library file, the track's path as that library writes it)]."""
+    path = Path(os.path.abspath(path))
+    parts = path.parts
+    places = []
+    if len(parts) > 3 and parts[1] == "Volumes":
+        root = Path(*parts[:3])
+        places.append((root / "_Serato_" / SERATO_DATABASE,
+                       str(path.relative_to(root))))
+    places.append((Path.home() / "Music" / "_Serato_" / SERATO_DATABASE,
+                   str(path)[1:]))
+    return places
+
+
+def _library_key(text: str) -> str:
+    # macOS hands out decomposed accents and ignores case; Serato may keep
+    # either form.
+    import unicodedata
+    return unicodedata.normalize("NFC", text).casefold()
+
+
+_LIBRARIES: dict[tuple[str, float], dict[str, float]] = {}
+
+
+def serato_library(database: Path) -> dict[str, float] | None:
+    """{track path: BPM} from a Serato `database V2`, or None if there is
+    none. Read once per file and kept while it is unchanged.
+
+    The file is a run of fields -- a four-byte name, a four-byte big-endian
+    length, the value -- and each track is an "otrk" field whose value is
+    more fields: "pfil" the path and "tbpm" the BPM, both UTF-16BE.
+    """
+    try:
+        stamp = database.stat().st_mtime
+    except OSError:
         return None
-    number = rest[2:].split(b"\0", 1)[0].decode("ascii", "replace")
-    return _bpm(number)
+    key = (str(database), stamp)
+    if key not in _LIBRARIES:
+        try:
+            data = database.read_bytes()
+        except OSError:
+            return None
+        tracks = {}
+        for name, value in _serato_fields(data):
+            if name != b"otrk":
+                continue
+            fields = dict(_serato_fields(value))
+            where = fields.get(b"pfil")
+            bpm = _bpm(fields.get(b"tbpm", b"").decode("utf-16-be", "replace"))
+            if where and bpm:
+                tracks[_library_key(where.decode("utf-16-be", "replace"))] = bpm
+        _LIBRARIES.clear()                    # one library at a time is plenty
+        _LIBRARIES[key] = tracks
+    return _LIBRARIES[key]
+
+
+def _serato_fields(data: bytes):
+    at = 0
+    while at + 8 <= len(data):
+        size = int.from_bytes(data[at + 4:at + 8], "big")
+        yield data[at:at + 4], data[at + 8:at + 8 + size]
+        at += 8 + size
+
+
+def serato_library_bpm(path: Path) -> float | None:
+    for database, written in _serato_databases(path):
+        tracks = serato_library(database)
+        if tracks:
+            found = tracks.get(_library_key(written))
+            if found:
+                return found
+    return None
+
+
+def where_the_tempo_was_looked_for(path: Path, tags: dict | None = None) -> str:
+    """For a track with no tempo, where it was looked for, in words: what
+    the report prints, so the next missing tempo says why the first time."""
+    said = []
+    if tags is not None:
+        said.append("no TBPM tag" if not tags else
+                    "no TBPM tag (tags: " + ", ".join(sorted(tags)[:12]) + ")")
+    major, frames = _id3_frames(path)
+    if major is None:
+        said.append("no ID3v2 tag at the head of the file")
+    elif not frames:
+        said.append(f"an ID3v2.{major} tag with no frames read")
+    else:
+        geobs = [_geob(body)[0] for fid, body in frames if fid == b"GEOB"]
+        said.append(f"ID3v2.{major}, {len(frames)} frames; Serato frames: "
+                    + (", ".join(g or "?" for g in geobs) if geobs else "none"))
+    for database, written in _serato_databases(path):
+        tracks = serato_library(database)
+        if tracks is None:
+            said.append(f"no Serato library at {database}")
+        else:
+            said.append(f"Serato library at {database}: {len(tracks)} tracks "
+                        f"with a BPM, not this one ({written})")
+    return "; ".join(said)
 
 
 def _round(value: float | None, divisor: float) -> float | None:

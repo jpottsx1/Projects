@@ -152,8 +152,18 @@ every machine but the one that made it for a while.
   BPM on every track in Serato and read none here: Serato writes TBPM only
   with a setting on, but always writes its "Serato Autotags" GEOB frame
   (two version bytes, then the BPM as ASCII). `decode.probe` reads TBPM
-  first, leniently ("122,5", "122 BPM"), then that frame. Schema v6 marks
-  rows with no tempo stale, once, so they are measured again with it.
+  first, leniently ("122,5", "122 BPM"), then that frame. **And Disc 4
+  still read none** (6fa6318): the frame was not there either. So Serato's
+  library, `~/Music/_Serato_/database V2` (or `<drive>/_Serato_` for a
+  file on an external drive), is read too -- a run of name/length/value
+  fields, one `otrk` per track with its path (`pfil`) and BPM (`tbpm`) in
+  UTF-16BE, paths compared NFC and case-folded. Whether that is where
+  Disc 4's tempos are is not confirmed: a track with no tempo now prints
+  `no tempo:` with every place looked (the frames in the file, each
+  library and how many tracks it lists), so if this misses too, the next
+  report says why. The ID3 walk also takes v2.4 sizes written as plain
+  integers, unsynchronisation and data-length indicators. Schema v7
+  marks rows with no tempo stale once more (v6 did it for the frame).
 - **`git pull --ff-only` stops for good once the Mac has a commit GitHub
   lacks.** A report ran at f48b3bf, a version GitHub never had, and no
   update would ever have arrived. Both Finder commands now source
@@ -1046,10 +1056,26 @@ lift is what was asked for, only shared.
   a synthetic plucked line: 92% of frames well inside a note found, pitch
   within 0.15% (median) and 0.48% (95th), no rest frames taken for notes,
   18 s of bass tracked in 0.1 s.
-- **An octave under the note, never on it**, two octaves above 150 Hz,
-  and nothing under a note below 56 Hz (its octave would be under 28 Hz).
-  A tone on the note's own pitch would sum with the bass in whatever phase
-  they met: a boost on one note, a hole on the next.
+- **An octave under the note**, two octaves above 150 Hz. A tone on the
+  note's own pitch, started blind, would sum with the bass in whatever
+  phase they met: a boost on one note, a hole on the next.
+- **On a note under 56 Hz, on the note and in step with it** (`tones`'
+  `locked`). An octave down would be under 28 Hz, and She Blinded Me With
+  Science, notes around 41 Hz, got a tone 5% of the track. The pitch comes
+  from the bass part; the PHASE from the recording, heterodyned by the
+  tone's own running phase and low-passed at `LOCK_HZ` (6 Hz), so the
+  tone lands on top of the note already there. On half-second notes at
+  random phases with a kick on every one: in step at 0.998 or better on
+  every note, every note's band up by more than 1 dB where the same tone
+  at a guessed phase takes one down, and 99.95% of the tone within 6 Hz
+  of its note. 4-20 Hz locks all work; 2 Hz lags a note change, 60 Hz
+  prints the kick into the tone. About 4 s more per five-minute track.
+- **The sub stage never flips the locked tone.** `enhance` flips what it
+  adds when the kick bursts run against the track; flipped, the locked
+  tone would cancel its note exactly. It travels apart
+  (`bassline=(tone, share, locked)`), is sized with the tone, and is
+  added after the flip. A test inverts the kick so one run flips and the
+  other does not, and holds the deep notes in step in both.
 - **As loud as the bass is there**, rising and falling over 15 ms: the
   half-level note gets a tone 6 dB down, a rest gets none, no click.
 - **The share** is where the low end already is: the bass part's 30-120

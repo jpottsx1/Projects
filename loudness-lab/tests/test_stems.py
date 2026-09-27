@@ -996,6 +996,18 @@ class TestTheKickReport(unittest.TestCase):
             self.assertAlmostEqual(float(a), float(b),
                                    delta=max(0.02, 0.01 * abs(float(b))))
 
+    def test_a_track_with_no_tempo_says_where_one_was_looked_for(self):
+        """New Romantics Disc 4 printed "-" for every track, twice, with
+        nothing to say why the second fix missed too."""
+        from loudnesslab import decode
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.object(decode, "where_the_tempo_was_looked_for",
+                                  return_value="nowhere useful"):
+            untagged, _ = self.run_report(Path(tmp), bpm=None)
+            tagged, _ = self.run_report(Path(tmp))
+        self.assertIn("no tempo: nowhere useful", untagged)
+        self.assertNotIn("no tempo", tagged)
+
     def test_a_song_processing_separated_is_not_separated_again(self):
         """One store for both: what processing kept is what the report
         reads, so checking a processed folder separates nothing."""

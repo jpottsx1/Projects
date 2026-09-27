@@ -292,15 +292,16 @@ class TestSchemaMigration(unittest.TestCase):
         self.assertIsNone(row["year_is_original"])
 
     def _make_v4(self) -> None:
-        """A database as the previous build left it: mono and stereo rows,
-        all measured, all marked ok."""
+        """A database as the v4 build left it: mono and stereo rows, all
+        measured, all marked ok, all with a tempo (so only the v5 rule is
+        in play here -- the v6 one is tested on its own)."""
         conn = db.connect(self.path)
         conn.execute("UPDATE meta SET value = '4' WHERE key = 'schema_version'")
         for path, channels in (("/mono.mp3", 1), ("/stereo.mp3", 2),
                                ("/broken.mp3", 1)):
             conn.execute(
-                "INSERT INTO tracks (path, status, source_channels, tool_version) "
-                "VALUES (?, ?, ?, '0.1.0')",
+                "INSERT INTO tracks (path, status, source_channels, tool_version, bpm) "
+                "VALUES (?, ?, ?, '0.1.0', 120.0)",
                 (path, "error" if path == "/broken.mp3" else "ok", channels))
         conn.commit()
         conn.close()
@@ -323,6 +324,28 @@ class TestSchemaMigration(unittest.TestCase):
                          "stereo re-measures for nothing -- it did not change")
         self.assertEqual(status["/broken.mp3"], "error",
                          "a failure was overwritten by the migration")
+
+    def test_v6_measures_again_the_rows_with_no_tempo(self):
+        """Serato's own tempo was not read before v6: rows without one are
+        measured again, once; rows with one, and failures, are left."""
+        conn = db.connect(self.path)
+        conn.execute("UPDATE meta SET value = '5' WHERE key = 'schema_version'")
+        for path, bpm, status in (("/tagged.mp3", 118.0, "ok"),
+                                  ("/untagged.mp3", None, "ok"),
+                                  ("/broken.mp3", None, "error")):
+            conn.execute("INSERT INTO tracks (path, status, source_channels, "
+                         "tool_version, bpm) VALUES (?, ?, 2, '0.1.0', ?)",
+                         (path, status, bpm))
+        conn.commit()
+        conn.close()
+        conn = db.connect(self.path)
+        try:
+            status = {row["path"]: row["status"] for row in
+                      conn.execute("SELECT path, status FROM tracks")}
+        finally:
+            conn.close()
+        self.assertEqual(status, {"/tagged.mp3": "ok", "/untagged.mp3": "stale",
+                                  "/broken.mp3": "error"})
 
     def test_a_stale_row_is_analysed_again(self):
         """Marking it stale is only worth anything if a scan acts on it."""

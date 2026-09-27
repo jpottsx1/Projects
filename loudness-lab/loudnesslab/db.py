@@ -145,6 +145,18 @@ def _migrate(conn: sqlite3.Connection, version: int) -> None:
             # library that re-measures is recoverable and one carrying
             # silently wrong numbers is not.
             conn.execute("UPDATE tracks SET status = 'stale' WHERE status = 'ok'")
+    if version < 6:
+        # The tempo tag was read only from TBPM, and Serato writes that only
+        # with a setting on -- its own "Serato Autotags" frame it always
+        # writes. A whole disc whose every track has a BPM in Serato was
+        # measured with none (decode.serato_bpm). Rows with no tempo are
+        # measured again, once, so those that have one in Serato get it; a
+        # track that truly has none comes back as it was, and at this
+        # version is not asked again.
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(tracks)")}
+        if "bpm" in columns:          # a v1 database never had one
+            conn.execute("UPDATE tracks SET status = 'stale' "
+                         "WHERE bpm IS NULL AND status = 'ok'")
     # v3 only adds the gain_log table, which CREATE TABLE IF NOT EXISTS
     # above has already made; nothing to alter.
     if version < 4:

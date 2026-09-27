@@ -148,6 +148,19 @@ every machine but the one that made it for a while.
   sub still at 63 Hz -- and nothing in them said so. `Measure Kick
   Detection.command` now pulls first, stops if it cannot, and writes the
   version at the top of the report.
+- **Serato's tempo is not always in TBPM.** New Romantics Disc 4 has a
+  BPM on every track in Serato and read none here: Serato writes TBPM only
+  with a setting on, but always writes its "Serato Autotags" GEOB frame
+  (two version bytes, then the BPM as ASCII). `decode.probe` reads TBPM
+  first, leniently ("122,5", "122 BPM"), then that frame. Schema v6 marks
+  rows with no tempo stale, once, so they are measured again with it.
+- **`git pull --ff-only` stops for good once the Mac has a commit GitHub
+  lacks.** A report ran at f48b3bf, a version GitHub never had, and no
+  update would ever have arrived. Both Finder commands now source
+  `update-from-github.sh`: edits are stashed, local commits kept on a
+  `local-<date>` branch, and main set to GitHub's. Rehearsed against a
+  local stand-in: behind, a local commit, edits, untracked music, another
+  branch, already current.
 - **Folder grouping uses `Library.folderLabels`,** not the parent's name:
   two compilations each with a CD1 otherwise merge into one corpus, and a
   corpus silently averaged with another is a wrong number that looks

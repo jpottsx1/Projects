@@ -12,17 +12,15 @@ cd "$(dirname "$0")"
 # has already cost an afternoon, looking for a pane that existed in the
 # repository and not on this disk. "Pull and rebuild" should be one action,
 # not two things to remember in the right order.
-if command -v git >/dev/null 2>&1 && git rev-parse --git-dir >/dev/null 2>&1; then
-    echo "Updating…"
-    if git pull --ff-only; then
-        :
-    else
-        echo
-        echo "Could not update. Usually that means there are local edits here."
-        echo "Building what is on disk instead -- it may be out of date."
-    fi
+# Exactly GitHub's main, with anything local set aside rather than lost --
+# see update-from-github.sh for why a plain pull was not enough.
+. ../update-from-github.sh
+if ! sync_with_github; then
     echo
+    echo "Could not update. The lines above say why -- copy them and send"
+    echo "them on. Building what is on disk instead; it may be out of date."
 fi
+echo
 
 echo "Building Loudness Lab. The first build takes a minute or two."
 echo

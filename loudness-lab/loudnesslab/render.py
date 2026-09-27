@@ -51,16 +51,18 @@ def default_jobs() -> int:
     memory = physical_memory_gb()
     if memory is None:
         return by_cores
-    # And no more than fit in memory: a worker with the bassline sub and
-    # air on peaked at 1.8 GB on a four-minute track (measured), so
-    # WORKER_GB each, after RESERVE_GB for the system and Demucs. Past
-    # that the Mac swaps, and everything -- separating too -- slows down
-    # together.
+    # And no more than fit in memory: WORKER_GB each, after RESERVE_GB for
+    # the system and Demucs. Past that the Mac swaps, and everything --
+    # separating too -- slows down together. Measured on Jeff's Mac (16
+    # GB, 45 tracks, 2026-09-27): four at a time, up to 3.7 GB a track,
+    # and processing took 96 s a track where the same work takes about 42
+    # without swapping. Separating (38 s a track) set that run's pace, so
+    # two at a time loses nothing there.
     by_memory = max(1, int((memory - RESERVE_GB) // WORKER_GB))
     return min(by_cores, by_memory)
 
 
-WORKER_GB = 2.5
+WORKER_GB = 4.0
 RESERVE_GB = 5.0
 
 

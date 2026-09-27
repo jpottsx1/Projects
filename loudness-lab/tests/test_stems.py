@@ -1458,21 +1458,23 @@ class TestWhereTheTimeWent(unittest.TestCase):
     def test_separating_set_the_pace(self):
         said = cli._timing(self.results(40.0, 10), 4, 1000.0,
                            {"separated": 10, "separate_s": 900.0,
-                            "devices": {"mps"}})
+                            "devices": {"mps"}, "done": 10})
         self.assertIn("Processing: 40 s a track, 4 at a time -- 10 s a track", said)
         self.assertIn("Separating: 90 s a track on the Mac's graphics chip", said)
         self.assertIn("Separating set the pace", said)
+        self.assertNotIn("separated before", said)
 
     def test_processing_set_the_pace(self):
         said = cli._timing(self.results(120.0, 10), 2, 700.0,
-                           {"separated": 10, "separate_s": 200.0,
-                            "devices": {"cpu"}})
-        self.assertIn("on the processor", said)
+                           {"separated": 6, "separate_s": 120.0,
+                            "devices": {"cpu"}, "done": 10})
+        self.assertIn("on the processor, 6 track(s); 4 were separated before.", said)
         self.assertIn("Processing set the pace", said)
 
     def test_nothing_separated_says_nothing_about_it(self):
         said = cli._timing(self.results(30.0, 3), 2, 60.0,
-                           {"separated": 0, "separate_s": 0.0, "devices": set()})
+                           {"separated": 0, "separate_s": 0.0, "devices": set(),
+                            "done": 3})
         self.assertIn("Processing: 30 s a track", said)
         self.assertNotIn("Separating", said)
         self.assertIsNone(cli._timing([{"status": "skipped"}], 2, 1.0, None))
@@ -1531,7 +1533,8 @@ class TestAGpuThatFailsIsGivenUp(unittest.TestCase):
 class TestHowManyAtATime(unittest.TestCase):
     def test_half_the_cores_unless_memory_runs_out_first(self):
         with mock.patch.object(render.os, "cpu_count", return_value=10):
-            for memory, expected in ((64.0, 5), (16.0, 4), (8.0, 1), (4.0, 1), (None, 5)):
+            # 16 GB is Jeff's Mac: four at a time swapped (3.7 GB a track).
+            for memory, expected in ((64.0, 5), (16.0, 2), (8.0, 1), (4.0, 1), (None, 5)):
                 with mock.patch.object(render, "physical_memory_gb", return_value=memory):
                     self.assertEqual(render.default_jobs(), expected, memory)
 

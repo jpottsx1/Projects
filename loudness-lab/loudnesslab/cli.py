@@ -221,9 +221,11 @@ def _timing(results: list[dict], workers: int, seconds: float,
     if separating and separating["separated"]:
         split = separating["separate_s"] / separating["separated"]
         where = " and ".join(DEVICES.get(d, d) for d in sorted(separating["devices"]))
+        before = separating["done"] - separating["separated"]
         lines.append(f"  Separating: {split:.0f} s a track on {where}, "
-                     f"{separating['separated']} track(s); the rest were "
-                     f"separated before.")
+                     f"{separating['separated']} track(s)"
+                     + (f"; {before} were separated before." if before > 0
+                        else "."))
         if stems.gpu_failure():
             lines.append(f"  The graphics chip failed and was given up on "
                          f"for this run: {stems.gpu_failure()}")

@@ -1078,6 +1078,18 @@ zero-phase filter would help every stage, but moves numbers the golden
 vectors hold, so it waits for the timing note to say processing is the
 slow half.
 
+**The timing note's first real run (Jeff's Mac, 16 GB, 45 new tracks,
+58d654e):** 33.8 min, 45 s a track overall (against about 106 before
+#29). Separating 38 s a track on the graphics chip, one at a time, set the
+pace. Processing 96 s a track, four at a time, up to 3.7 GB a track --
+swapping, where the same work takes about 42 s here. So `WORKER_GB` is
+now 4.0 (two at a time on 16 GB, which still outpaces separating), and
+the exciter lets its whole-track arrays go as soon as it is done with
+them and works out the band's "after" from the three sums already in
+hand: 1318 MB -> 879 MB at its peak, 18 s -> 13 s, output unchanged.
+Separating is the one-time cost per song; a second run over the same
+songs goes at processing speed.
+
 The app never ran any of this on its main actor: it runs the command as a
 separate process and reads its progress, which is what keeps the window
 responsive.

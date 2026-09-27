@@ -191,6 +191,10 @@ def excite(x: np.ndarray, rate: int, amount_db: float = DEFAULT_AIR_DB,
     # is exactly the aliasing suppression the module docstring measured and
     # the margin costs little next to that 4x.
     harmonics = _harmonics(source, rate, drive, bias)
+    # Memory: every array here is the whole track, 180 MB for four minutes
+    # of stereo float64. A track peaked at 3.7 GB on Jeff's Mac with four at
+    # a time, and swapped, so each is let go as soon as it is done with.
+    del source
 
     # Again, and causally this time. An asymmetric curve rectifies, so it
     # produces DC and a spray of difference tones BELOW the tune frequency
@@ -201,8 +205,7 @@ def excite(x: np.ndarray, rate: int, amount_db: float = DEFAULT_AIR_DB,
 
     dry = _band(x, rate, BAND_LOW_HZ, BAND_HIGH_HZ)
     wet = _band(harmonics, rate, BAND_LOW_HZ, BAND_HIGH_HZ)
-    before = float(np.mean(dry * dry))
-    added = float(np.mean(wet * wet))
+    before, added = _mean_product(dry, dry), _mean_product(wet, wet)
     if added <= 0 or before <= 0:
         report["note"] = "no usable band energy to work with"
         return x, report
@@ -216,20 +219,26 @@ def excite(x: np.ndarray, rate: int, amount_db: float = DEFAULT_AIR_DB,
     #   (dry + g*wet)^2 = dry^2 + 2*g*cross + g^2*wet^2 = dry^2 * 10^(a/10)
     #
     # which is a quadratic in g with one positive root.
-    cross = float(np.mean(dry * wet))
+    cross = _mean_product(dry, wet)
     wanted = before * (10 ** (amount_db / 10) - 1.0)
     gain = float((-cross + np.sqrt(cross * cross + added * wanted)) / added)
 
     if guide is not None:
-        harmonics = harmonics * np.asarray(guide, dtype=np.float64)[:, None]
+        harmonics *= np.asarray(guide, dtype=np.float64)[:, None]
         report["guided"] = True
         report["guide_mean"] = float(np.mean(guide))
         # The band filter is linear, so the band of the result is the dry
         # band plus the band of what was added: filter only the guided
         # harmonics, not the whole result again.
         wet = _band(harmonics, rate, BAND_LOW_HZ, BAND_HIGH_HZ)
-    y = (x + gain * harmonics).astype(x.dtype)
-    after = float(np.mean((dry + gain * wet) ** 2))
+        cross, added = _mean_product(dry, wet), _mean_product(wet, wet)
+    # (dry + g*wet)^2 again, from the three sums already in hand.
+    after = before + 2 * gain * cross + gain * gain * added
+    del dry, wet
+    harmonics *= gain
+    harmonics += x
+    y = harmonics.astype(x.dtype)
+    del harmonics
 
     was, now = bs1770.measure(x), bs1770.measure(y)
     report.update({
@@ -241,6 +250,12 @@ def excite(x: np.ndarray, rate: int, amount_db: float = DEFAULT_AIR_DB,
         "lufs_change_db": _delta(now["lufs_i"], was["lufs_i"]),
     })
     return y, report
+
+
+def _mean_product(a: np.ndarray, b: np.ndarray) -> float:
+    """mean(a * b) without the whole-track product array."""
+    return float(np.einsum("ij,ij->", a, b) / a.size) if a.ndim == 2 else \
+        float(np.dot(a, b) / a.size)
 
 
 def _delta(after: float | None, before: float | None) -> float:

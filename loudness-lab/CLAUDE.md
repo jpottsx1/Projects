@@ -1090,6 +1090,17 @@ hand: 1318 MB -> 879 MB at its peak, 18 s -> 13 s, output unchanged.
 Separating is the one-time cost per song; a second run over the same
 songs goes at processing speed.
 
+**"+0.00 dB" with no reason (2026-09-27).** Jeff was surprised by small
+or zero sub on Prince-era and 90s tracks (Mary Jane Girls, Basement Jaxx,
+Real McCoy at 0.00). With `--auto`, Sub is the track's shortfall under the
+reference over 31.5-63 Hz, capped; a track within 0.5 dB gets none and
+the job carried the reason as `skip` -- which is cleared when air is
+sized too, so the track still gets its air, and the reason went with
+it. The job now keeps it as `sub_note`, and the manifest carries
+`sub_asked_db` (what the sub was asked for) and `sub_note` (why), shown
+in Results as "Asked" and "Why". Not yet known for those tracks which it
+was: at the reference already, or declined for a reason.
+
 The app never ran any of this on its main actor: it runs the command as a
 separate process and reads its progress, which is what keeps the window
 responsive.

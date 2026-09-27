@@ -370,6 +370,12 @@ def _one(job: dict) -> dict:
         manifest = {
             "source": str(source), "name": job["name"], "folder": job["folder"],
             "sub_db": round(float(info["applied_db"]), 3),
+            # What the track was short of the reference -- what the sub
+            # was asked for -- and why it got what it got. "+0.93 dB"
+            # alone cannot say whether that was all it needed or all it
+            # could be given.
+            "sub_asked_db": round(float(amount), 3),
+            "sub_note": job.get("sub_note") or reason,
             "punch_db": round(float(info["punch_db"]), 3),
             "air_db": round(float(aired.get("measured_db", 0.0)), 3),
             "clips_restored": (clip or {}).get("restored", 0),

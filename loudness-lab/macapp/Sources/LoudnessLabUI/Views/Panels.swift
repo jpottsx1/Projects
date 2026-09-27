@@ -502,12 +502,20 @@ struct ResultsPanel: View {
                     set: { ids in chosen = manifest.tracks.first { ids.contains($0.id) } })) {
                     TableColumn("Track", value: \.name)
                     TableColumn("Sub") { Text(String(format: "%+.2f dB", $0.subDB)) }
+                    TableColumn("Asked") { row in
+                        Text(row.subAskedDB.map { String(format: "%+.2f dB", $0) } ?? "—")
+                    }
                     TableColumn("Air") { row in
                         Text(row.airDB.map { String(format: "%+.2f dB", $0) } ?? "—")
                     }
                     TableColumn("Punch") { Text(String(format: "%+.1f dB", $0.punchDB)) }
                     TableColumn("Clips") { Text("\($0.clipsRestored)") }
                     TableColumn("Lift") { Text(String(format: "%+.2f dB", $0.clipLiftDB)) }
+                    // Why the sub got what it got: "already within 0.3 dB of
+                    // the reference", a skip, or what the kicks and bass did.
+                    TableColumn("Why") { row in
+                        Text(row.subNote ?? "").help(row.subNote ?? "")
+                    }
                 }
                 .help(Help.results.detail)
             } else {

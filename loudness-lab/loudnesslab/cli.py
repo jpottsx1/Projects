@@ -670,6 +670,11 @@ def cmd_subbass(args: argparse.Namespace) -> int:
             seen.add(key)
         amount, skip = amounts.get(row["path"], (args.amount, None))
         air_amount, _ = air_amounts.get(row["path"], (args.air, None))
+        # Why the sub got what it got, kept even when air un-skips the
+        # track below: it used to be dropped there, and a track already
+        # at the reference showed "+0.00 dB" with no reason (Mary Jane
+        # Girls, Basement Jaxx, 2026-09-27).
+        sub_note = skip
         # `skip` short-circuits the whole track in render.one() -- right,
         # back when the sub was the only thing --auto could size, wrong
         # now that air is a second one. A track can easily be fine on bass
@@ -684,7 +689,8 @@ def cmd_subbass(args: argparse.Namespace) -> int:
             "stem": _unique_stem(Path(row["path"]).stem,
                                  labels.get(row["path"], ""), taken),
             "folder": labels.get(row["path"], "(root)"),
-            "amount": amount, "skip": skip, "label": _label(args, amount),
+            "amount": amount, "skip": skip, "sub_note": sub_note,
+            "label": _label(args, amount),
             "freq": args.freq, "decay": args.decay,
             "punch": args.punch, "punch_decay": args.punch_decay,
             "declip": bool(args.declip), "declip_max": args.declip_max,

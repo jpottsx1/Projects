@@ -269,3 +269,33 @@ class TestBlockByBlock(unittest.TestCase):
             blocks = air._harmonics(source, RATE, air.DRIVE, air.BIAS)
         scale = float(np.sqrt(np.mean(whole ** 2)))
         self.assertLess(float(np.abs(blocks - whole).max()) / scale, 1e-6)
+
+
+class TestMeasuredOnce(unittest.TestCase):
+    def test_the_chain_measures_the_finished_track_once(self):
+        """Air measured its result for its report, and the chain measured
+        the same array again for the levelling: 5 s a long track."""
+        from unittest import mock
+        from loudnesslab import bs1770, render
+        x, _ = programme(seconds=8.0)
+        job = {"path": "t.flac", "name": "t", "folder": "f", "stem": "t",
+               "amount": 0.0, "skip": None, "label": "air", "freq": 45.0,
+               "decay": 0.12, "punch": 0.0, "punch_decay": 8.0,
+               "declip": False, "declip_max": 6.0, "min_activity": 0.0,
+               "target_lra": 0.0, "max_attenuation": 6.0, "transient": 0.0,
+               "min_crest": 11.0, "air": 2.0, "air_tune": 3500.0,
+               "target": -16.0, "estimator": "s_p95", "peak_ceiling": -1.0,
+               "compare": True, "dry_run": True, "out_dir": ".", "fmt": "flac"}
+        seen = []
+        real = bs1770.measure
+
+        def counting(a):
+            seen.append(id(a))
+            return real(a)
+        with mock.patch.object(render.decode, "decode", return_value=x.astype(np.float32)), \
+                mock.patch.object(render.decode, "TARGET_RATE", RATE), \
+                mock.patch.object(bs1770, "measure", side_effect=counting):
+            result = render.one(job)
+        self.assertEqual(result["status"], "ok", result.get("reason"))
+        self.assertTrue(result["air"]["applied"])
+        self.assertEqual(len(seen), len(set(seen)), "an array measured twice")

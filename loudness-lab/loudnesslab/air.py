@@ -153,7 +153,8 @@ def _harmonics(source: np.ndarray, rate: int, drive: float, bias: float
 def excite(x: np.ndarray, rate: int, amount_db: float = DEFAULT_AIR_DB,
            tune_hz: float = DEFAULT_TUNE_HZ,
            drive: float = DRIVE, bias: float = BIAS,
-           guide: np.ndarray | None = None) -> tuple[np.ndarray, dict]:
+           guide: np.ndarray | None = None,
+           measure=None) -> tuple[np.ndarray, dict]:
     """Add `amount_db` of generated harmonics to the 8-20 kHz band.
 
     The amount is measured, not mixed: the harmonic signal is scaled so the
@@ -240,7 +241,11 @@ def excite(x: np.ndarray, rate: int, amount_db: float = DEFAULT_AIR_DB,
     y = harmonics.astype(x.dtype)
     del harmonics
 
-    was, now = bs1770.measure(x), bs1770.measure(y)
+    # `measure` lets the chain hand in one that remembers: the result is
+    # measured again straight after this, and each is a whole-track
+    # loudness and true-peak pass (about 5 s on a long track).
+    measure = measure or bs1770.measure
+    was, now = measure(x), measure(y)
     report.update({
         "applied": True,
         "amount_db": float(amount_db),

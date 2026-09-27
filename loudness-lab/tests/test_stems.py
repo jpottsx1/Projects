@@ -1533,8 +1533,9 @@ class TestAGpuThatFailsIsGivenUp(unittest.TestCase):
 class TestHowManyAtATime(unittest.TestCase):
     def test_half_the_cores_unless_memory_runs_out_first(self):
         with mock.patch.object(render.os, "cpu_count", return_value=10):
-            # 16 GB is Jeff's Mac: four at a time swapped (3.7 GB a track).
-            for memory, expected in ((64.0, 5), (16.0, 2), (8.0, 1), (4.0, 1), (None, 5)):
+            # 16 GB is Jeff's Mac: four at a time swapped (3.7 GB a track);
+            # two at 2.8 GB left room for a third.
+            for memory, expected in ((64.0, 5), (16.0, 3), (8.0, 1), (4.0, 1), (None, 5)):
                 with mock.patch.object(render, "physical_memory_gb", return_value=memory):
                     self.assertEqual(render.default_jobs(), expected, memory)
 

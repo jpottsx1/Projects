@@ -145,10 +145,10 @@ def _migrate(conn: sqlite3.Connection, version: int) -> None:
             # library that re-measures is recoverable and one carrying
             # silently wrong numbers is not.
             conn.execute("UPDATE tracks SET status = 'stale' WHERE status = 'ok'")
-    if version < 7:
+    if version < 8:
         # The tempo tag was read only from TBPM, and Serato writes that only
         # with a setting on. v6 added its "Serato Autotags" frame; v7 its
-        # library, where the BPM of a whole disc turned out to be when
+        # library; v8 the free-text TEMPO and fBPM fields (decode.BPM_TAGS), where the BPM of a whole disc turned out to be when
         # neither had it (decode.serato_bpm). Rows with no tempo are
         # measured again, once, so those that have one in Serato get it; a
         # track that truly has none comes back as it was, and at this

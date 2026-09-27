@@ -109,6 +109,12 @@ class TestProbeTakesItWhereTbpmIsMissing(unittest.TestCase):
         self.assertEqual(self.probe({}, serato), 122.0)
         self.assertIsNone(self.probe({}, _tag([])))
 
+    def test_a_tempo_field(self):
+        # A "Tempo" field (TXXX:TEMPO, or FLAC's TEMPO), and the others
+        # taggers use -- each as ffprobe names it, checked against ffprobe.
+        for key in ("TEMPO", "tempo", "BPM", "fBPM", "TBPM"):
+            self.assertEqual(self.probe({key: "124"}, _tag([])), 124.0, key)
+
     def test_tbpm_written_loosely(self):
         for written, read in (("122", 122.0), ("122.00", 122.0), ("122,5", 122.5),
                               ("122 BPM", 122.0)):

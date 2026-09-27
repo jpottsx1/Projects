@@ -325,12 +325,12 @@ class TestSchemaMigration(unittest.TestCase):
         self.assertEqual(status["/broken.mp3"], "error",
                          "a failure was overwritten by the migration")
 
-    def test_v7_measures_again_the_rows_with_no_tempo(self):
-        """Serato's library was not read before v7: rows without a tempo
-        are measured again, once -- from v6 too, which had tried only the
-        file's own frame; rows with one, and failures, are left."""
+    def test_v8_measures_again_the_rows_with_no_tempo(self):
+        """TEMPO fields were not read before v8: rows without a tempo are
+        measured again, once -- from v7 too, which had tried the file's
+        frame and Serato's library; rows with one, and failures, are left."""
         conn = db.connect(self.path)
-        conn.execute("UPDATE meta SET value = '6' WHERE key = 'schema_version'")
+        conn.execute("UPDATE meta SET value = '7' WHERE key = 'schema_version'")
         for path, bpm, status in (("/tagged.mp3", 118.0, "ok"),
                                   ("/untagged.mp3", None, "ok"),
                                   ("/broken.mp3", None, "error")):

@@ -1504,7 +1504,7 @@
    63.0
   ],
   "referenceFolder": "mp3",
-  "schemaVersion": 7,
+  "schemaVersion": 8,
   "shortfalls": [
    {
     "meanDeficitDB": 0.13725,

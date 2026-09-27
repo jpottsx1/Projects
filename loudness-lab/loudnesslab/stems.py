@@ -107,7 +107,17 @@ def _stereo(x: np.ndarray) -> np.ndarray:
     return np.column_stack([x, x]) if x.ndim == 1 else x
 
 
-def _demucs(x: np.ndarray, model=None) -> dict[str, np.ndarray]:
+# How Demucs is run. The defaults are Demucs's own: a random shift of up
+# to half a second, 25% overlap between its 7.8 s pieces, one piece at a
+# time on the GPU. `tools/separation_speed.py` measures the alternatives
+# on the Mac that will use them -- several pieces at once (`batch`), no
+# random shift, less overlap -- and these change only when it says so.
+DEMUCS = {"batch": 1, "shifts": 1, "overlap": 0.25}
+
+
+def _demucs(x: np.ndarray, model=None, batch: int | None = None,
+            shifts: int | None = None, overlap: float | None = None,
+            half: bool = False) -> dict[str, np.ndarray]:
     import torch
     from demucs.apply import apply_model
 
@@ -122,11 +132,20 @@ def _demucs(x: np.ndarray, model=None) -> dict[str, np.ndarray]:
     ref = wav.mean(0)
     mean, std = float(ref.mean()), float(ref.std()) or 1.0
 
+    batch = DEMUCS["batch"] if batch is None else batch
+    shifts = DEMUCS["shifts"] if shifts is None else shifts
+    overlap = DEMUCS["overlap"] if overlap is None else overlap
+
     def run(device: str):
         model.to(device).eval()
         with torch.no_grad():
-            return apply_model(model, ((wav - mean) / std)[None], device=device,
-                               split=True, overlap=0.25, progress=False)[0]
+            normalised = ((wav - mean) / std)[None]
+            if batch > 1 or shifts == 0 or half:
+                return separate_in_batches(model, normalised, device,
+                                           overlap=overlap, batch=batch,
+                                           half=half)[0]
+            return apply_model(model, normalised, device=device, shifts=shifts,
+                               split=True, overlap=overlap, progress=False)[0]
 
     if torch.backends.mps.is_available() and "mps_failed" not in _loaded:
         # Apple's GPU backend has lacked operations Demucs uses in some
@@ -149,6 +168,89 @@ def _demucs(x: np.ndarray, model=None) -> dict[str, np.ndarray]:
             for i, name in enumerate(model.sources)}
 
 
+def separate_in_batches(model, mix, device, overlap: float = 0.25,
+                        batch: int = 4, half: bool = False):
+    """Demucs's own split-and-blend, with `batch` pieces through the model
+    at once instead of one: the same pieces, padded the same way, blended
+    with the same triangular weights -- `apply_model(..., shifts=0)`
+    exactly, but the GPU gets several pieces per call instead of one.
+    `mix` is (1, channels, samples); the result (1, sources, channels,
+    samples). Tested against `apply_model` itself (tests/test_stems).
+
+    `half`: the model's arithmetic in 16-bit on the Mac's graphics chip
+    (autocast, so operations that need 32 bits keep them). Only there:
+    elsewhere it raises, and the speed test reports it as not available."""
+    if half and str(device) != "mps":
+        raise ValueError("half precision is only tried on the Mac's graphics chip")
+    import torch
+    from demucs.apply import BagOfModels, TensorChunk
+    from demucs.htdemucs import HTDemucs
+    from demucs.utils import center_trim
+
+    if isinstance(model, BagOfModels):
+        members = list(zip(model.models, model.weights))
+    else:
+        members = [(model, [1.0] * len(model.sources))]
+    estimates, totals = 0.0, [0.0] * len(model.sources)
+    for member, weights in members:
+        member.to(device).eval()
+        out = _split_batched(member, mix, device, overlap, batch,
+                             torch, TensorChunk, HTDemucs, center_trim, half)
+        for k, weight in enumerate(weights):
+            out[:, k] *= weight
+            totals[k] += weight
+        estimates = estimates + out
+    for k in range(estimates.shape[1]):
+        estimates[:, k] /= totals[k]
+    return estimates
+
+
+def _split_batched(model, mix, device, overlap, batch, torch, TensorChunk,
+                   HTDemucs, center_trim, half=False):
+    channels, length = mix.shape[1], mix.shape[2]
+    out = torch.zeros(1, len(model.sources), channels, length, device=mix.device)
+    sum_weight = torch.zeros(length, device=mix.device)
+    segment_length = int(model.samplerate * model.segment)
+    stride = int((1 - overlap) * segment_length)
+    weight = torch.cat([torch.arange(1, segment_length // 2 + 1, device=device),
+                        torch.arange(segment_length - segment_length // 2, 0, -1,
+                                     device=device)])
+    weight = weight / weight.max()
+    pieces = []
+    for offset in range(0, length, stride):
+        chunk = TensorChunk(mix, offset, segment_length)
+        valid = (model.valid_length(chunk.length)
+                 if hasattr(model, "valid_length") else chunk.length)
+        pieces.append((offset, chunk, valid))
+
+    def flush(group):
+        stacked = torch.cat([chunk.padded(valid).to(device)
+                             for _, chunk, valid in group], dim=0)
+        with torch.no_grad():
+            if half:
+                with torch.autocast(device_type="mps", dtype=torch.float16):
+                    results = model(stacked)
+                results = results.float()
+            else:
+                results = model(stacked)
+        for (offset, chunk, _), result in zip(group, results):
+            trimmed = center_trim(result[None], chunk.length)
+            n = trimmed.shape[-1]
+            out[..., offset:offset + n] += (weight[:n] * trimmed).to(mix.device)
+            sum_weight[offset:offset + n] += weight[:n].to(mix.device)
+
+    group = []
+    for piece in pieces:
+        # Only pieces padded to the same length go through together.
+        if group and (len(group) == batch or group[0][2] != piece[2]):
+            flush(group)
+            group = []
+        group.append(piece)
+    if group:
+        flush(group)
+    return out / sum_weight
+
+
 def _spleeter(x: np.ndarray) -> dict[str, np.ndarray]:
     if "spleeter" not in _loaded:
         from spleeter.separator import Separator
@@ -158,7 +260,7 @@ def _spleeter(x: np.ndarray) -> dict[str, np.ndarray]:
 
 
 def separate(x: np.ndarray, rate: int, backend: str = "demucs",
-             model=None) -> dict[str, np.ndarray]:
+             model=None, options: dict | None = None) -> dict[str, np.ndarray]:
     """Split a track into drums, bass, other and vocals.
 
     Every stem comes back at `rate` and exactly as long as `x`, so a sample
@@ -167,6 +269,8 @@ def separate(x: np.ndarray, rate: int, backend: str = "demucs",
     put every burst a few samples early.
 
     `model` is for tests: a Demucs model to use instead of loading htdemucs.
+    `options` overrides `DEMUCS` for this call (batch, shifts, overlap):
+    what the separation speed test compares.
     """
     if backend not in BACKENDS:
         raise ValueError(f"unknown separator {backend!r}; one of {BACKENDS}")
@@ -178,7 +282,8 @@ def separate(x: np.ndarray, rate: int, backend: str = "demucs",
     n = source.shape[0]
     at_model = (soxr.resample(source, rate, MODEL_RATE, quality="VHQ")
                 if rate != MODEL_RATE else source)
-    stems = _demucs(at_model, model) if backend == "demucs" else _spleeter(at_model)
+    stems = (_demucs(at_model, model, **(options or {})) if backend == "demucs"
+             else _spleeter(at_model))
 
     out = {}
     for name in STEMS:

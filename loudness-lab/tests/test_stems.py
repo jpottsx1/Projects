@@ -1553,3 +1553,66 @@ class TestHowManyAtATime(unittest.TestCase):
         result = render.one({"path": "x.mp3", "name": "x", "folder": "f",
                              "skip": "nothing to do", "amount": 0.0})
         self.assertGreater(result["peak_gb"], 0.0)
+
+
+class TestTheSeparationSpeedTest(unittest.TestCase):
+    """tools/separation_speed.py: what it compares, and what it will
+    recommend. The timings only mean anything on the Mac that runs it."""
+
+    @classmethod
+    def setUpClass(cls):
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+        import separation_speed
+        cls.tool = separation_speed
+
+    def test_kicks_agree_within_ten_ms(self):
+        a = np.array([0, 24000, 48000, 72000])
+        self.assertEqual(self.tool.kick_agreement(a, a + 300, 48000), 1.0)   # 6 ms
+        self.assertEqual(self.tool.kick_agreement(a, a + 720, 48000), 0.0)   # 15 ms
+        self.assertAlmostEqual(self.tool.kick_agreement(a, a[:2], 48000), 4 / 6)
+        self.assertEqual(self.tool.kick_agreement(a[:0], a[:0], 48000), 1.0)
+
+    def test_closeness(self):
+        x = np.random.default_rng(0).standard_normal(1000)
+        self.assertEqual(self.tool.closeness_db(x, x), 120.0)
+        self.assertAlmostEqual(self.tool.closeness_db(x, 0.9 * x), 20.0, places=6)
+
+    def row(self, name, seconds, kicks):
+        return {"name": name, "seconds": seconds, "kicks": kicks}
+
+    def test_the_fastest_that_finds_the_same_kicks(self):
+        rows = [self.row("now", 100, 0.985), self.row("no shift", 98, 1.0),
+                self.row("4 at once", 60, 1.0),
+                self.row("4 at once, less overlap", 45, 0.90)]
+        said = self.tool.recommend(rows)
+        self.assertIn("Recommendation: 4 at once -- 40% faster", said)
+
+    def test_a_failure_is_never_recommended(self):
+        rows = [self.row("now", 100, 0.99), self.row("8 at once", None, 1.0)]
+        self.assertIn("keep separating as now", self.tool.recommend(rows))
+
+    def test_a_loose_yardstick_still_needs_95_percent(self):
+        rows = [self.row("now", 100, 0.10), self.row("less overlap", 50, 0.40)]
+        self.assertIn("keep separating as now", self.tool.recommend(rows))
+
+
+@unittest.skipUnless(importlib.util.find_spec("demucs") and importlib.util.find_spec("torch"),
+                     "Demucs is not installed")
+class TestSeparatingInBatches(unittest.TestCase):
+    def test_the_same_as_demucs_own_loop(self):
+        """Several pieces at once must be Demucs's own split-and-blend,
+        not an approximation of it. A model with random weights will do:
+        this is about the arithmetic around the model, not the model."""
+        import torch
+        from demucs.apply import BagOfModels, apply_model
+        from demucs.htdemucs import HTDemucs
+        torch.manual_seed(0)
+        model = HTDemucs(sources=["drums", "bass", "other", "vocals"],
+                         samplerate=44100, segment=7.8).eval()
+        mix = torch.randn(1, 2, int(44100 * 21.3)) * 0.1
+        expected = apply_model(model, mix, shifts=0, split=True, overlap=0.25, device="cpu")
+        for batch in (1, 3, 4):
+            got = stems.separate_in_batches(model, mix, "cpu", overlap=0.25, batch=batch)
+            self.assertLess(float((got - expected).abs().max()), 1e-6, batch)
+        got = stems.separate_in_batches(BagOfModels([model]), mix, "cpu", batch=4)
+        self.assertLess(float((got - expected).abs().max()), 1e-6)

@@ -1097,6 +1097,33 @@ measured twice -- by air for its report and by the chain for levelling --
 so `render.one` hands air a measure that remembers each array: a
 four-minute track 42 s -> 37.7 s here (52 s before #29).
 
+**Separating is the limit on new songs (fourth timed run, 75aad5f):** 37
+new tracks, 49 s a track; separating 36 s a track set the pace, processing
+88 s a track three at a time (29 s a track of the run), 3.1 GB, no swap.
+Demucs hands the graphics chip one 7.8 s piece at a time, with a random
+shift of up to half a second (its `shifts=1`: one pass, so no averaging,
+just a different result each run). `stems.separate_in_batches` is its
+split-and-blend with several pieces per call -- `apply_model(shifts=0)`
+exactly, to 4e-8, tested against `apply_model` itself with a random-weight
+HTDemucs (the real weights cannot be downloaded here; PyTorch and Demucs
+can, from PyPI). Whether it is faster is a graphics-chip question, so
+`Test Separation Speed.command` (`tools/separation_speed.py`) separates
+three of Jeff's songs seven ways -- now, no shift, 2/4/8 at once, less
+overlap, half precision -- times each and compares the kicks found with
+the no-shift reference. A way is recommended if it agrees on as many
+kicks as Demucs's own random shift does, and never under 95%.
+`stems.DEMUCS` keeps Demucs's defaults until that report says otherwise.
+
+Core ML (Neural Engine), estimated not built: htdemucs's STFT and
+complex-number steps do not convert, so the spectrogram would be done
+outside (Accelerate) and only the network body converted; coremltools
+can convert on Linux but only a Mac can run or time the result, and the
+weights cannot be fetched here -- so every step is a script for Jeff to
+run. Several round trips, days of elapsed time, a gain of perhaps 2-4x
+over the graphics chip that is not assured (operations the Neural Engine
+lacks fall back to the GPU; 16-bit may move kicks). Worth it only if the
+speed test's best is still well short of what is wanted.
+
 **"+0.00 dB" with no reason (2026-09-27).** Jeff was surprised by small
 or zero sub on Prince-era and 90s tracks (Mary Jane Girls, Basement Jaxx,
 Real McCoy at 0.00). With `--auto`, Sub is the track's shortfall under the

@@ -95,6 +95,16 @@ def cmd_analyze(args: argparse.Namespace) -> int:
     return 0
 
 
+def reference_folder(wanted: str | None) -> Path | None:
+    """The reference as a folder on disk, when it is given as one: a full
+    path, as the app's "Other..." passes a chosen folder. None for a
+    folder label ("100 Hits - The New Romantics (2011)/Disc 4")."""
+    text = (wanted or "").strip()
+    if not text.startswith(("/", "~")):
+        return None
+    return Path(os.path.expanduser(text)).resolve() if text else None
+
+
 def _reference_curve(conn, wanted: str,
                      bands=report.LOW_SHAPE_BANDS) -> tuple[str | None, dict]:
     """Median shape of the folder named by `wanted`, over `bands`.
@@ -102,13 +112,54 @@ def _reference_curve(conn, wanted: str,
     Low bands for the sub stage, top bands for air -- same query, same
     resolution of which folder "the reference" names, different slice of
     the spectrum.
+
+    `wanted` is a folder on disk (a full path) or a folder label. A path
+    takes every measured track under it, subfolders included; it used to
+    be matched against the labels, which have no leading "/", so a chosen
+    folder never matched (2026-09-27: "New Music 2026-09-23 matched none").
+    A label names one folder -- or, if it names a folder whose tracks are
+    all in subfolders, all of them together, where it used to match
+    "several" and give up.
     """
+    folder = reference_folder(wanted)
+    if folder is not None:
+        base = str(folder).rstrip(os.sep)
+        like = (base.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+                + os.sep + "%")
+        rows = conn.execute(
+            "SELECT b.band_hz, b.shape_db FROM bands b JOIN tracks t "
+            "ON t.id = b.track_id WHERE t.status = 'ok' "
+            "AND b.shape_db IS NOT NULL AND t.path LIKE ? ESCAPE '\\'",
+            (like,)).fetchall()
+        values: dict = {}
+        for row in rows:
+            values.setdefault(row["band_hz"], []).append(row["shape_db"])
+        curve = {b: float(np.median(values[b])) for b in bands if values.get(b)}
+        return (base, curve) if curve else (None, {})
     matrix_bands, shape = report._band_matrix(conn, "shape_db", group_by="folder")
     name = report.resolve_reference(shape, wanted)
+    if name is not None:
+        groups = [name]
+    else:
+        # Every folder under one folder of that name: the name as whole
+        # folders somewhere in the label, and one place it points to --
+        # two albums' "CD1" are two corpora, never pooled.
+        key = wanted.strip().strip("/").lower()
+        parents = {}
+        for g in shape:
+            padded = "/" + g.lower() + "/"
+            at = padded.find("/" + key + "/")
+            if at >= 0:
+                parents.setdefault(padded[:at + len(key) + 2], []).append(g)
+        groups = next(iter(parents.values())) if len(parents) == 1 else []
+        name = wanted.strip() if groups else None
     if name is None:
         return None, {}
-    curve = {b: float(np.median(shape[name][b]))
-             for b in bands if shape[name].get(b)}
+    curve = {}
+    for b in bands:
+        pooled = [v for g in groups for v in shape[g].get(b, [])]
+        if pooled:
+            curve[b] = float(np.median(pooled))
     return name, curve
 
 
@@ -565,7 +616,20 @@ def cmd_subbass(args: argparse.Namespace) -> int:
         reporter = None
     else:
         reporter = _progress_printer(start)
-    counts = analyze.run(roots=args.path, db_path=database, jobs=args.jobs,
+    # A reference given as a folder is measured too, if it is not one of
+    # the folders being processed -- it only has to be in the library, and
+    # choosing a new one should not first need a separate Measure. Only
+    # measured: the processing scope below is still `args.path`.
+    roots = list(args.path)
+    chosen = reference_folder(args.reference) if args.auto else None
+    if chosen is not None:
+        if not chosen.is_dir():
+            return fail(f"--auto needs a reference folder; {str(chosen)!r} "
+                        f"is not a folder on this Mac.")
+        if not any(chosen == Path(r).resolve() or Path(r).resolve() in chosen.parents
+                   for r in args.path):
+            roots.append(chosen)
+    counts = analyze.run(roots=roots, db_path=database, jobs=args.jobs,
                          progress=reporter)
     if porcelain:
         _emit({"event": "measured",
@@ -622,6 +686,11 @@ def cmd_subbass(args: argparse.Namespace) -> int:
         if args.auto:
             reference_name, curve = _reference_curve(conn, args.reference or "")
             if reference_name is None:
+                if reference_folder(args.reference) is not None:
+                    return fail(
+                        f"--auto needs a reference folder; "
+                        f"{args.reference.strip()!r} has no measured tracks "
+                        f"in it -- no audio files, or none could be read.")
                 return fail(
                     f"--auto needs a reference folder; {args.reference!r} "
                     f"matched none (or matched several).\nName one of the "

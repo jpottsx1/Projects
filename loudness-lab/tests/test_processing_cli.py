@@ -489,3 +489,75 @@ class TestWhyTheSubIsWhatItIs(unittest.TestCase):
         tracks = self.manifest(str(src), "--amount", "3")
         self.assertEqual(tracks[0]["sub_asked_db"], 3.0)
         self.assertAlmostEqual(tracks[0]["sub_db"], 3.0, delta=0.5)
+
+
+@unittest.skipUnless(HAVE_FFMPEG, "ffmpeg/ffprobe not installed")
+class TestTheReferenceAsAFolder(unittest.TestCase):
+    """2026-09-27: the app passed a chosen folder as a full path, and
+    '/Users/jeff/Downloads/Gathered/FLAC/New Music 2026-09-23' matched
+    none -- labels have no leading '/', the folder had not been measured,
+    and its tracks were in subfolders."""
+
+    def setUp(self):
+        self.dir = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.dir, ignore_errors=True)
+        self.src = self.dir / "src"
+        _fixture(self.src, ("Mary Jane Girls - In My House",))
+        # The reference: two albums in subfolders, nothing loose.
+        self.ref = self.dir / "Gathered" / "FLAC" / "New Music 2026-09-23"
+        _fixture(self.ref / "Album One", ("One",))
+        _fixture(self.ref / "Album Two", ("Two",))
+
+    def run_it(self, reference: str) -> list[dict]:
+        out = subprocess.run(
+            [sys.executable, str(TOOL), "subbass", str(self.src), "--auto",
+             "--reference", reference, "--db", str(self.dir / "l.db"),
+             "--out", str(self.dir / "out"), "--jobs", "1", "--porcelain"],
+            capture_output=True, text=True)
+        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+        return [json.loads(line) for line in out.stdout.splitlines() if line.strip()]
+
+    def test_a_full_path_never_measured_with_its_tracks_in_subfolders(self):
+        events = self.run_it(str(self.ref))
+        selected = [e for e in events if e["event"] == "selected"][0]
+        self.assertEqual(selected["reference"], str(self.ref.resolve()))
+        # Measured (1 track to process + 2 in the reference), processed: 1.
+        measured = [e for e in events if e["event"] == "measured"][0]
+        self.assertEqual(measured["analysed"], 3)
+        # The same audio as the reference: nothing to add, and it says so.
+        # Only the one track was worked on; the reference was not.
+        processed = [e for e in events
+                     if e["event"] == "progress" and e.get("phase") == "process"]
+        self.assertEqual([e["name"] for e in processed],
+                         ["Mary Jane Girls - In My House"])
+        self.assertIn("already within", processed[0]["reason"])
+
+    def test_a_trailing_slash_and_spaces(self):
+        events = self.run_it("  " + str(self.ref) + "/ ")
+        self.assertEqual(events[-1]["event"], "done")
+
+    def test_a_folder_that_is_not_there(self):
+        out = subprocess.run(
+            [sys.executable, str(TOOL), "subbass", str(self.src), "--auto",
+             "--reference", str(self.dir / "nowhere"), "--db", str(self.dir / "l.db"),
+             "--porcelain"], capture_output=True, text=True)
+        self.assertEqual(out.returncode, 2)
+        self.assertIn("is not a folder", json.loads(out.stdout.splitlines()[-1])["message"])
+
+    def test_a_label_naming_a_folder_of_subfolders(self):
+        # Measure everything first, then name the parent by its label.
+        subprocess.run([sys.executable, str(TOOL), "analyze", str(self.dir),
+                        "--db", str(self.dir / "l.db")], capture_output=True)
+        events = self.run_it("New Music 2026-09-23")
+        self.assertEqual(events[-1]["event"], "done")
+
+    def test_two_folders_of_the_same_name_are_not_pooled(self):
+        _fixture(self.dir / "Other" / "New Music 2026-09-23", ("Three",))
+        subprocess.run([sys.executable, str(TOOL), "analyze", str(self.dir),
+                        "--db", str(self.dir / "l.db")], capture_output=True)
+        out = subprocess.run(
+            [sys.executable, str(TOOL), "subbass", str(self.src), "--auto",
+             "--reference", "New Music 2026-09-23", "--db", str(self.dir / "l.db"),
+             "--porcelain"], capture_output=True, text=True)
+        self.assertEqual(out.returncode, 2)
+        self.assertIn("matched none (or matched several)", out.stdout)

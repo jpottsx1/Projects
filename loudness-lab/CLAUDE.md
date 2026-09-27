@@ -1101,6 +1101,21 @@ it. The job now keeps it as `sub_note`, and the manifest carries
 in Results as "Asked" and "Why". Not yet known for those tracks which it
 was: at the reference already, or declined for a reason.
 
+**A reference chosen as a folder (2026-09-27).** "--auto needs a
+reference folder; '/Users/jeff/Downloads/Gathered/FLAC/New Music
+2026-09-23' matched none": the app's "Other..." passes a full path, and
+the reference was only ever matched against folder LABELS, which have no
+leading "/" -- plus a new folder is not measured until processed, and
+its tracks sat in subfolders, each its own label. Now a path is matched
+by path (`cli.reference_folder`): every measured track under it,
+subfolders included, and `subbass` measures the folder first when it is
+not one being processed (only measured; the processing scope is
+unchanged). A label naming a folder of subfolders pools them, but only
+when they all sit under one folder of that name -- two albums' "CD1" are
+never merged. Still open: the Survey's "vs ref" (Swift,
+`Library.resolveReference`) does not understand a path, so it stays
+blank for one; processing does not depend on it.
+
 The app never ran any of this on its main actor: it runs the command as a
 separate process and reads its progress, which is what keeps the window
 responsive.

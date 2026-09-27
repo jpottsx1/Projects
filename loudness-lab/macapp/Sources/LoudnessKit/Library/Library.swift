@@ -9,7 +9,7 @@ import Foundation
 /// should not have to do it again to open the app.
 public final class Library {
 
-    public static let schemaVersion = 5
+    public static let schemaVersion = 6
     public static let toolVersion = "0.1.0"
 
     public static let schema = """
@@ -135,6 +135,17 @@ public final class Library {
                 // library that re-measures is recoverable, one carrying
                 // silently wrong numbers is not.
                 try db.run("UPDATE tracks SET status = 'stale' WHERE status = 'ok'")
+            }
+        }
+        if version < 6 {
+            // The tempo was read only from TBPM, which Serato writes only
+            // with a setting on; its own Autotags frame it always writes.
+            // Rows with no tempo are measured again, once (as db.py).
+            let columns = try db.run("PRAGMA table_info(tracks)")
+                .compactMap { $0["name"] as? String }
+            if columns.contains("bpm") {
+                try db.run("UPDATE tracks SET status = 'stale' "
+                           + "WHERE bpm IS NULL AND status = 'ok'")
             }
         }
         if version < 4 {

@@ -25,10 +25,10 @@ fail() {
 # Pull first, as Build and Run does. A report from a stale checkout is
 # worse than none: the 2026-09-26 reports came from code two merges old,
 # without the line they were run to get, and read as current.
+. ./update-from-github.sh
+sync_with_github \
+    || fail "Could not update, so this would check with old code. The lines just above say why -- copy them and send them on."
 if command -v git >/dev/null 2>&1 && git rev-parse --git-dir >/dev/null 2>&1; then
-    echo "Updating…"
-    git pull --ff-only \
-        || fail "Could not update, so this would check with old code. The lines just above say why -- copy them and send them on."
     VERSION="$(git log -1 --format='%h, %cd' --date=short)"
 fi
 

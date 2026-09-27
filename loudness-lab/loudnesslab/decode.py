@@ -80,7 +80,8 @@ def probe(path: Path) -> dict:
         "genre": tags.get("genre"),
         "year": year,
         "year_is_original": year_is_original,
-        "bpm": _float(tags.get("tbpm") or tags.get("bpm")),
+        "bpm": (_bpm(tags.get("tbpm") or tags.get("bpm") or tags.get("tmpo"))
+                or serato_bpm(path)),
         "musical_key": tags.get("initialkey") or tags.get("tkey") or tags.get("key"),
     }
 
@@ -197,6 +198,89 @@ def _float(value) -> float | None:
     except (TypeError, ValueError):
         return None
     return result if np.isfinite(result) else None
+
+
+def _bpm(value) -> float | None:
+    """A tempo tag read leniently: "122", "122.00", "122,5", "122 BPM".
+    Zero or less is no tempo."""
+    if value is None:
+        return None
+    match = re.search(r"\d+(?:[.,]\d+)?", str(value))
+    if not match:
+        return None
+    bpm = _float(match.group(0).replace(",", "."))
+    return bpm if bpm and bpm > 0 else None
+
+
+def serato_bpm(path: Path) -> float | None:
+    """The tempo Serato keeps in its own "Serato Autotags" frame, or None.
+
+    Serato shows a BPM for every analysed track, but writes it to the
+    standard TBPM tag only with a setting on; the Autotags frame it always
+    writes. A whole disc of the New Romantics set read no tempo from TBPM
+    while Serato showed one for every track. MP3 (ID3v2.3/2.4) only: read
+    straight from the tag at the head of the file, nothing decoded.
+
+    The frame is a GEOB: encoding byte, MIME type, file name and
+    description (each terminated), then the object -- two version bytes
+    (1, 1) and the BPM as ASCII, zero-terminated, then the auto-gain.
+    """
+    try:
+        with open(path, "rb") as f:
+            head = f.read(10)
+            if len(head) < 10 or head[:3] != b"ID3" or head[3] not in (3, 4):
+                return None
+            major, flags = head[3], head[5]
+            size = _syncsafe(head[6:10])
+            tag = f.read(size)
+    except OSError:
+        return None
+    at = 0
+    if flags & 0x40:                          # extended header, skipped
+        at = _syncsafe(tag[:4]) if major == 4 else 4 + int.from_bytes(tag[:4], "big")
+    while at + 10 <= len(tag):
+        frame_id = tag[at:at + 4]
+        if not frame_id.strip(b"\0"):
+            break                              # padding
+        raw = tag[at + 4:at + 8]
+        length = _syncsafe(raw) if major == 4 else int.from_bytes(raw, "big")
+        body = tag[at + 10:at + 10 + length]
+        at += 10 + length
+        if frame_id != b"GEOB" or not body:
+            continue
+        found = _autotags_bpm(body)
+        if found is not None:
+            return found
+    return None
+
+
+def _syncsafe(four: bytes) -> int:
+    return (four[0] << 21) | (four[1] << 14) | (four[2] << 7) | four[3]
+
+
+def _autotags_bpm(body: bytes) -> float | None:
+    encoding, rest = body[0], body[1:]
+    wide = encoding in (1, 2)                 # UTF-16: two-byte terminators
+    end = b"\0\0" if wide else b"\0"
+
+    def cut(data: bytes, terminator: bytes) -> tuple[bytes, bytes]:
+        i = 0
+        while True:
+            i = data.find(terminator, i)
+            if i < 0:
+                return data, b""
+            if not wide or i % 2 == 0:
+                return data[:i], data[i + len(terminator):]
+            i += 1
+
+    _, rest = cut(rest, b"\0")               # MIME type: always Latin-1
+    _, rest = cut(rest, end)                  # file name
+    description, rest = cut(rest, end)
+    text = description.decode("utf-16" if wide else "latin-1", "replace")
+    if text.strip("\ufeff").strip() != "Serato Autotags" or len(rest) < 3:
+        return None
+    number = rest[2:].split(b"\0", 1)[0].decode("ascii", "replace")
+    return _bpm(number)
 
 
 def _round(value: float | None, divisor: float) -> float | None:

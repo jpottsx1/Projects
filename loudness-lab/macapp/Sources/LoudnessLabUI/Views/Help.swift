@@ -552,11 +552,13 @@ enum Help {
         loud as the bass is there, so it follows the line note for note and \
         stops where the bass stops.
 
-        An octave under, never on the note: a tone on the bass's own pitch \
-        would add to it on one note and cancel it on the next. A note \
-        already under 56 Hz is left alone -- it is in the sub band already, \
-        and an octave below it is too low to hear. A note above 150 Hz gets \
-        a tone two octaves down.
+        An octave under the note, where it can only add: a tone on the \
+        bass's own pitch, started blind, would add to it on one note and \
+        cancel it on the next. A note above 150 Hz gets a tone two octaves \
+        down. A note under 56 Hz, where an octave below would be too low to \
+        hear, gets a tone on its own pitch -- in step with it, the timing \
+        read from the record itself, so it lands on top of the note and \
+        only makes it bigger.
 
         How much of the sub goes under the bass and how much under the \
         kicks follows where the track's low end already is: mostly the bass \

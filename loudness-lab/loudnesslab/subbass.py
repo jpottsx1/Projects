@@ -660,16 +660,23 @@ def _blank_report(amount_db: float) -> dict:
 
 
 def _share_out(bursts: np.ndarray, tone: np.ndarray, share: float,
-               rate: int) -> np.ndarray:
+               rate: int, locked: np.ndarray | None = None
+               ) -> tuple[np.ndarray, np.ndarray]:
     """Bursts and tone mixed so the tone carries `share` of the energy in
     the sub band. They are at different moments and pitches, so their
-    energies add; each is first brought to unit energy in the band."""
-    def unit(y):
-        energy = float(np.mean(_band(y, rate, SUB_LOW_HZ, SUB_HIGH_HZ) ** 2))
-        return y / np.sqrt(energy) if energy > 0 else y * 0.0
+    energies add; each is first brought to unit energy in the band. The
+    tone is `tone` and `locked` together, scaled as one, and the locked
+    part comes back apart: (bursts and free tone, locked tone)."""
+    def energy(y):
+        return float(np.mean(_band(y, rate, SUB_LOW_HZ, SUB_HIGH_HZ) ** 2))
     share = float(np.clip(share, 0.0, 1.0))
-    return (np.sqrt(1 - share) * unit(bursts)
-            + np.sqrt(share) * unit(tone[:bursts.size])).astype(np.float32)
+    tone = tone[:bursts.size]
+    locked = (np.zeros_like(tone) if locked is None else locked[:bursts.size])
+    kick_energy, tone_energy = energy(bursts), energy(tone + locked)
+    kick_scale = np.sqrt(1 - share) / np.sqrt(kick_energy) if kick_energy > 0 else 0.0
+    tone_scale = np.sqrt(share) / np.sqrt(tone_energy) if tone_energy > 0 else 0.0
+    return ((kick_scale * bursts + tone_scale * tone).astype(np.float32),
+            (tone_scale * locked).astype(np.float32))
 
 
 def enhance(x: np.ndarray, rate: int, amount_db: float = 5.0,
@@ -679,7 +686,7 @@ def enhance(x: np.ndarray, rate: int, amount_db: float = 5.0,
             punch_decay_ms: float = DEFAULT_PUNCH_DECAY_MS,
             drums: np.ndarray | None = None,
             kicks: tuple[np.ndarray, np.ndarray] | None = None,
-            bassline: tuple[np.ndarray, float] | None = None
+            bassline: tuple | None = None
             ) -> tuple[np.ndarray, dict]:
     """Add `amount_db` of energy to the 31.5-63 Hz octave, under the kicks.
 
@@ -689,8 +696,10 @@ def enhance(x: np.ndarray, rate: int, amount_db: float = 5.0,
     given, is (offsets, strengths) already found and filtered -- see
     `select_kicks` -- and is used as it is.
 
-    `bassline`, if given, is (tone, share): a tone under the bass notes
-    (`bassline.tone`) and the part of the added energy it gets. The kick
+    `bassline`, if given, is (tone, share) or (tone, share, locked): a tone
+    under the bass notes (`bassline.tones`), the part of the added energy
+    it gets, and a tone locked in step with the deep notes. The locked tone
+    is never flipped with the rest: out of step it would cancel its note. The kick
     bursts and the tone are each brought to the same energy in the band,
     mixed share to share, and the one gain then sized for `amount_db` as
     before -- so the lift is what was asked for, only split. A track with
@@ -712,8 +721,13 @@ def enhance(x: np.ndarray, rate: int, amount_db: float = 5.0,
     report["kicks"] = int(kicks.size)
     report["kicks_per_minute"] = (kicks.size / (x.shape[0] / rate / 60)
                                   if x.shape[0] else 0.0)
-    tone, share = bassline if bassline is not None else (None, 0.0)
-    has_tone = tone is not None and float(np.mean(np.square(tone))) > 0
+    tone, share, locked = ((tuple(bassline) + (None,))[:3] if bassline is not None
+                           else (None, 0.0, None))
+    if tone is None and locked is not None:
+        tone = np.zeros_like(locked)
+    has_tone = tone is not None and (
+        float(np.mean(np.square(tone))) > 0
+        or (locked is not None and float(np.mean(np.square(locked))) > 0))
     report["bass_share"] = float(share) if has_tone else 0.0
     if kicks.size < 8 and (not has_tone or amount_db <= 0):
         report["note"] = "too few kick onsets to work from"
@@ -727,23 +741,28 @@ def enhance(x: np.ndarray, rate: int, amount_db: float = 5.0,
 
     sub = (_lay_bursts(x.shape[0], rate, kicks, strengths, freq, decay_s)
            if kicks.size >= 8 else np.zeros(x.shape[0], dtype=np.float32))
+    in_step = np.zeros(x.shape[0], dtype=np.float32)
     if has_tone:
-        sub = _share_out(sub, tone, share if kicks.size >= 8 else 1.0, rate)
+        sub, in_step = _share_out(sub, tone, share if kicks.size >= 8 else 1.0,
+                                  rate, locked)
         report["bass_share"] = float(share if kicks.size >= 8 else 1.0)
-    if float(np.mean(sub ** 2)) <= 0:
+    if float(np.mean(sub ** 2)) <= 0 and float(np.mean(in_step ** 2)) <= 0:
         report["note"] = "synthesis produced nothing"
         return x, report
 
     track_band = _band(x, rate, SUB_LOW_HZ, SUB_HIGH_HZ)
     sub_band = _band(sub, rate, SUB_LOW_HZ, SUB_HIGH_HZ)
-    if float(np.mean(sub_band ** 2)) <= 0:
+    step_band = _band(in_step, rate, SUB_LOW_HZ, SUB_HIGH_HZ)
+    if float(np.mean((sub_band + step_band) ** 2)) <= 0:
         report["note"] = "synthesis landed outside the target band"
         return x, report
 
-    # Reinforce rather than fight what is already under the kick.
+    # Reinforce rather than fight what is already under the kick. The
+    # locked tone is in step with its note already, and stays so.
     if float(np.mean(track_band * sub_band)) < 0:
         sub, sub_band = -sub, -sub_band
         report["polarity_flipped"] = True
+    sub, sub_band = sub + in_step, sub_band + step_band
 
     gain = _gain_for_increase(track_band, sub_band, amount_db)
     existing = float(np.mean(track_band ** 2))

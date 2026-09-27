@@ -1415,8 +1415,9 @@ def build_parser() -> argparse.ArgumentParser:
                           "no air at any setting")
     sub.add_argument("--bass-sub", action="store_true", default=None,
                      help="--stem-kicks: part of the sub follows the bassline, "
-                          "a tone an octave under the bass notes, shared with "
-                          "the kicks as the low end already is")
+                          "a tone an octave under the bass notes (on a note "
+                          "under 56 Hz, in step with it), shared with the "
+                          "kicks as the low end already is")
     sub.add_argument("--air-stems", action="store_true", default=None,
                      help="--air: put the air where vocals and instruments "
                           "carry the top end, not hi-hats and cymbals, from "

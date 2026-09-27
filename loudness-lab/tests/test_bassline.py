@@ -123,6 +123,152 @@ class TestWhereTheToneGoes(unittest.TestCase):
         self.assertAlmostEqual(20 * np.log10(rms(1) / rms(0)), -6.0, delta=2.0)
 
 
+DEEP = [41.2, 49.0, 36.7, 46.2, 43.7, 0.0, 51.9, 38.9]
+
+
+def _deep_line(seed: int = 1, repeats: int = 3, kicks: float = 1.0):
+    """(bass part, mix, each note's fundamental as it sits in the mix).
+
+    Notes under 56 Hz, each starting at a random phase, and in the mix a
+    kick on every one: She Blinded Me With Science, where the bass line is
+    the kick drum. The fundamental is kept apart as the truth a tone in
+    step with the note has to match."""
+    rng = np.random.default_rng(seed)
+    n = int(NOTE_S * RATE)
+    d = np.arange(n) / RATE
+    bass, fund, drums = [], [], []
+    for f in DEEP * repeats:
+        if not f:
+            bass.append(np.zeros(n)); fund.append(np.zeros(n)); drums.append(np.zeros(n))
+            continue
+        phi = rng.uniform(0, 2 * np.pi)
+        env = np.exp(-d / 0.8) * np.minimum(1.0, d / 0.004)
+        bass.append(sum(np.sin(2 * np.pi * f * k * d + k * phi) / k
+                        * np.exp(-d * 10 * (k - 1)) for k in range(1, 5)) * env)
+        fund.append(np.sin(2 * np.pi * f * d + phi) * env)
+        drums.append(fixtures._kick(n, rng))
+    bass, fund = 0.5 * np.concatenate(bass), 0.5 * np.concatenate(fund)
+    mix = bass + kicks * 0.5 * np.concatenate(drums)
+    stereo = lambda y: np.stack([y, y], axis=1).astype(np.float32)
+    return stereo(bass), stereo(mix), fund
+
+
+def _middles(n_total: int, skip: float = 0.12):
+    """The middle of each note: clear of its rise, its fall and the kick."""
+    n = int(NOTE_S * RATE)
+    for k, f in enumerate(DEEP * (n_total // (n * len(DEEP)))):
+        if f:
+            yield f, slice(k * n + int(skip * RATE), (k + 1) * n - int(0.05 * RATE))
+
+
+class TestADeepNoteGetsATone(unittest.TestCase):
+    """Under 56 Hz an octave down is under 28 Hz, so a deep note gets a tone
+    on its own pitch -- in step with it, the phase read from the mix."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.bass, cls.mix, cls.fund = _deep_line()
+        cls.free, cls.locked, cls.heard = bassline.tones(
+            cls.bass, RATE, cls.bass.shape[0], mix=cls.mix)
+
+    def in_step(self, tone):
+        """Per note: how closely the tone matches the note's own
+        fundamental in the mix, 1 exactly in step, -1 exactly against."""
+        out = []
+        for f, where in _middles(tone.size):
+            a, b = tone[where].astype(np.float64), self.fund[where]
+            out.append(float(np.dot(a, b) / np.linalg.norm(a) / np.linalg.norm(b)))
+        return np.array(out)
+
+    def test_it_is_in_step_with_every_note(self):
+        agree = self.in_step(self.locked)
+        self.assertGreater(float(np.min(agree)), 0.95, agree.round(3))
+
+    def test_it_is_a_tone_not_the_mix(self):
+        """Only the phase is read from the mix, and slowly: a lock wide
+        enough to follow the kick would print the kick's thump into the
+        tone's wobble. Over each whole note, kick included, the tone keeps
+        99.5% of its energy within 6 Hz of the note (at 6 Hz: 99.95%; a
+        60 Hz lock: 97.8%)."""
+        for f, where in _middles(self.locked.size, skip=0.0):
+            seg = self.locked[where].astype(np.float64)
+            spectrum = np.abs(np.fft.rfft(seg * np.hanning(seg.size), 8 * seg.size)) ** 2
+            freqs = np.fft.rfftfreq(8 * seg.size, 1 / RATE)
+            self.assertGreater(spectrum[np.abs(freqs - f) < 6].sum() / spectrum.sum(),
+                               0.995, f)
+
+    def test_so_every_note_only_gains(self):
+        # The note's own band, before and after, at the level the stage
+        # would add: never less, where a tone at a guessed phase takes
+        # some notes away.
+        band = lambda y: subbass._band(y, RATE, 30.0, 60.0)
+        scale = 0.5 * np.abs(self.fund).max() / np.abs(self.locked).max()
+        guessed = self.locked.astype(np.float64)
+        n = int(NOTE_S * RATE)
+        # The same tone at a phase not read from the mix: its own start.
+        rng = np.random.default_rng(5)
+        for k in range(0, guessed.size, n):
+            chunk = guessed[k:k + n]
+            analytic = np.fft.ifft(np.fft.fft(chunk) * np.r_[1, 2 * np.ones(chunk.size // 2 - 1),
+                                                         np.zeros(chunk.size - chunk.size // 2)])
+            guessed[k:k + n] = np.real(analytic * np.exp(1j * rng.uniform(0, 2 * np.pi)))
+        mix = self.mix[:, 0].astype(np.float64)
+        change = {"locked": [], "guessed": []}
+        for f, where in _middles(mix.size):
+            before = np.mean(band(mix)[where] ** 2)
+            for name, tone in (("locked", self.locked), ("guessed", guessed)):
+                after = np.mean(band(mix + scale * tone)[where] ** 2)
+                change[name].append(10 * np.log10(after / before))
+        self.assertGreater(min(change["locked"]), 1.0, np.round(change["locked"], 2))
+        self.assertLess(min(change["guessed"]), 0.0,
+                        "the fixture should show why the phase is read")
+
+    def test_notes_above_56_hz_keep_the_octave_under(self):
+        # The line the other tests use: its notes over 56 Hz get the same
+        # octave-under tone as before, the recording given or not.
+        bass, _ = _line(repeats=1)
+        free, locked, heard = bassline.tones(bass, RATE, bass.shape[0], mix=bass)
+        # LINE has two deep notes in ten, 41.2 and 55 Hz: only they are locked.
+        self.assertTrue(0.12 < heard["on_note"] <= 0.2, heard["on_note"])
+        without, _ = bassline.tone(bass, RATE, bass.shape[0])
+        np.testing.assert_allclose(free, without, atol=1e-6)
+
+    def test_without_the_recording_a_deep_note_gets_nothing(self):
+        free, locked, heard = bassline.tones(self.bass, RATE, self.bass.shape[0])
+        self.assertEqual(float(np.abs(locked).max()), 0.0)
+        self.assertEqual(heard["on_note"], 0.0)
+        self.assertIsNone(heard["median_deep_hz"])
+        self.assertAlmostEqual(self.heard["median_deep_hz"], 44.0, delta=4.0)
+
+    def test_the_sub_stage_never_flips_it(self):
+        """enhance flips what it adds when the kick bursts run against the
+        track. With the kick inverted in the mix one of these two is
+        flipped; the tone in step with the notes must stay in step in
+        both."""
+        flipped = []
+        for sign in (1.0, -1.0):
+            bass, mix, fund = _deep_line(kicks=sign)
+            free, locked, _ = bassline.tones(bass, RATE, bass.shape[0], mix=mix)
+            kicks = subbass.detect_kicks(mix, RATE, mix - bass)
+            out, report = subbass.enhance(mix, RATE, amount_db=4.0, kicks=kicks,
+                                          bassline=(free, 0.7, locked))
+            flipped.append(report["polarity_flipped"])
+            added = (out / 10 ** (report["safety_trim_db"] / 20) - mix)[:, 0]
+            for f, where in _middles(added.size, skip=0.3):
+                a, b = added[where].astype(np.float64), fund[where]
+                self.assertGreater(float(np.dot(a, b) / np.linalg.norm(a)
+                                         / np.linalg.norm(b)), 0.8, (sign, f))
+        self.assertEqual(sorted(flipped), [False, True])
+
+    def test_the_report_says_it(self):
+        line = fixtures.bassline_line(np.zeros_like(self.bass), self.bass,
+                                      self.bass.shape[0], mix=self.mix)
+        self.assertRegex(line, r"in step with the notes under 56 Hz \(around \d+ Hz\) \d+%")
+        said = bassline.what_it_did(self.heard, 0.4)
+        self.assertRegex(said, r"^40% of the sub under the bassline: one in step "
+                               r"with the deep notes around \d+ Hz, \d+% of the track$")
+
+
 class TestTheShare(unittest.TestCase):
     def test_it_is_where_the_low_end_is(self):
         mix, drums, _ = fixtures.programme("groove", seconds=10.0)

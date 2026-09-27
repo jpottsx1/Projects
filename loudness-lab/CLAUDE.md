@@ -162,8 +162,11 @@ every machine but the one that made it for a while.
   `no tempo:` with every place looked (the frames in the file, each
   library and how many tracks it lists), so if this misses too, the next
   report says why. The ID3 walk also takes v2.4 sizes written as plain
-  integers, unsynchronisation and data-length indicators. Schema v7
-  marks rows with no tempo stale once more (v6 did it for the frame).
+  integers, unsynchronisation and data-length indicators. Jeff asked
+  about a "Tempo" field: ffprobe names a TXXX:TEMPO (or FLAC's TEMPO)
+  `TEMPO`, which was not read either; `decode.BPM_TAGS` now lists it and
+  MixMeister's `fBPM`, checked against real ffprobe. Schema v8 marks
+  rows with no tempo stale once more (v6 for the frame, v7 the library).
 - **`git pull --ff-only` stops for good once the Mac has a commit GitHub
   lacks.** A report ran at f48b3bf, a version GitHub never had, and no
   update would ever have arrived. Both Finder commands now source

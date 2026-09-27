@@ -29,6 +29,13 @@ ORIGINAL_YEAR_TAGS = ("originaldate", "originalyear", "original_year",
 RELEASE_YEAR_TAGS = ("date", "year", "tdrc", "tyer", "tdrl", "release_date")
 
 
+# Where a tempo is written, as ffprobe names it (lowercased): the ID3 BPM
+# frame, iTunes' atom, and the free-text fields taggers use -- "TEMPO"
+# (a "Tempo" field; FLAC's comment of that name), "BPM", MixMeister's
+# "fBPM". The first one present wins.
+BPM_TAGS = ("tbpm", "bpm", "tmpo", "tempo", "fbpm")
+
+
 class DecodeError(RuntimeError):
     pass
 
@@ -80,7 +87,7 @@ def probe(path: Path) -> dict:
         "genre": tags.get("genre"),
         "year": year,
         "year_is_original": year_is_original,
-        "bpm": (_bpm(tags.get("tbpm") or tags.get("bpm") or tags.get("tmpo"))
+        "bpm": (_bpm(next((tags[k] for k in BPM_TAGS if tags.get(k)), None))
                 or serato_bpm(path)),
         "musical_key": tags.get("initialkey") or tags.get("tkey") or tags.get("key"),
     }

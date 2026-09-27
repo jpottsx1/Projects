@@ -588,6 +588,8 @@ def _analyse(task: dict) -> dict:
     # column the grid the filter settled on (double the tag, sometimes).
     against = {name: tagged for name in columns}
     notes = [f"no tempo: {task['no_tempo']}"] if task.get("no_tempo") else []
+    if task.get("tempo_from"):
+        notes.append(f"tempo from {task['tempo_from']}")
     for backend in task["backends"]:
         parts = (task["parts"][backend] if task["parts"]
                  else separated(x, backend, task["cache"], task["legacy"])[0])
@@ -687,8 +689,12 @@ def measure_files(paths: list[Path], backends: list[str],
         else:
             for b in backends:
                 keep_separation(x, b, cache, legacy)
-        tagged = decode.probe(path).get("bpm")
+        tagged, source = decode.tempo_with_source(path)
         return {"x": x, "tagged": tagged,
+                # Where a tempo that is not a plain tag came from: Serato's
+                # frame, its library, or another copy of the file in it.
+                "tempo_from": (source if tagged and not source.endswith(" tag")
+                               else None),
                 # A track with no tempo says where one was looked for, so a
                 # missing tempo is diagnosed from the report it shows up in.
                 "no_tempo": (None if tagged else

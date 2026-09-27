@@ -6,6 +6,7 @@ import sqlite3
 from pathlib import Path
 
 from . import SCHEMA_VERSION, __version__
+from .decode import TEMPO_READER
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -108,8 +109,26 @@ def connect(path: Path) -> sqlite3.Connection:
                      (str(SCHEMA_VERSION),))
     else:
         _migrate(conn, int(stored["value"]))
+    _look_again_for_tempos(conn)
     conn.commit()
     return conn
+
+
+def _look_again_for_tempos(conn: sqlite3.Connection) -> None:
+    """Measure again, once, the rows with no tempo when there is somewhere
+    new to look for one (`decode.TEMPO_READER`). Kept apart from the schema
+    version: finding tempos changed three times in a day, and a schema bump
+    costs the app a matching change each time."""
+    stored = conn.execute(
+        "SELECT value FROM meta WHERE key = 'tempo_reader'").fetchone()
+    if stored is not None and int(stored["value"]) >= TEMPO_READER:
+        return
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(tracks)")}
+    if "bpm" in columns:
+        conn.execute("UPDATE tracks SET status = 'stale' "
+                     "WHERE bpm IS NULL AND status = 'ok'")
+    conn.execute("INSERT OR REPLACE INTO meta (key, value) VALUES ('tempo_reader', ?)",
+                 (str(TEMPO_READER),))
 
 
 def _migrate(conn: sqlite3.Connection, version: int) -> None:

@@ -103,6 +103,20 @@ class TestProbeTakesItWhereTbpmIsMissing(unittest.TestCase):
         with mock.patch.object(decode.subprocess, "run", return_value=done):
             return decode.probe(path)["bpm"]
 
+    def test_where_it_came_from(self):
+        serato = _tag([(b"GEOB", _geob("Serato Autotags", _autotags("122.00")))])
+        path = _file(serato)
+        self.addCleanup(path.unlink, missing_ok=True)
+        answer = {"streams": [{"codec_name": "mp3"}], "format": {"tags": {"TEMPO": "99"}}}
+        done = mock.Mock(returncode=0, stdout=json.dumps(answer), stderr="")
+        with mock.patch.object(decode.subprocess, "run", return_value=done):
+            self.assertEqual(decode.tempo_with_source(path), (99.0, "the TEMPO tag"))
+        answer["format"]["tags"] = {}
+        done.stdout = json.dumps(answer)
+        with mock.patch.object(decode.subprocess, "run", return_value=done):
+            self.assertEqual(decode.tempo_with_source(path),
+                             (122.0, "Serato's frame in the file"))
+
     def test_tbpm_first_then_serato(self):
         serato = _tag([(b"GEOB", _geob("Serato Autotags", _autotags("122.00")))])
         self.assertEqual(self.probe({"TBPM": "118"}, serato), 118.0)
@@ -193,12 +207,53 @@ class TestSeratoLibrary(unittest.TestCase):
     def test_it_says_where_it_looked(self):
         path = self.track("05 Nowhere.mp3")
         said = decode.where_the_tempo_was_looked_for(path)
-        self.assertIn("ID3v2.4, 1 frames; Serato frames: none", said)
+        self.assertIn("ID3v2.4, frames TIT2; Serato frames: none", said)
         self.assertIn("no Serato library at", said)
         self.library({self.track("06 Other.mp3"): "100"})
         said = decode.where_the_tempo_was_looked_for(path)
         self.assertIn("1 tracks with a BPM, not this one", said)
         self.assertIn("Downloads/Disc 4/05 Nowhere.mp3", said)
+
+    def test_another_copy_of_the_same_file(self):
+        """Disc 4, third report: the files in Downloads were never touched
+        by Serato and its library had 1059 tracks, none at that path. The
+        BPMs Serato showed were another copy's."""
+        path = self.track("07.Thomas Dolby - She Blinded Me With Science.mp3")
+        copy = self.home / "Music" / "New Romantics" / "Disc 4" / path.name
+        copy.parent.mkdir(parents=True)
+        self.library({copy: "128.00", self.track("Other.mp3"): "90"})
+        self.assertEqual(decode.serato_bpm(path), 128.0)
+        with mock.patch.object(decode, "_ffprobe", return_value={"streams": [{}]}):
+            bpm, source = decode.tempo_with_source(path)
+        self.assertEqual(bpm, 128.0)
+        self.assertEqual(source, "Serato's library, the same file name at "
+                                 f"{copy}")
+
+    def test_its_own_entry_first(self):
+        path = self.track("08 Guilty.mp3")
+        copy = self.home / "Elsewhere" / path.name
+        copy.parent.mkdir()
+        self.library({copy: "140", path: "135"})
+        self.assertEqual(decode.serato_library_match(path), (135.0, None))
+
+    def test_a_name_with_two_tempos_is_two_songs(self):
+        path = self.track("01 Intro.mp3")
+        a, b = self.home / "A" / path.name, self.home / "B" / path.name
+        self.library({a: "100", b: "120"})
+        self.assertIsNone(decode.serato_bpm(path))
+        said = decode.where_the_tempo_was_looked_for(path)
+        self.assertIn("this file name with different BPMs at", said)
+        self.assertIn("(100)", said)
+        self.assertIn("(120)", said)
+
+    def test_the_free_text_fields_are_named(self):
+        path = self.music / "free.mp3"
+        path.write_bytes(_tag([(b"TIT2", b"\x00Song"),
+                               (b"TXXX", b"\x00Tempo Guess\x00fast"),
+                               (b"TXXX", b"\x01\xff\xfe" + "MOOD".encode("utf-16-le")
+                                + b"\x00\x00\xff\xfeh\x00i\x00")]))
+        said = decode.where_the_tempo_was_looked_for(path)
+        self.assertIn("frames TIT2 TXXX(Tempo Guess) TXXX(MOOD)", said)
 
 
 class TestTheTagReadLeniently(unittest.TestCase):

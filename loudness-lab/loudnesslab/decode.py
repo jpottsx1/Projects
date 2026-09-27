@@ -34,6 +34,11 @@ RELEASE_YEAR_TAGS = ("date", "year", "tdrc", "tyer", "tdrl", "release_date")
 # (a "Tempo" field; FLAC's comment of that name), "BPM", MixMeister's
 # "fBPM". The first one present wins.
 BPM_TAGS = ("tbpm", "bpm", "tmpo", "tempo", "fbpm")
+# Which way of finding a tempo a database's rows were read with. Each new
+# place to look bumps it, and `db.connect` then measures again, once, the
+# rows that had none. 1 TBPM; 2 Serato's frame; 3 its library; 4 TEMPO and
+# fBPM; 5 another copy of the file in the library, by name.
+TEMPO_READER = 5
 
 
 class DecodeError(RuntimeError):
@@ -49,8 +54,7 @@ def require_tools() -> None:
         )
 
 
-def probe(path: Path) -> dict:
-    """Container/stream properties and tags, normalised to lowercase keys."""
+def _ffprobe(path: Path) -> dict:
     out = subprocess.run(
         ["ffprobe", "-v", "error", "-print_format", "json",
          "-show_format", "-show_streams", "-select_streams", "a:0", str(path)],
@@ -62,16 +66,25 @@ def probe(path: Path) -> dict:
         data = json.loads(out.stdout)
     except json.JSONDecodeError as exc:
         raise DecodeError(f"ffprobe returned unparseable JSON: {exc}") from exc
-
-    streams = data.get("streams") or []
-    if not streams:
+    if not data.get("streams"):
         raise DecodeError("no audio stream")
-    stream, fmt = streams[0], data.get("format", {})
+    return data
 
+
+def _tags(data: dict) -> dict:
     tags = {}
-    for source in (fmt.get("tags") or {}, stream.get("tags") or {}):
+    for source in ((data.get("format") or {}).get("tags") or {},
+                   (data.get("streams") or [{}])[0].get("tags") or {}):
         for key, value in source.items():
             tags.setdefault(key.lower(), value)
+    return tags
+
+
+def probe(path: Path) -> dict:
+    """Container/stream properties and tags, normalised to lowercase keys."""
+    data = _ffprobe(path)
+    stream, fmt = data["streams"][0], data.get("format", {})
+    tags = _tags(data)
 
     year, year_is_original = _year(tags)
 
@@ -87,8 +100,7 @@ def probe(path: Path) -> dict:
         "genre": tags.get("genre"),
         "year": year,
         "year_is_original": year_is_original,
-        "bpm": (_bpm(next((tags[k] for k in BPM_TAGS if tags.get(k)), None))
-                or serato_bpm(path)),
+        "bpm": _bpm_and_source(path, tags)[0],
         "musical_key": tags.get("initialkey") or tags.get("tkey") or tags.get("key"),
     }
 
@@ -361,6 +373,8 @@ def _library_key(text: str) -> str:
 
 
 _LIBRARIES: dict[tuple[str, float], dict[str, float]] = {}
+# The same library by file name: {name: [(path as written, BPM)]}.
+_BY_NAME: dict[tuple[str, float], dict[str, list[tuple[str, float]]]] = {}
 
 
 def serato_library(database: Path) -> dict[str, float] | None:
@@ -381,7 +395,7 @@ def serato_library(database: Path) -> dict[str, float] | None:
             data = database.read_bytes()
         except OSError:
             return None
-        tracks = {}
+        tracks, names = {}, {}
         for name, value in _serato_fields(data):
             if name != b"otrk":
                 continue
@@ -389,10 +403,22 @@ def serato_library(database: Path) -> dict[str, float] | None:
             where = fields.get(b"pfil")
             bpm = _bpm(fields.get(b"tbpm", b"").decode("utf-16-be", "replace"))
             if where and bpm:
-                tracks[_library_key(where.decode("utf-16-be", "replace"))] = bpm
+                written = where.decode("utf-16-be", "replace")
+                tracks[_library_key(written)] = bpm
+                names.setdefault(_library_key(written.rsplit("/", 1)[-1]),
+                                 []).append((written, bpm))
         _LIBRARIES.clear()                    # one library at a time is plenty
-        _LIBRARIES[key] = tracks
+        _BY_NAME.clear()
+        _LIBRARIES[key], _BY_NAME[key] = tracks, names
     return _LIBRARIES[key]
+
+
+def _same_name(database: Path, path: Path) -> list[tuple[str, float]]:
+    """Tracks in the library with this file's name, wherever they are."""
+    if serato_library(database) is None:
+        return []
+    key = (str(database), database.stat().st_mtime)
+    return _BY_NAME.get(key, {}).get(_library_key(Path(path).name), [])
 
 
 def _serato_fields(data: bytes):
@@ -404,13 +430,46 @@ def _serato_fields(data: bytes):
 
 
 def serato_library_bpm(path: Path) -> float | None:
+    return serato_library_match(path)[0]
+
+
+def serato_library_match(path: Path) -> tuple[float | None, str | None]:
+    """(BPM, where) from Serato's library: this file's own entry, or else a
+    track of the same file name elsewhere -- another copy of the song, the
+    one Serato analysed (Disc 4: the BPMs Serato showed were not for the
+    files in Downloads, which Serato had never written to). `where` is None
+    for the file's own entry, else the other copy's path. A name that
+    appears with different BPMs gives none: two songs, not one."""
     for database, written in _serato_databases(path):
         tracks = serato_library(database)
-        if tracks:
-            found = tracks.get(_library_key(written))
-            if found:
-                return found
-    return None
+        if tracks and _library_key(written) in tracks:
+            return tracks[_library_key(written)], None
+    for database, _ in _serato_databases(path):
+        copies = _same_name(database, path)
+        if copies and all(abs(bpm - copies[0][1]) <= 0.05 for _, bpm in copies):
+            return copies[0][1], copies[0][0]
+    return None, None
+
+
+def tempo_with_source(path: Path) -> tuple[float | None, str | None]:
+    """(tempo, where it came from in words), as `probe` reads it."""
+    tags = _tags(_ffprobe(path))
+    return _bpm_and_source(path, tags)
+
+
+def _bpm_and_source(path: Path, tags: dict) -> tuple[float | None, str | None]:
+    for key in BPM_TAGS:
+        found = _bpm(tags.get(key))
+        if found:
+            return found, f"the {key.upper()} tag"
+    found = _autotags_in_file(path)
+    if found:
+        return found, "Serato's frame in the file"
+    found, elsewhere = serato_library_match(path)
+    if found:
+        return found, ("Serato's library" if elsewhere is None else
+                       f"Serato's library, the same file name at /{elsewhere}")
+    return None, None
 
 
 def where_the_tempo_was_looked_for(path: Path, tags: dict | None = None) -> str:
@@ -427,16 +486,39 @@ def where_the_tempo_was_looked_for(path: Path, tags: dict | None = None) -> str:
         said.append(f"an ID3v2.{major} tag with no frames read")
     else:
         geobs = [_geob(body)[0] for fid, body in frames if fid == b"GEOB"]
-        said.append(f"ID3v2.{major}, {len(frames)} frames; Serato frames: "
+        said.append(f"ID3v2.{major}, frames "
+                    + " ".join(_frame_name(fid, body) for fid, body in frames)
+                    + "; Serato frames: "
                     + (", ".join(g or "?" for g in geobs) if geobs else "none"))
     for database, written in _serato_databases(path):
         tracks = serato_library(database)
         if tracks is None:
             said.append(f"no Serato library at {database}")
-        else:
-            said.append(f"Serato library at {database}: {len(tracks)} tracks "
-                        f"with a BPM, not this one ({written})")
+            continue
+        copies = _same_name(database, path)
+        said.append(f"Serato library at {database}: {len(tracks)} tracks "
+                    f"with a BPM, not this one ({written})"
+                    + ("" if not copies else
+                       "; this file name with different BPMs at "
+                       + ", ".join(f"/{w} ({b:g})" for w, b in copies[:3])))
     return "; ".join(said)
+
+
+def _frame_name(frame_id: bytes, body: bytes) -> str:
+    """A frame's id, and for a free-text one (TXXX) what it is called."""
+    name = frame_id.decode("ascii", "replace")
+    if frame_id == b"TXXX" and body:
+        wide = body[0] in (1, 2)
+        text = body[1:]
+        end = text.find(b"\0\0") if wide else text.find(b"\0")
+        while wide and end > 0 and end % 2:
+            end = text.find(b"\0\0", end + 1)
+        label = text[:end if end >= 0 else None]
+        label = (label.decode("utf-16" if label[:2] in (b"\xff\xfe", b"\xfe\xff")
+                              else "utf-16-be", "replace") if wide
+                 else label.decode("latin-1", "replace"))
+        name += f"({label.strip(chr(0xfeff)).strip()})"
+    return name
 
 
 def _round(value: float | None, divisor: float) -> float | None:

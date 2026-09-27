@@ -961,7 +961,8 @@ class TestTheKickReport(unittest.TestCase):
     def setUpClass(cls):
         cls.drums, _, _ = fixtures.backbeat(seconds=40.0)
 
-    def run_report(self, cache, drums=None, bpm=104.0, legacy=None):
+    def run_report(self, cache, drums=None, bpm=104.0, legacy=None,
+                   source="the TBPM tag"):
         """(the report, how many times it separated)."""
         from loudnesslab import decode
         drums = self.drums if drums is None else drums
@@ -971,6 +972,8 @@ class TestTheKickReport(unittest.TestCase):
         with mock.patch.object(decode, "require_tools"), \
                 mock.patch.object(decode, "find_audio", return_value=[Path("a.mp3")]), \
                 mock.patch.object(decode, "probe", return_value={"bpm": bpm}), \
+                mock.patch.object(decode, "tempo_with_source",
+                                  return_value=(bpm, source if bpm else None)), \
                 mock.patch.object(decode, "decode", return_value=drums), \
                 mock.patch.object(stems, "separate", return_value=parts) as separate, \
                 contextlib.redirect_stdout(out):
@@ -1007,6 +1010,15 @@ class TestTheKickReport(unittest.TestCase):
             tagged, _ = self.run_report(Path(tmp))
         self.assertIn("no tempo: nowhere useful", untagged)
         self.assertNotIn("no tempo", tagged)
+
+    def test_a_tempo_from_another_copy_says_so(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            report, _ = self.run_report(
+                Path(tmp), source="Serato's library, the same file name at /Music/a.mp3")
+            plain, _ = self.run_report(Path(tmp))
+        self.assertIn("tempo from Serato's library, the same file name at "
+                      "/Music/a.mp3", report)
+        self.assertNotIn("tempo from", plain)
 
     def test_a_song_processing_separated_is_not_separated_again(self):
         """One store for both: what processing kept is what the report
@@ -1106,6 +1118,8 @@ class TestTheKickReport(unittest.TestCase):
                                       side_effect=lambda d: [Path(f"{d.name}-{i}.mp3")
                                                              for i in range(3)]), \
                     mock.patch.object(decode, "probe", return_value={"bpm": 104.0}), \
+                    mock.patch.object(decode, "tempo_with_source",
+                                      return_value=(104.0, "the TBPM tag")), \
                     mock.patch.object(decode, "decode",
                                       side_effect=lambda p, rate: by_name[p.name]), \
                     mock.patch.object(stems, "separate",

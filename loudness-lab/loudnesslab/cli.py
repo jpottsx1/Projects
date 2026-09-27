@@ -188,6 +188,56 @@ def _variant(kind: str, path: Path, label: str, audio) -> dict:
     }
 
 
+DEVICES = {"mps": "the Mac's graphics chip", "cuda": "the graphics card",
+           "cpu": "the processor"}
+
+
+def _timing(results: list[dict], workers: int, seconds: float,
+            separating: dict | None) -> str | None:
+    """Where a processing run's time went, in words: separating (one track
+    at a time, in this process) against processing (`workers` at a time),
+    and which one the run waited on. The two overlap, so the slower one
+    sets the pace -- and speeding up the other buys nothing."""
+    worked = [r["seconds"] for r in results
+              if r.get("seconds") is not None and r["status"] != "skipped"]
+    if not worked:
+        return None
+    lines = [f"  Time: {seconds / 60:.1f} min for {len(results)} track(s), "
+             f"{seconds / max(1, len(results)):.0f} s a track overall."]
+    each = sum(worked) / len(worked)
+    lines.append(f"  Processing: {each:.0f} s a track, {workers} at a time "
+                 f"-- {each / workers:.0f} s a track of the run.")
+    peaks = [r["peak_gb"] for r in results if r.get("peak_gb")]
+    memory = render.physical_memory_gb()
+    if peaks and memory:
+        needed = max(peaks) * workers
+        lines.append(f"  Memory: up to {max(peaks):.1f} GB a track, "
+                     f"{workers} at a time, on a machine with {memory:.0f} GB.")
+        if needed + render.RESERVE_GB > memory:
+            lines.append("  That is more than fits beside the system and "
+                         "Demucs, so it will have been swapping to disk, "
+                         "which slows everything. Fewer at a time would be "
+                         "faster.")
+    if separating and separating["separated"]:
+        split = separating["separate_s"] / separating["separated"]
+        where = " and ".join(DEVICES.get(d, d) for d in sorted(separating["devices"]))
+        lines.append(f"  Separating: {split:.0f} s a track on {where}, "
+                     f"{separating['separated']} track(s); the rest were "
+                     f"separated before.")
+        if stems.gpu_failure():
+            lines.append(f"  The graphics chip failed and was given up on "
+                         f"for this run: {stems.gpu_failure()}")
+        pace = each / workers
+        if split > 1.2 * pace:
+            lines.append("  Separating set the pace: processing waited on it. "
+                         "A second run over these tracks separates nothing.")
+        elif pace > 1.2 * split:
+            lines.append("  Processing set the pace, not separating.")
+        else:
+            lines.append("  The two kept pace with each other.")
+    return "\n".join(lines)
+
+
 def _separator(jobs: list[dict], cache_dir: Path, porcelain: bool,
                quiet: bool):
     """The per-track separation step, as a function the pool pipeline
@@ -220,7 +270,10 @@ def _separator(jobs: list[dict], cache_dir: Path, porcelain: bool,
     wanted = [job for job in jobs
               if job.get("skip") is None and (kicks(job) or guide(job))]
     ids = {id(job) for job in wanted}
-    state = {"done": 0, "processing_started": False}
+    state = {"done": 0, "processing_started": False,
+             # For the run's timing line: time spent separating, on how
+             # many tracks, and where.
+             "separated": 0, "separate_s": 0.0, "devices": set()}
 
     def prepare(job):
         if id(job) not in ids:
@@ -236,7 +289,11 @@ def _separator(jobs: list[dict], cache_dir: Path, porcelain: bool,
                 # Keep everything anything reads: separating is the cost.
                 # The guide, and the kick report's parts, so checking this
                 # folder in the report later separates nothing.
+                started = time.monotonic()
                 parts = stems.separate(audio, decode.TARGET_RATE, "demucs")
+                state["separate_s"] += time.monotonic() - started
+                state["separated"] += 1
+                state["devices"].add(stems.last_device.get("name", "?"))
                 stems.store_kick_source(cache_dir, audio, decode.TARGET_RATE,
                                         parts["drums"],
                                         [parts["vocals"], parts["other"]],
@@ -774,9 +831,12 @@ def cmd_subbass(args: argparse.Namespace) -> int:
         def reported(done, total, result, _report=report_one, _state=prepare.state):
             _state["processing_started"] = True
             _report(done, total, result)
+    started_processing = time.monotonic()
     results = render.run(jobs, workers=workers,
                          progress=reported if prepare else report_one,
                          prepare=prepare)
+    timing = _timing(results, workers, time.monotonic() - started_processing,
+                     prepare.state if prepare else None)
 
     written = sum(1 for r in results if r["status"] == "ok")
     outcomes = [(r["folder"], r["amount"], r.get("reason") if r["status"] != "ok"
@@ -804,6 +864,11 @@ def cmd_subbass(args: argparse.Namespace) -> int:
         out()
     out(_policy_preview(outcomes))
     out()
+    if timing:
+        out(timing)
+        out()
+        if porcelain:
+            _emit({"event": "note", "message": timing})
     manifest_path = None
     if args.dry_run:
         out(f"  DRY RUN -- nothing written. {written} track(s) would be "

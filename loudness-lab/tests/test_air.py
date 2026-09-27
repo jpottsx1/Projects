@@ -251,3 +251,21 @@ class TestWhatItCosts(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestBlockByBlock(unittest.TestCase):
+    """The oversampled middle runs a block at a time (2 GB a four-minute
+    track, whole). The blocks must add up to the whole-track result: the
+    margins give each block's resampler what it would have seen."""
+
+    def test_blocks_are_the_whole_track(self):
+        from unittest import mock
+        x, _ = programme(seconds=6.0)
+        source = sosfiltfilt(butter(4, air.DEFAULT_TUNE_HZ, btype="high", fs=RATE,
+                                    output="sos"), x, axis=0)
+        with mock.patch.object(air, "BLOCK_S", 1000.0):
+            whole = air._harmonics(source, RATE, air.DRIVE, air.BIAS)
+        with mock.patch.object(air, "BLOCK_S", 0.7):
+            blocks = air._harmonics(source, RATE, air.DRIVE, air.BIAS)
+        scale = float(np.sqrt(np.mean(whole ** 2)))
+        self.assertLess(float(np.abs(blocks - whole).max()) / scale, 1e-6)

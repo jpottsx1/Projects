@@ -83,6 +83,14 @@ REPORT_BASS_RATE = KICK_SOURCE_RATE
 SHARED_CACHE = Path.home() / "Music" / "LoudnessLab" / "stem-cache"
 
 _loaded: dict[str, object] = {}
+# Where the last Demucs separation ran: "mps" (the Mac's GPU), "cuda" or
+# "cpu". Read by the processing run's timing line.
+last_device: dict[str, str] = {}
+
+
+def gpu_failure() -> str | None:
+    """Why the Mac's GPU was given up on this run, if it was."""
+    return _loaded.get("mps_failed")
 
 
 def available() -> list[str]:
@@ -120,15 +128,22 @@ def _demucs(x: np.ndarray, model=None) -> dict[str, np.ndarray]:
             return apply_model(model, ((wav - mean) / std)[None], device=device,
                                split=True, overlap=0.25, progress=False)[0]
 
-    if torch.backends.mps.is_available():
+    if torch.backends.mps.is_available() and "mps_failed" not in _loaded:
         # Apple's GPU backend has lacked operations Demucs uses in some
-        # PyTorch releases. Slower is better than stopping a batch.
+        # PyTorch releases. Slower is better than stopping a batch -- but
+        # once it has failed, the rest of the run goes straight to the CPU
+        # rather than paying for a failed try on every track, and the
+        # reason is kept for the run's timing line to say.
         try:
             out = run("mps")
-        except (RuntimeError, NotImplementedError):
+            last_device["name"] = "mps"
+        except (RuntimeError, NotImplementedError) as exc:
+            _loaded["mps_failed"] = f"{type(exc).__name__}: {exc}"[:200]
             out = run("cpu")
+            last_device["name"] = "cpu"
     else:
-        out = run("cuda" if torch.cuda.is_available() else "cpu")
+        last_device["name"] = "cuda" if torch.cuda.is_available() else "cpu"
+        out = run(last_device["name"])
     out = out * std + mean
     return {name: out[i].cpu().numpy().T.astype(np.float32)
             for i, name in enumerate(model.sources)}

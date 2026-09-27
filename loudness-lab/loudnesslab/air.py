@@ -97,6 +97,59 @@ def _blank(note: str | None = None) -> dict:
             "guided": False, "note": note}
 
 
+# The oversampled middle runs a block at a time. At 4x, a four-minute
+# stereo track is 92 million samples an array, 740 MB in float64, and the
+# whole-track version peaked at 2 GB a track -- with two tracks in flight
+# and Demucs beside them, enough to send a Mac to swap (measured here: 21.6
+# s and +2025 MB for four minutes). Each block carries MARGIN_S of the
+# track either side, so the resampler's filters see what they would have
+# seen on the whole track, and the margins are cut away after; the tanh
+# between is sample by sample. The result is the whole-track one to within
+# rounding (tests/test_air).
+BLOCK_S = 20.0
+MARGIN_S = 0.25
+
+
+def _harmonics(source: np.ndarray, rate: int, drive: float, bias: float
+               ) -> np.ndarray:
+    """What the curve adds to `source` that is not `source`: up, distort,
+    remove the linear part, down. Block by block; see BLOCK_S."""
+    n = source.shape[0]
+    block, margin = int(BLOCK_S * rate), int(MARGIN_S * rate)
+    out = np.zeros(source.shape, dtype=np.float64)
+    # Subtract the curve's own small-signal gain, leaving only what is
+    # genuinely non-linear. Without this the stage is mostly a high shelf
+    # with a little distortion on it: tanh is very nearly linear near the
+    # origin, so the "harmonic" path carries a scaled copy of the source,
+    # it adds COHERENTLY with the dry signal, and the amount overshoots --
+    # measured, +1 dB asked for came back as +3.13. It also makes the
+    # whole argument for the stage false, since a shelf would then do the
+    # same thing.
+    #
+    # The gain to remove is the derivative at zero: d/du tanh(drive*u +
+    # bias) = drive * (1 - tanh^2(bias)).
+    linear = drive * (1 - np.tanh(bias) ** 2)
+    offset = np.tanh(bias)
+    for start in range(0, n, block):
+        stop = min(n, start + block)
+        lo, hi = max(0, start - margin), min(n, stop + margin)
+        up = soxr.resample(source[lo:hi], rate, rate * OVERSAMPLE, quality="VHQ")
+        # tanh(drive*up + bias) - tanh(bias) - linear*up, in place: a
+        # block's worth of memory, once.
+        shaped = up * drive
+        shaped += bias
+        np.tanh(shaped, out=shaped)
+        shaped -= offset
+        up *= linear
+        shaped -= up
+        del up
+        down = soxr.resample(shaped, rate * OVERSAMPLE, rate, quality="VHQ")
+        del shaped
+        piece = down[start - lo:start - lo + (stop - start)]
+        out[start:start + piece.shape[0]] = piece
+    return out
+
+
 def excite(x: np.ndarray, rate: int, amount_db: float = DEFAULT_AIR_DB,
            tune_hz: float = DEFAULT_TUNE_HZ,
            drive: float = DRIVE, bias: float = BIAS,
@@ -137,25 +190,7 @@ def excite(x: np.ndarray, rate: int, amount_db: float = DEFAULT_AIR_DB,
     # one -- about 4x faster on a full track, measured. `VHQ` because this
     # is exactly the aliasing suppression the module docstring measured and
     # the margin costs little next to that 4x.
-    up = soxr.resample(source, rate, rate * OVERSAMPLE, quality="VHQ")
-    shaped = np.tanh(drive * up + bias) - np.tanh(bias)
-    # Subtract the curve's own small-signal gain, leaving only what is
-    # genuinely non-linear. Without this the stage is mostly a high shelf
-    # with a little distortion on it: tanh is very nearly linear near the
-    # origin, so the "harmonic" path carries a scaled copy of the source,
-    # it adds COHERENTLY with the dry signal, and the amount overshoots --
-    # measured, +1 dB asked for came back as +3.13. It also makes the
-    # whole argument for the stage false, since a shelf would then do the
-    # same thing.
-    #
-    # The gain to remove is the derivative at zero: d/du tanh(drive*u +
-    # bias) = drive * (1 - tanh^2(bias)).
-    harmonics = soxr.resample(shaped - drive * (1 - np.tanh(bias) ** 2) * up,
-                              rate * OVERSAMPLE, rate, quality="VHQ")
-    harmonics = harmonics[:x.shape[0]]
-    if harmonics.shape[0] < x.shape[0]:
-        harmonics = np.pad(harmonics,
-                           ((0, x.shape[0] - harmonics.shape[0]), (0, 0)))
+    harmonics = _harmonics(source, rate, drive, bias)
 
     # Again, and causally this time. An asymmetric curve rectifies, so it
     # produces DC and a spray of difference tones BELOW the tune frequency
@@ -189,8 +224,12 @@ def excite(x: np.ndarray, rate: int, amount_db: float = DEFAULT_AIR_DB,
         harmonics = harmonics * np.asarray(guide, dtype=np.float64)[:, None]
         report["guided"] = True
         report["guide_mean"] = float(np.mean(guide))
+        # The band filter is linear, so the band of the result is the dry
+        # band plus the band of what was added: filter only the guided
+        # harmonics, not the whole result again.
+        wet = _band(harmonics, rate, BAND_LOW_HZ, BAND_HIGH_HZ)
     y = (x + gain * harmonics).astype(x.dtype)
-    after = _band_energy(y, rate, BAND_LOW_HZ, BAND_HIGH_HZ)
+    after = float(np.mean((dry + gain * wet) ** 2))
 
     was, now = bs1770.measure(x), bs1770.measure(y)
     report.update({

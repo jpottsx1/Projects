@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import multiprocessing
 import os
+import time
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
@@ -46,7 +47,38 @@ def default_jobs() -> int:
     tracks are minutes long, and a rule fitted to a test fixture is a rule
     fitted to nothing.
     """
-    return max(1, (os.cpu_count() or 2) // 2)
+    by_cores = max(1, (os.cpu_count() or 2) // 2)
+    memory = physical_memory_gb()
+    if memory is None:
+        return by_cores
+    # And no more than fit in memory: a worker with the bassline sub and
+    # air on peaked at 1.8 GB on a four-minute track (measured), so
+    # WORKER_GB each, after RESERVE_GB for the system and Demucs. Past
+    # that the Mac swaps, and everything -- separating too -- slows down
+    # together.
+    by_memory = max(1, int((memory - RESERVE_GB) // WORKER_GB))
+    return min(by_cores, by_memory)
+
+
+WORKER_GB = 2.5
+RESERVE_GB = 5.0
+
+
+def physical_memory_gb() -> float | None:
+    """The machine's memory in GB, or None where it cannot be read."""
+    try:
+        return os.sysconf("SC_PHYS_PAGES") * os.sysconf("SC_PAGE_SIZE") / 2 ** 30
+    except (ValueError, OSError, AttributeError):
+        return None
+
+
+def peak_memory_gb() -> float:
+    """This process's peak memory so far, in GB. macOS reports it in
+    bytes, Linux in kilobytes."""
+    import resource
+    import sys
+    peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    return peak / 2 ** 30 if sys.platform == "darwin" else peak / 2 ** 20
 
 
 def _variant(kind: str, path: Path, label: str, audio) -> dict:
@@ -87,7 +119,19 @@ def _mean_low(table: dict) -> float:
 
 
 def one(job: dict) -> dict:
-    """Process one track. Runs in a worker process; never raises."""
+    """Process one track. Runs in a worker process; never raises. The
+    result carries `seconds`, how long the worker spent on it, for the
+    run's timing line."""
+    started = time.monotonic()
+    result = _one(job)
+    result["seconds"] = round(time.monotonic() - started, 2)
+    # The worker's peak so far: a worker takes several tracks in turn, so
+    # this is the most any of them has needed, which is what matters.
+    result["peak_gb"] = round(peak_memory_gb(), 2)
+    return result
+
+
+def _one(job: dict) -> dict:
     source = Path(job["path"])
     base = {"path": job["path"], "name": job["name"], "folder": job["folder"]}
     skip = job.get("skip")

@@ -240,6 +240,10 @@ final class Engine: ObservableObject {
                     + "\(event.skipped ?? 0) already current, "
                     + "\(event.errors ?? 0) failed\(seconds).")
             }
+        case "note":
+            // Something the run has to say in words: where a processing
+            // run's time went (separating or processing), at its end.
+            if let message = event.message { say(message) }
         case "error":
             // Not shown here: `Outcome` has it, and `run` states it once --
             // as the failure, where the window can show it, rather than as

@@ -1055,6 +1055,29 @@ track.
   51 s at two, 31 s at four. Half the cores by default, as processing.
   The report is word for word the same at one worker and three.
 
+**Processing speed, second look (34 songs an hour on Jeff's Mac).** One
+four-minute track with de-clip, stem kicks, the bassline sub and air, here
+on four cores: 52 s, and the exciter was half of it -- and 2 GB of memory
+at its peak, from running the 4x-oversampled curve over the whole track at
+once. It now runs in 20 s blocks with 0.25 s either side for the
+resamplers (`air.BLOCK_S`): 384 MB, output identical to 153 dB under the
+peak, the track 42 s. A whole track still peaks around 1.8 GB (bassline
+and air the most), so `render.default_jobs` is now also held to what
+fits in memory: `WORKER_GB` 2.5 each after `RESERVE_GB` 5 for the system
+and Demucs. Whether separating or processing was his slow half is not
+known from here, so a processing run now ends with a timing note (in the
+app's log as a `note` event): seconds a track separating and on which
+chip, seconds a track processing and how many at a time, which one set
+the pace, the peak memory a track against the machine's, and whether
+that will have swapped. A Demucs run whose graphics chip fails once goes
+to the processor for the rest of the run instead of failing first on
+every track (`stems.gpu_failure`). Not done, and measured: scipy's
+`sosfiltfilt` is 3.1 s on a four-minute stereo band filter where one
+`sosfilt` pass is 0.25 s (its initial-state path and copies) -- a faster
+zero-phase filter would help every stage, but moves numbers the golden
+vectors hold, so it waits for the timing note to say processing is the
+slow half.
+
 The app never ran any of this on its main actor: it runs the command as a
 separate process and reads its progress, which is what keeps the window
 responsive.

@@ -1446,3 +1446,106 @@ class TestThePipeline(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestWhereTheTimeWent(unittest.TestCase):
+    """34 songs in an hour, and no way to tell whether separating or
+    processing was the slow half: the run now says."""
+
+    def results(self, seconds, n):
+        return [{"status": "ok", "seconds": seconds} for _ in range(n)]
+
+    def test_separating_set_the_pace(self):
+        said = cli._timing(self.results(40.0, 10), 4, 1000.0,
+                           {"separated": 10, "separate_s": 900.0,
+                            "devices": {"mps"}})
+        self.assertIn("Processing: 40 s a track, 4 at a time -- 10 s a track", said)
+        self.assertIn("Separating: 90 s a track on the Mac's graphics chip", said)
+        self.assertIn("Separating set the pace", said)
+
+    def test_processing_set_the_pace(self):
+        said = cli._timing(self.results(120.0, 10), 2, 700.0,
+                           {"separated": 10, "separate_s": 200.0,
+                            "devices": {"cpu"}})
+        self.assertIn("on the processor", said)
+        self.assertIn("Processing set the pace", said)
+
+    def test_nothing_separated_says_nothing_about_it(self):
+        said = cli._timing(self.results(30.0, 3), 2, 60.0,
+                           {"separated": 0, "separate_s": 0.0, "devices": set()})
+        self.assertIn("Processing: 30 s a track", said)
+        self.assertNotIn("Separating", said)
+        self.assertIsNone(cli._timing([{"status": "skipped"}], 2, 1.0, None))
+
+    def test_every_track_is_timed(self):
+        result = render.one({"path": "x.mp3", "name": "x", "folder": "f",
+                             "skip": "nothing to do", "amount": 0.0})
+        self.assertIn("seconds", result)
+
+
+class TestAGpuThatFailsIsGivenUp(unittest.TestCase):
+    """When the Mac's graphics chip fails, the track is separated on the
+    processor -- and the rest of the run goes there directly, rather than
+    failing on the graphics chip first every time."""
+
+    def test_tried_once_then_left(self):
+        import contextlib as ctx
+        import types
+
+        class Tensor(np.ndarray):
+            def cpu(self):
+                return self
+
+            def numpy(self):
+                return np.asarray(self)
+
+        tried = []
+
+        def apply_model(model, mix, device, **_):
+            tried.append(device)
+            if device == "mps":
+                raise RuntimeError("an operation the GPU lacks")
+            return np.stack([np.asarray(mix[0])] * 4)[None].view(Tensor)
+
+        torch = types.SimpleNamespace(
+            from_numpy=lambda a: a.view(Tensor), no_grad=ctx.nullcontext,
+            backends=types.SimpleNamespace(
+                mps=types.SimpleNamespace(is_available=lambda: True)),
+            cuda=types.SimpleNamespace(is_available=lambda: False))
+        model = types.SimpleNamespace(sources=["drums", "bass", "other", "vocals"])
+        model.to = lambda device: model
+        model.eval = lambda: model
+        modules = {"torch": torch, "demucs": types.ModuleType("demucs"),
+                   "demucs.apply": types.SimpleNamespace(apply_model=apply_model)}
+        x = np.random.default_rng(0).standard_normal((4000, 2)).astype(np.float32)
+        self.addCleanup(stems._loaded.pop, "mps_failed", None)
+        with mock.patch.dict(sys.modules, modules):
+            for _ in range(3):
+                out = stems._demucs(x, model)
+        self.assertEqual(tried, ["mps", "cpu", "cpu", "cpu"])
+        self.assertEqual(stems.last_device["name"], "cpu")
+        self.assertIn("an operation the GPU lacks", stems.gpu_failure())
+        np.testing.assert_allclose(out["drums"], x, atol=1e-5)
+
+
+class TestHowManyAtATime(unittest.TestCase):
+    def test_half_the_cores_unless_memory_runs_out_first(self):
+        with mock.patch.object(render.os, "cpu_count", return_value=10):
+            for memory, expected in ((64.0, 5), (16.0, 4), (8.0, 1), (4.0, 1), (None, 5)):
+                with mock.patch.object(render, "physical_memory_gb", return_value=memory):
+                    self.assertEqual(render.default_jobs(), expected, memory)
+
+    def test_the_run_says_when_it_did_not_fit(self):
+        results = [{"status": "ok", "seconds": 40.0, "peak_gb": 3.0}] * 4
+        with mock.patch.object(render, "physical_memory_gb", return_value=16.0):
+            said = cli._timing(results, 4, 100.0, None)
+        self.assertIn("Memory: up to 3.0 GB a track, 4 at a time, on a machine "
+                      "with 16 GB.", said)
+        self.assertIn("swapping to disk", said)
+        with mock.patch.object(render, "physical_memory_gb", return_value=64.0):
+            self.assertNotIn("swapping", cli._timing(results, 4, 100.0, None))
+
+    def test_every_track_carries_its_peak(self):
+        result = render.one({"path": "x.mp3", "name": "x", "folder": "f",
+                             "skip": "nothing to do", "amount": 0.0})
+        self.assertGreater(result["peak_gb"], 0.0)

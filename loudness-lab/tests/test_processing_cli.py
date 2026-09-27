@@ -445,3 +445,47 @@ class TestSeratoTagCarry(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@unittest.skipUnless(HAVE_FFMPEG, "ffmpeg/ffprobe not installed")
+class TestWhyTheSubIsWhatItIs(unittest.TestCase):
+    """"+0.00 dB" on Mary Jane Girls and Basement Jaxx, with no reason:
+    the results now say what the sub was asked for and why."""
+
+    def setUp(self):
+        self.dir = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.dir, ignore_errors=True)
+
+    def manifest(self, *extra: str) -> list[dict]:
+        out = subprocess.run(
+            [sys.executable, str(TOOL), "subbass", *extra,
+             "--db", str(self.dir / "l.db"), "--out", str(self.dir / "out"),
+             "--jobs", "1", "--porcelain"],
+            capture_output=True, text=True)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        done = json.loads(out.stdout.splitlines()[-1])
+        return json.loads(Path(done["manifest"]).read_text())["tracks"]
+
+    def test_a_track_already_at_the_reference_says_so_with_air_on(self):
+        # The same audio in both folders: no shortfall at all. Air on, so
+        # the track is still processed -- which is where the reason used
+        # to be thrown away.
+        ref, src = self.dir / "ref", self.dir / "src"
+        _fixture(ref, ("Reference One", "Reference Two"))
+        _fixture(src, ("Mary Jane Girls - In My House",))
+        listing = self.dir / "chosen.txt"
+        listing.write_text(str(src / "Mary Jane Girls - In My House.flac") + "\n")
+        tracks = self.manifest(str(src), str(ref), "--auto", "--reference", "ref",
+                               "--air", "2", "--air-fixed", "--select", str(listing))
+        self.assertEqual(len(tracks), 1)
+        self.assertEqual(tracks[0]["sub_db"], 0.0)
+        self.assertEqual(tracks[0]["sub_asked_db"], 0.0)
+        self.assertIn("already within", tracks[0]["sub_note"])
+        self.assertIn("of the reference", tracks[0]["sub_note"])
+
+    def test_a_fixed_amount_is_what_was_asked(self):
+        src = self.dir / "src"
+        _fixture(src, ("Sheila E. - A Love Bizarre",))
+        tracks = self.manifest(str(src), "--amount", "3")
+        self.assertEqual(tracks[0]["sub_asked_db"], 3.0)
+        self.assertAlmostEqual(tracks[0]["sub_db"], 3.0, delta=0.5)

@@ -27,6 +27,11 @@ struct Manifest: Codable {
         let clipsRestored: Int
         let clipLiftDB: Double
         let variants: [Variant]
+        /// What the sub was asked for (the track's shortfall against the
+        /// reference, capped) and why it got what it got. Nil in a
+        /// manifest written before these were added.
+        let subAskedDB: Double?
+        let subNote: String?
 
         var id: String { source }
 
@@ -37,6 +42,8 @@ struct Manifest: Codable {
             case airDB = "air_db"
             case clipsRestored = "clips_restored"
             case clipLiftDB = "clip_lift_db"
+            case subAskedDB = "sub_asked_db"
+            case subNote = "sub_note"
         }
     }
 

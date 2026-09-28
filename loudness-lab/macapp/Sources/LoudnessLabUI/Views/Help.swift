@@ -806,6 +806,10 @@ enum Help {
         Mud is how far the 200-400 Hz band came down (hover for why a track \
         got none).
 
+        Up and down arrows step through the songs. While one is playing the \
+        next starts from the top, on the same version (A or B) you were \
+        hearing; stopped stays stopped.
+
         Asked is what the sub was asked for: with per-track sizing, how far \
         the track's low end sat under the reference (capped). Why says why \
         it got what it got -- "already within 0.3 dB of the reference" for a \

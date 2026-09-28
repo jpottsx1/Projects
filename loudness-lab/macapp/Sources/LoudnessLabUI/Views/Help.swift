@@ -233,16 +233,19 @@ enum Help {
         related to the source, which is why it reads as detail rather than as \
         hiss.
 
-        Measured on a track with everything above 16 kHz removed: a 3 dB shelf \
-        moved the 16–22 kHz band by 3 dB, which is 3 dB more of nothing. 3 dB \
-        of air moved it by 16.
+        Measured on a track with everything above 16 kHz removed: to put 12 \
+        dB into that empty top octave, a high shelf has to lift the hi-hats \
+        (8–12 kHz) by 10 dB with it; air lifts them by 1.5.
 
-        The number is what the 8–20 kHz band actually rises by, not a mix \
-        level — the harmonics are scaled to hit it and the run reports what it \
-        got. Loudness barely moves, which is the famous thing about an \
-        exciter; peak moves a great deal, because the harmonics land on the \
-        source's own peaks. The levelling that ends the chain takes that back \
-        out, but it is why this is a small control.
+        The number is what the top octave, 16–20 kHz, actually rises by -- \
+        not a mix level: the harmonics are scaled to hit it and the run \
+        reports what it got. (It was 8–20 kHz until September 2026. That \
+        band is mostly hi-hats, so the number said little about what you \
+        hear change; the same setting now is gentler.) On a track whose top \
+        octave is missing -- a tape roll-off, a lossy encode -- even 12 dB \
+        costs next to nothing. On a track with a full, bright top it costs \
+        peak: 6 dB there raised the peak by about 5. The levelling that ends \
+        the chain takes that back out.
 
         Check the survey's cliff column first. A folder with a gentle roll-off \
         already has a top end and this is taste; one with a wall has had it \
@@ -250,10 +253,11 @@ enum Help {
 
         With "Size it per track against a reference" on, this number becomes \
         a ceiling rather than a flat amount: each track is measured against \
-        the reference folder's own 8–20 kHz band and given air up to this \
-        much, in proportion to how much brighter the reference already is -- \
-        the same idea as the sub's cap, applied to the top end instead of \
-        the bottom.
+        the reference folders' own top octave and given air up to this much, \
+        as far as it falls short -- the same idea as the sub's cap. That is \
+        what makes a high ceiling safe: the tracks missing their top octave \
+        get plenty, cheaply, and a bright track gets little or none, where \
+        it would cost.
         """)
 
     static let airTune = HelpEntry(
@@ -476,8 +480,8 @@ enum Help {
         summary: "Give every track the Air amount, even when the sub is sized per track.",
         detail: """
         With "Size it per track against a reference" on, Air is normally a \
-        ceiling: each track gets only what its 8-20 kHz band falls short of \
-        the reference. A folder already brighter than the reference gets \
+        ceiling: each track gets only what its top octave (16-20 kHz) falls \
+        short of the reference. A folder already brighter than the reference gets \
         none at any setting -- the 1988 dance folder measured 4.56 dB \
         brighter, and every track came back with no air.
 

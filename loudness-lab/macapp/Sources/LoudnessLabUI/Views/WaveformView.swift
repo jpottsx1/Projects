@@ -79,8 +79,80 @@ struct WaveformView: View {
                 }
             }
             .frame(height: Self.height)
+            bandLanes
             legend
         }
+    }
+
+    /// The two bands the processing actually works in, each on its own
+    /// scale. The colored overview above answers "what does the track look
+    /// like"; it could not answer "what did the sub do", because its red is
+    /// everything under 200 Hz and a bass line at 80-200 Hz fills it
+    /// whatever is added under it -- Night Fever read as "nothing added"
+    /// beside September for exactly that reason (2026-09-28).
+    static let laneHeight: CGFloat = 34
+
+    @ViewBuilder
+    private var bandLanes: some View {
+        if !original.sub.isEmpty {
+            lane("Sub 31.5–63 Hz", original.sub, processed?.sub, color: Self.bass)
+            lane("Air 16–20 kHz", original.air, processed?.air, color: Self.treble)
+        }
+    }
+
+    private func lane(_ title: String, _ before: [Float], _ after: [Float]?,
+                      color: Color) -> some View {
+        // Withheld while blind, like everything else that says which is which.
+        let shown = showDifference ? after : nil
+        return ZStack(alignment: .topLeading) {
+            Canvas { context, size in
+                drawLane(before, shown, color: color, in: &context, size: size)
+            }
+            .background(Color.black.opacity(0.85))
+            .clipShape(RoundedRectangle(cornerRadius: 4))
+            HStack(spacing: 6) {
+                rowLabel(title)
+                if let change = Self.change(before, shown) {
+                    rowLabel(String(format: "%+.1f dB as heard", change))
+                }
+            }
+            .padding(4)
+        }
+        .frame(height: Self.laneHeight)
+    }
+
+    /// The band's energy after against before, in dB, over the whole
+    /// track. "As heard": in a comparison both versions are level-matched,
+    /// so this is the change you hear, which differs from the Results
+    /// column (measured before the matching) by the matching gain.
+    static func change(_ before: [Float], _ after: [Float]?) -> Double? {
+        guard let after, !before.isEmpty, before.count == after.count else { return nil }
+        let was = before.reduce(0.0) { $0 + Double($1) * Double($1) }
+        let now = after.reduce(0.0) { $0 + Double($1) * Double($1) }
+        guard was > 0, now > 0 else { return nil }
+        return 10 * log10(now / was)
+    }
+
+    private func drawLane(_ before: [Float], _ after: [Float]?, color: Color,
+                          in context: inout GraphicsContext, size: CGSize) {
+        guard !before.isEmpty else { return }
+        let midY = size.height / 2
+        let ceiling = Double(max(before.max() ?? 0, after?.max() ?? 0))
+        let scale = Double(midY) / max(ceiling, 1e-9) * 0.9
+        context.drawLayer { layer in
+            layer.blendMode = .plusLighter
+            band(before, in: &layer, size: size, midY: midY, scale: scale,
+                 color: color, opacity: 0.35)
+            if let after {
+                delta(before, after, in: &layer, size: size, midY: midY,
+                      scale: scale, color: color)
+            }
+        }
+        let x = size.width * progress
+        context.stroke(Path { p in
+            p.move(to: CGPoint(x: x, y: 0))
+            p.addLine(to: CGPoint(x: x, y: size.height))
+        }, with: .color(.white.opacity(0.85)), lineWidth: 1)
     }
 
     private func rowLabel(_ text: String) -> some View {

@@ -412,6 +412,9 @@ LOW_SHAPE_BANDS = tuple(b for b in BAND_CENTRES if 31.0 <= b <= 63.0)
 # so the deficit this sizes the stage from is the same deficit its own
 # report checks the result against.
 TOP_SHAPE_BANDS = tuple(b for b in BAND_CENTRES if 8000.0 <= b <= 20000.0)
+# What air is sized from: the top octave, the band `air.excite` now
+# measures in. TOP_SHAPE_BANDS stays the survey's "top end".
+AIR_SHAPE_BANDS = tuple(b for b in BAND_CENTRES if 16000.0 <= b <= 20000.0)
 
 
 # CD1, Disc 2, disc-3, DVD4, Vol. 5, Part6, or that same token as a SUFFIX

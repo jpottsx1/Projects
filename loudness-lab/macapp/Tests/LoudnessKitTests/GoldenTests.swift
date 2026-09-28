@@ -1294,7 +1294,7 @@ final class GoldenTests: XCTestCase {
          "punchBand": FilterBank.punchBand, "subFloor": FilterBank.subFloor,
          "subCeiling": FilterBank.subCeiling, "envelope20": FilterBank.envelope20,
          "envelope200": FilterBank.envelope200, "envelope60": FilterBank.envelope60,
-         "envelope3": FilterBank.envelope3]
+         "envelope3": FilterBank.envelope3, "airBand": FilterBank.airBand]
     }
 
     func rms(_ x: [[Double]]) -> Double {

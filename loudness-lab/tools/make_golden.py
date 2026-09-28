@@ -44,6 +44,9 @@ FILTERS = {
     "subBand":      (4, [31.5, 63.0], "band"),
     "kickBand":     (4, [30.0, 100.0], "band"),
     "punchBand":    (4, [2000.0, 6000.0], "band"),
+    # Not used by any measurement: the app's waveform draws the band air
+    # is measured in (air.BAND_LOW_HZ to BAND_HIGH_HZ), beside subBand.
+    "airBand":      (4, [16000.0, 20000.0], "band"),
     "subFloor":     (2, 28.0, "high"),
     "subCeiling":   (4, 75.0, "low"),
     "envelope20":   (2, 20.0, "low"),

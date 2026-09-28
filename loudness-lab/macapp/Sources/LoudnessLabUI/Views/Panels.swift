@@ -311,11 +311,13 @@ struct SettingsPanel: View {
 
                 Divider()
 
-                slider(Help.air, $profile.air, 0...6, "dB",
-                       // Off is the default. Past about 3 the peak cost
-                       // starts eating the headroom the levelling needs.
-                       sweet: 0...3)
-                Text("Makes a top end out of harmonics rather than lifting "
+                slider(Help.air, $profile.air, 0...24, "dB",
+                       // dB in the top octave (16-20 kHz). A missing top
+                       // octave fills to 12 for nothing; a full one costs
+                       // about 5 dB of peak at 6 -- as a per-track
+                       // ceiling, 6 to 12 spends it where it is cheap.
+                       sweet: 6...12)
+                Text("16–20 kHz, made from harmonics rather than lifting "
                      + "one that is not there. Zero turns it off.")
                     .font(.caption).foregroundStyle(.secondary)
                     .help(Help.air.detail)

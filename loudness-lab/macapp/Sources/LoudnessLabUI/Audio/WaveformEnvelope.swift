@@ -16,6 +16,13 @@ struct WaveformEnvelope: Sendable {
     let bass: [Float]
     let mid: [Float]
     let treble: [Float]
+    /// Exactly the bands the processing works in, unlike the three above:
+    /// the sub's 31.5-63 Hz and air's top octave, 16-20 kHz, through the
+    /// same Butterworth filters the Python designs (`FilterBank`). The
+    /// colored bands are round numbers for a picture; these are what the
+    /// Sub and Air numbers measure, so the two can be read together.
+    var sub: [Float] = []
+    var air: [Float] = []
 
     static let empty = WaveformEnvelope(peak: [], bass: [], mid: [], treble: [])
 
@@ -58,11 +65,18 @@ enum WaveformAnalyzer {
 
         let bassLow = onePoleLowPass(mono, cutoffHz: bassCeilingHz, rate: rate)
         let midLow = onePoleLowPass(mono, cutoffHz: trebleFloorHz, rate: rate)
+        // The processed bands, when the filters were designed for this
+        // rate -- they are fixed coefficients, and at another rate they
+        // would be other bands.
+        let exact = rate == FilterBank.rate
+        let subBand = exact ? FilterBank.subBand.filter(mono) : []
+        let airBand = exact ? FilterBank.airBand.filter(mono) : []
 
         let columns = min(Self.columns, n)
         let perColumn = max(1, n / columns)
 
         var peak = [Float](), bass = [Float](), mid = [Float](), treble = [Float]()
+        var sub = [Float](), air = [Float]()
         peak.reserveCapacity(columns); bass.reserveCapacity(columns)
         mid.reserveCapacity(columns); treble.reserveCapacity(columns)
 
@@ -79,13 +93,23 @@ enum WaveformAnalyzer {
                 trebleAcc += trebleValue * trebleValue
             }
             let count = Double(end - start)
+            if exact {
+                var subAcc = 0.0, airAcc = 0.0
+                for i in start..<end {
+                    subAcc += subBand[i] * subBand[i]
+                    airAcc += airBand[i] * airBand[i]
+                }
+                sub.append(Float((subAcc / count).squareRoot()))
+                air.append(Float((airAcc / count).squareRoot()))
+            }
             peak.append(Float(peakAcc))
             bass.append(Float((bassAcc / count).squareRoot()))
             mid.append(Float((midAcc / count).squareRoot()))
             treble.append(Float((trebleAcc / count).squareRoot()))
             start = end
         }
-        return WaveformEnvelope(peak: peak, bass: bass, mid: mid, treble: treble)
+        return WaveformEnvelope(peak: peak, bass: bass, mid: mid, treble: treble,
+                                sub: sub, air: air)
     }
 
     /// A single-pole exponential filter, not a Butterworth -- the whole

@@ -1140,6 +1140,25 @@ speed test's best is still well short of what is wanted.
   following the stems, hi-hat-carried top end gets less. One modern
   reference folder is the wrong target for 1977 disco anyway.
 
+**Both fixes built (2026-09-28).** Air is now measured and sized in the
+top octave, 16-20 kHz (`air.BAND_LOW_HZ`, `report.AIR_SHAPE_BANDS`;
+`TOP_SHAPE_BANDS` stays the survey's top end). Measured first: on a
+tape-rolled-off fixture, +1 dB "of 8-20 kHz" had lifted 16-20 kHz by 27
+dB and 8-12 kHz by 0.3 -- the stage was already a top-octave stage, only
+its number and its sizing were not. Per +12 dB of top octave: rolled off,
+peak -0.04 and hats +0.01; codec-cut, -0.16 and +0.02; a full bright top,
++10.6 dB of peak and +2.7 of hats. Sized per track that spends it where
+it is cheap, so the slider is 0-24 dB (it was 0-6 of a different unit;
+the same setting is now gentler). A Night-Fever-like fixture -- hats
+brighter than the reference, top rolled off at 15 kHz -- read "already
+within" on 8-20 kHz and gets the full ceiling now; tested end to end.
+The waveform keeps its three colors and gains two lanes under it, "Sub
+31.5-63 Hz" and "Air 16-20 kHz", filtered with the processing's own
+bands (`FilterBank.subBand`, and `airBand`, generated for the picture),
+each on its own scale with the change in dB as heard (level-matched in a
+comparison, so it differs from the Results column by the matching gain).
+Not compiled here; the golden test's filter table lists `airBand`.
+
 **Profiles per kind of music.** Jeff: "build profiles ... let the user
 measure a series of folders per profile, such as dance, 2020s, pop,
 disco". A profile now carries `references`, more folders pooled with

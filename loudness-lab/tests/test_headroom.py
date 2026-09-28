@@ -100,6 +100,20 @@ class TestHeldBack(unittest.TestCase):
         self.assertIn("1 of 2 track(s) held under the target", text)
         self.assertIn("held back 3.0 dB (median)", text)
         self.assertIn("gives back 2.00 dB of the held-back level", text)
+        # The table's sign: peaks that went down read as a minus.
+        self.assertIn("peak -1.50 dB (median, down), -2.00 at best; lowers the "
+                      "peak on 2 of 2", text)
+
+    def test_peaks_that_rose_read_as_up(self):
+        """Jeff's 132 processed tracks: rotation RAISED the median peak by
+        about 1 dB -- limited masters, whose flattened tops it knocks out of
+        line -- and the first summary said "peaks down -0.97"."""
+        rows = [{"name": "a", "wanted": -3.0, "refused": 0.0, "peak": -0.1,
+                 "rotations": {n: {"peak_down": -1.0, "loudness_moved": 0.01,
+                                   "band_moved": 0.02} for n, _ in headroom.ROTATIONS}}]
+        text = "\n".join(headroom.summary(rows))
+        self.assertIn("peak +1.00 dB (median, up)", text)
+        self.assertIn("lowers the peak on 0 of 1", text)
 
 
 if __name__ == "__main__":

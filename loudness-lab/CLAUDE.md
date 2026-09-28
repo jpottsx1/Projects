@@ -1178,6 +1178,19 @@ differs by track, and a rotation can raise a peak. Must run causally: a
 zero-phase pass cancels an all-pass (tested). Nothing built into the
 chain until Jeff's report says tracks are held back.
 
+**Answered: not built.** Jeff's 132 processed tracks (6f97c7a): rotation
+RAISED the median true peak by about 1 dB at every strength (1.5 dB off
+at best) -- these masters were limited, their tops flattened level, and
+turning the bass's phase knocks those tops out of line. A rotator helps
+before a limiter, which is where broadcast chains put it, not after
+one. 28 of 132 were held under -16 by the ceiling, 1.4 dB (median), 3.6
+at most -- mostly the de-clipped tracks, whose restored peaks are the
+point of de-clipping; the level they cannot reach is the punch given
+back, and recovering it would mean limiting those peaks off again. A
+lower target does not fix it cleanly either (17 still held at -17, 10 at
+-18). The report's summary first said "peaks down -0.97 dB" for peaks
+that rose; it now uses the table's sign.
+
 **Profiles per kind of music.** Jeff: "build profiles ... let the user
 measure a series of folders per profile, such as dance, 2020s, pop,
 disco". A profile now carries `references`, more folders pooled with

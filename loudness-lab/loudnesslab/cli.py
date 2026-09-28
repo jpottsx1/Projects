@@ -16,8 +16,8 @@ import time
 from pathlib import Path
 
 from . import (__version__, analyze, apply_gain, bs1770, db, declip, decode,
-               air, expand, mp3gain, mud, profiles, render, report, stems,
-               subbass, write)
+               air, expand, mp3gain, mud, profiles, render, replace, report,
+               stems, subbass, write)
 
 
 def _progress_printer(start: float):
@@ -437,6 +437,49 @@ def _separate_for_kicks(jobs: list[dict], cache_dir: Path, porcelain: bool,
         prepare(job)
 
 
+def _replace_originals(manifest: list, out, porcelain: bool):
+    """Swap each processed track into its original's place, originals kept
+    in one dated batch. The manifest then points at where the processed
+    file now is. (the batch folder, how many were swapped)."""
+    batch = replace.new_batch()
+    swapped = 0
+    for track in manifest:
+        variant = next((v for v in track["variants"]
+                        if v["kind"] == "processed"), None)
+        if variant is None:
+            continue
+        done, message = replace.replace(Path(track["source"]),
+                                        Path(variant["path"]), batch)
+        if done:
+            swapped += 1
+            variant["path"] = track["source"]
+            track["replaced"] = True
+        else:
+            line = f"  {track['name']}: {message}"
+            out(line)
+            if porcelain:
+                _emit({"event": "note", "message": line.strip()})
+    if swapped:
+        line = (f"  {swapped} original(s) replaced. The originals are kept in "
+                f"{batch} -- 'Restore Originals' puts them back.")
+        out(line)
+        if porcelain:
+            _emit({"event": "note", "message": line.strip()})
+    return batch, swapped
+
+
+def cmd_restore(args: argparse.Namespace) -> int:
+    """Put a batch of replaced originals back where they were."""
+    restored, problems = replace.restore(args.batch)
+    for problem in problems:
+        print(f"  {problem}")
+    print(f"  {restored} original(s) restored from {args.batch}.")
+    if restored:
+        print("  The processed files that stood in their place are in its "
+              "'undone' folder.")
+    return 1 if problems else 0
+
+
 def _write_manifest(path: Path, args: argparse.Namespace,
                     tracks: list) -> None:
     """A record of the run that a player can read.
@@ -632,6 +675,22 @@ def cmd_subbass(args: argparse.Namespace) -> int:
             "attack and air are all off).\nNothing to do -- levelling is the "
             "gain command:\n  ./loudness-lab gain <path> --profile "
             f"{args.profile or 'level-only'}", 0)
+    if getattr(args, "replace_originals", False):
+        # The one place processing touches originals, so it has to be
+        # asked for twice and cannot be asked for by accident: a finished
+        # track at its level (not a comparison's level-matched B) and no
+        # dry run, which would swap nothing and look as if it had.
+        if not args.yes:
+            return fail("error: --replace-originals moves every original it "
+                        "replaces into ~/Music/LoudnessLab/Replaced "
+                        "originals; add --yes to go ahead.")
+        if not args.no_compare:
+            return fail("error: --replace-originals needs --no-compare: a "
+                        "comparison's B is level-matched for listening, not "
+                        "levelled for a set.")
+        if args.dry_run:
+            return fail("error: --replace-originals and --dry-run together "
+                        "would replace nothing.")
     wanted_references = _references(args)
     if args.auto and not wanted_references:
         return fail("error: --auto needs a reference corpus. Give --reference, "
@@ -1025,11 +1084,17 @@ def cmd_subbass(args: argparse.Namespace) -> int:
                    "errors": sum(1 for r in results if r["status"] == "error"),
                    "seconds": round(time.monotonic() - start, 3)})
         return 0
+    replaced_in = None
+    if getattr(args, "replace_originals", False) and manifest:
+        replaced_in, swapped = _replace_originals(manifest, out, porcelain)
+        if not swapped:
+            replaced_in = None
     if manifest:
         manifest_path = out_dir / "manifest.json"
         _write_manifest(manifest_path, args, manifest)
     if porcelain:
-        _emit({"event": "done", "written": written, "selected": len(jobs),
+        _emit({"event": "done", "written": written,
+               "replaced_in": str(replaced_in) if replaced_in else None, "selected": len(jobs),
                "skipped": sum(1 for r in results if r["status"] == "skipped"),
                "errors": sum(1 for r in results if r["status"] == "error"),
                "manifest": str(manifest_path) if manifest_path else None,
@@ -1657,6 +1722,15 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_argument("--no-compare", action="store_true",
                      help="write only the processed file, not a level-matched "
                           "A/B pair")
+    sub.add_argument("--replace-originals", action="store_true",
+                     help="after each track is written, put it where its "
+                          "original was. Originals are moved, never deleted, "
+                          "into ~/Music/LoudnessLab/Replaced originals/<date "
+                          "and time>, and `restore` puts a batch back. Needs "
+                          "--no-compare and --yes; a track written in another "
+                          "format than its original is left alone")
+    sub.add_argument("--yes", action="store_true",
+                     help="confirm --replace-originals")
     sub.add_argument("--format", default=write.DEFAULT_FORMAT,
                      choices=sorted(write.FORMATS),
                      help="what to write: flac (lossless, the default), "
@@ -1726,6 +1800,12 @@ def build_parser() -> argparse.ArgumentParser:
     check.add_argument("path", type=Path, nargs="*",
                        help="optional folders to check for readable audio")
     check.set_defaults(func=cmd_doctor)
+
+    back = subparsers.add_parser(
+        "restore", help="put a batch of replaced originals back")
+    back.add_argument("batch", type=Path,
+                      help="a folder in ~/Music/LoudnessLab/Replaced originals")
+    back.set_defaults(func=cmd_restore)
 
     dump = subparsers.add_parser("export", help="dump results to CSV")
     dump.add_argument("--db", type=Path, default=Path("library.db"))

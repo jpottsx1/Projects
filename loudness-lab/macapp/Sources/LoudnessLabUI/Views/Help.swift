@@ -729,6 +729,31 @@ enum Help {
         do to a folder before committing a lossy generation to it.
         """)
 
+    static let replaceOriginals = HelpEntry(
+        title: "Replace originals when done",
+        summary: "Puts each finished track where its original was. The originals are kept, so this can be undone.",
+        detail: """
+        After a track is processed and written, it is moved into its \
+        original's place, same name, same folder -- so Serato, and anything \
+        else that knows the track by where it is, now plays the processed \
+        one. Only in a run that writes finished tracks rather than A/B \
+        pairs (a pair's B is level-matched for listening, not levelled for \
+        a set), and only when the format matches: a FLAC written for an \
+        MP3 original is left in the output folder, since a different file \
+        type would break its library path. Set the format to MP3 for an \
+        MP3 library.
+
+        Nothing is deleted. Each original is moved into Music › \
+        LoudnessLab › Replaced originals › <date and time>, under its full \
+        folder path, with a log of every swap. Double-click Restore \
+        Originals and choose that folder to put the whole batch back.
+
+        MP3 to MP3 carries the whole tag across, Serato's cue points and \
+        beatgrid included, but a re-encoded MP3 may sit a few milliseconds \
+        off the original in Serato. Check the cue points on one song \
+        before replacing a library.
+        """)
+
     // MARK: - Comparing
 
     static let switching = HelpEntry(
@@ -812,7 +837,8 @@ enum Help {
         HelpSection("Mud", [mud]),
         HelpSection("Air", [air, airFixed, airStems, airTune]),
         HelpSection("Level", [target, estimator, peakCeiling]),
-        HelpSection("The run", [limit, format, output, compare, dryRun]),
+        HelpSection("The run", [limit, format, output, compare, dryRun,
+                                replaceOriginals]),
         HelpSection("Listening", [switching, matchLoudness, blind]),
         HelpSection("Results", [results]),
     ]

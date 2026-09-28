@@ -120,6 +120,11 @@ BUILT_IN = {
         # because the damage is real and the method is self-limiting, not
         # because it is free. Listen before committing a folder to it.
         "declip": True,
+        # On, as a ceiling: each track gets what its 200-400 Hz sits above
+        # the reference. Measured on twenty seventies tracks against a
+        # disco reference (2026-09-28): 16 over by more than 1 dB, 3 the
+        # median, 4.8 at most -- 5 bounds that, as 8 bounds the sub.
+        "mud": 5.0,
     },
     # Measured, like the disco one, and on a library this project did not
     # come from: five discs of "100 Hits - The New Romantics (2011)", 100

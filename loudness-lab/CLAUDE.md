@@ -1159,6 +1159,25 @@ each on its own scale with the change in dB as heard (level-matched in a
 comparison, so it differs from the Results column by the matching gain).
 Not compiled here; the golden test's filter table lists `airBand`.
 
+**Phase rotation: measured before built (2026-09-28).** Jeff asked about
+BBE Sonic Sweet. Of its four tools, Harmonic Maximizer is what air
+already is, Mach3Bass (bass harmonics for small speakers) is the opposite
+of what a club rig wants, Loudness Maximizer is a limiter, and the Sonic
+Maximizer's "phase alignment" compensates speaker drivers a club system
+already aligns. The idea worth taking is the broadcast phase rotator:
+all-pass filters, level-flat at every frequency, that even out lopsided
+bass waveforms so the same sound peaks lower -- worth it only if the -1
+dBTP ceiling actually holds processed tracks under the -16 target (the
+sub and air both raise peaks). `Measure Headroom.command`
+(`tools/headroom.py`) reads a folder of processed tracks and reports,
+per track, what the levelling wants, what the ceiling refuses, and what
+three rotation strengths take off the true peak, with the proof that
+loudness and bands did not move. On a synthetic lopsided bass the best
+of the three took 0.55 dB off (another clip, 1.66); which strength wins
+differs by track, and a rotation can raise a peak. Must run causally: a
+zero-phase pass cancels an all-pass (tested). Nothing built into the
+chain until Jeff's report says tracks are held back.
+
 **Profiles per kind of music.** Jeff: "build profiles ... let the user
 measure a series of folders per profile, such as dance, 2020s, pop,
 disco". A profile now carries `references`, more folders pooled with

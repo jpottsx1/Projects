@@ -1191,6 +1191,24 @@ lower target does not fix it cleanly either (17 still held at -17, 10 at
 -18). The report's summary first said "peaks down -0.97 dB" for peaks
 that rose; it now uses the table's sign.
 
+**The bottom end, measured before anything is built (2026-09-28).**
+Jeff: why does BBE make such a difference, and what else can enhance
+the bottom end? BBE's audible effect is mostly level (unmatched A/B),
+its Lo Contour bass shelf, and its attack-tracking treble boost; Mach3Bass
+is dramatic only on small speakers. Chosen next: (1) mono bass -- club
+subs sum left and right, and bass differing between the channels
+cancels there, bass out of step between them largely vanishes; (3) mud,
+200-400 Hz, which Jeff wants sized per track against the reference like
+the sub AND following the music over time rather than a fixed cut.
+`Measure Low End.command` (`tools/low_end.py`) answers both from the
+library, processing nothing: dB a mono sum loses over 31.5-125 Hz,
+10 log10(mid / (mid + side)) weighted by each band's level (side/mid
+stored as "no value" for identical channels, counted as mono), and the
+200-400 Hz shape against the reference folder. On synthetic tracks a
+phase-flipped bass loses 17 dB; its mud reads +11 too, because the bass
+cancelling in the mid channel makes everything else read louder against
+it -- fix the mono problem before trusting a mud figure on that track.
+
 **Profiles per kind of music.** Jeff: "build profiles ... let the user
 measure a series of folders per profile, such as dance, 2020s, pop,
 disco". A profile now carries `references`, more folders pooled with

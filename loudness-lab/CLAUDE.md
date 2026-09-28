@@ -1209,6 +1209,21 @@ phase-flipped bass loses 17 dB; its mud reads +11 too, because the bass
 cancelling in the mid channel makes everything else read louder against
 it -- fix the mono problem before trusting a mud figure on that track.
 
+**Answered, and the mud cut built.** Jeff's 20 seventies tracks against
+his disco reference: mono bass is not a problem (0.14 dB lost median,
+1.13 worst, none out of step) -- nothing built. Mud is: 16 of 20 over by
+more than 1 dB in 200-400 Hz, 3 the median, 4.8 at most. `mud.py`: the
+band zero-phase, put back scaled (nothing else touched at any gain),
+cut by a threshold on its level against the whole track's (400 ms
+windows, 50 ms hop): every moment above it cut by how far above, none
+below, the threshold solved so the band drops by the amount asked, to
+0.02 dB. The first version kept each track's own least-built-up 30%
+uncut; on a track thick throughout that capped the cut at 4.8 dB
+whatever was asked (the per-track sizing test caught it, by accident).
+`--mud` / "Clear the mud": with `auto`, a ceiling, each track getting
+what its 200-400 Hz sits above the reference (`cli._mud_for`); a Mud
+column in Results. Chain: declip, range, transient, mud, sub, air, level.
+
 **Profiles per kind of music.** Jeff: "build profiles ... let the user
 measure a series of folders per profile, such as dance, 2020s, pop,
 disco". A profile now carries `references`, more folders pooled with

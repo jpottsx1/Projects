@@ -43,6 +43,9 @@ public struct Profile: Codable, Equatable, Sendable {
     // default and a taste control rather than a repair.
     public var air: Double = 0.0             // dB of generated harmonics
     public var airTune: Double = 3500.0      // Hz they are generated from
+    // dB out of 200-400 Hz, deepest where the band builds up. With `auto`,
+    // a ceiling: each track gets what it sits above the reference.
+    public var mud: Double = 0.0
     // Find kicks on a Demucs drum stem, and skip the sub where they
     // disagree with the BPM tag. Off by default: it needs Demucs.
     public var stemKicks: Bool = false
@@ -73,6 +76,7 @@ public struct Profile: Codable, Equatable, Sendable {
         case minCrest = "min_crest"
         case air
         case airTune = "air_tune"
+        case mud
         case stemKicks = "stem_kicks"
         case airFixed = "air_fixed"
         case airStems = "air_stems"
@@ -120,6 +124,7 @@ public struct Profile: Codable, Equatable, Sendable {
         minCrest = try number(.minCrest, fallback.minCrest)
         air = try number(.air, fallback.air)
         airTune = try number(.airTune, fallback.airTune)
+        mud = try number(.mud, fallback.mud)
         stemKicks = try values.decodeIfPresent(Bool.self, forKey: .stemKicks)
             ?? fallback.stemKicks
         airFixed = try values.decodeIfPresent(Bool.self, forKey: .airFixed)

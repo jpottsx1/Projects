@@ -16,7 +16,7 @@ import time
 from pathlib import Path
 
 from . import (__version__, analyze, apply_gain, bs1770, db, declip, decode,
-               air, expand, mp3gain, profiles, render, report, stems,
+               air, expand, mp3gain, mud, profiles, render, report, stems,
                subbass, write)
 
 
@@ -237,6 +237,31 @@ def _air_for(args: argparse.Namespace, conn, path: str, top_curve: dict) -> floa
     amount, _ = _auto_amount(conn, path, top_curve, args.air,
                              bands=report.AIR_SHAPE_BANDS)
     return amount
+
+
+def _mud_for(args: argparse.Namespace, conn, path: str, mud_curve: dict
+             ) -> tuple[float, str | None]:
+    """The mud cut one track gets, and why. With --auto, --mud is a
+    ceiling and each track gets what its 200-400 Hz sits ABOVE the
+    reference -- the sub's shortfall turned round. Without it, --mud as
+    set."""
+    if args.mud <= 0:
+        return 0.0, None
+    if not (args.auto and mud_curve):
+        return args.mud, None
+    rows = conn.execute(
+        "SELECT b.band_hz, b.shape_db FROM bands b JOIN tracks t "
+        "ON t.id = b.track_id WHERE t.path = ? AND b.band_hz IN "
+        f"({', '.join(str(b) for b in report.MUD_SHAPE_BANDS)})", (path,)).fetchall()
+    over = [row["shape_db"] - mud_curve[row["band_hz"]] for row in rows
+            if row["shape_db"] is not None and row["band_hz"] in mud_curve]
+    if not over:
+        return 0.0, "no band data for the mud cut"
+    excess = float(np.mean(over))
+    if excess <= 0.5:
+        return 0.0, (f"200-400 Hz already within {excess:+.1f} dB of the "
+                     f"reference: no mud cut")
+    return min(excess, args.mud), None
 
 
 def _level_to_target(audio, args, measured: dict):
@@ -737,8 +762,14 @@ def cmd_subbass(args: argparse.Namespace) -> int:
                 # regardless of how much brighter the reference already is.
                 _, top_curve, _ = _reference_curve_of(
                     conn, wanted_references, bands=report.AIR_SHAPE_BANDS)
+        mud_curve = {}
+        if args.auto and args.mud > 0:
+            _, mud_curve, _ = _reference_curve_of(
+                conn, wanted_references, bands=report.MUD_SHAPE_BANDS)
         amounts = {}
         air_amounts = {}
+        mud_amounts = {row["path"]: _mud_for(args, conn, row["path"], mud_curve)
+                       for row in rows}
         if args.auto:
             for row in rows:
                 amounts[row["path"]] = _auto_amount(conn, row["path"], curve,
@@ -774,6 +805,7 @@ def cmd_subbass(args: argparse.Namespace) -> int:
             seen.add(key)
         amount, skip = amounts.get(row["path"], (args.amount, None))
         air_amount, _ = air_amounts.get(row["path"], (args.air, None))
+        mud_amount, mud_note = mud_amounts.get(row["path"], (0.0, None))
         # Why the sub got what it got, kept even when air un-skips the
         # track below: it used to be dropped there, and a track already
         # at the reference showed "+0.00 dB" with no reason (Mary Jane
@@ -784,7 +816,7 @@ def cmd_subbass(args: argparse.Namespace) -> int:
         # now that air is a second one. A track can easily be fine on bass
         # and still short on top end; skipping it there would silently
         # skip air too, on tracks air auto-sizing exists to help.
-        if air_amount > 0:
+        if air_amount > 0 or mud_amount > 0:
             skip = None
         name = " - ".join(p for p in (row["artist"], row["title"]) if p) \
             or Path(row["path"]).stem
@@ -803,6 +835,7 @@ def cmd_subbass(args: argparse.Namespace) -> int:
             "max_attenuation": args.max_attenuation,
             "transient": args.transient, "min_crest": args.min_crest,
             "air": air_amount, "air_tune": args.air_tune,
+            "mud": mud_amount, "mud_note": mud_note,
             "stem_kicks": bool(args.stem_kicks), "bpm": row["bpm"],
             "bass_sub": bool(args.stem_kicks and args.bass_sub),
             "air_stems": bool(args.air_stems),
@@ -908,7 +941,8 @@ def cmd_subbass(args: argparse.Namespace) -> int:
                    "lra_after": (result.get("range") or {}).get("lra_after"),
                    "crest_before": (result.get("transient") or {}).get("crest_before"),
                    "crest_after": (result.get("transient") or {}).get("crest_after"),
-                   "air_db": (result.get("air") or {}).get("measured_db")})
+                   "air_db": (result.get("air") or {}).get("measured_db"),
+                   "mud_db": (result.get("mud") or {}).get("measured_db")})
             return
         if result["status"] == "error":
             print(f"  {result['name'][:39]:<40s}  FAILED: {result['reason']}")
@@ -1562,13 +1596,19 @@ def build_parser() -> argparse.ArgumentParser:
                           f"flattened it (default "
                           f"{profiles.FIELDS['min_crest']:.0f} dB)")
     sub.add_argument("--air", type=float, default=None, metavar="DB",
-                     help="dB of generated harmonics added to 8-20 kHz, for "
+                     help="dB of generated harmonics added to the top octave "
+                          "(16-20 kHz), for "
                           "a top end a shelf cannot help because a codec "
                           "emptied it. This one INVENTS -- the harmonics "
                           "were never in the recording. 0 is off. --auto: "
                           "this becomes the per-track cap, sized from the "
                           "track's own measured shortfall against "
                           "--reference in that same band, same as the sub")
+    sub.add_argument("--mud", type=float, default=None, metavar="DB",
+                     help="dB taken out of 200-400 Hz, deepest where the band "
+                          "builds up and nothing in sparse passages. 0 is off. "
+                          "--auto: the per-track cap, each track getting what "
+                          "its 200-400 Hz sits above --reference")
     sub.add_argument("--air-tune", type=float, default=None, metavar="HZ",
                      help="--air: the frequency the harmonics are generated "
                           "from, upward (default "

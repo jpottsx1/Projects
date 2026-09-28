@@ -20,7 +20,7 @@ from pathlib import Path
 
 import numpy as np
 
-from . import (air, bassline, bs1770, declip, decode, expand, spectrum,
+from . import (air, bassline, bs1770, declip, decode, expand, mud, spectrum,
                stems, subbass, write)
 
 
@@ -250,17 +250,24 @@ def _one(job: dict) -> dict:
                 amount_db=job["transient"],
                 min_crest_db=job.get("min_crest", expand.MIN_CREST_DB))
 
+        # The mud cut, before the sub: the sub adds under a low end that is
+        # already cleared, and the cut is sized from the track as it came.
+        cleared = mud._blank(job.get("mud_note") or "not asked for")
+        if job.get("mud", 0.0) > 0:
+            audio, cleared = mud.clear(audio, decode.TARGET_RATE, job["mud"])
+
         if skip is not None:
             # A track can want de-clipping, or dynamics, and not want a sub.
             # Where any of those did something there is a new file worth
             # writing, so only the sub is dropped; where nothing was done,
             # say so and move on.
             amount = 0.0
-            if not (ranged["applied"] or shaped["applied"]
+            if not (ranged["applied"] or shaped["applied"] or cleared["applied"]
                     or (clip is not None and clip["restored"])):
                 return {**base, "status": "skipped", "reason": skip,
                         "amount": None, "clip": clip, "range": ranged,
-                        "transient": shaped, "air": air._blank("not reached")}
+                        "transient": shaped, "air": air._blank("not reached"),
+                        "mud": cleared}
             note_skip = skip
 
         after, info = subbass.enhance(audio, decode.TARGET_RATE,
@@ -392,6 +399,8 @@ def _one(job: dict) -> dict:
             "sub_note": job.get("sub_note") or reason,
             "punch_db": round(float(info["punch_db"]), 3),
             "air_db": round(float(aired.get("measured_db", 0.0)), 3),
+            "mud_db": round(float(cleared.get("measured_db", 0.0)), 3),
+            "mud_note": cleared.get("note"),
             "clips_restored": (clip or {}).get("restored", 0),
             "clip_lift_db": round(float((clip or {}).get("lift_db", 0.0)), 3),
             "variants": variants,
@@ -399,7 +408,7 @@ def _one(job: dict) -> dict:
     return {
         **base, "status": "ok", "amount": amount, "reason": reason,
         "clip": clip, "manifest": manifest,
-        "range": ranged, "transient": shaped, "air": aired,
+        "range": ranged, "transient": shaped, "air": aired, "mud": cleared,
         "kicks_per_minute": float(info["kicks_per_minute"]),
         "bass_share": float(info.get("bass_share", 0.0)),
         "shape_before": float(_mean_low(before_bands)),

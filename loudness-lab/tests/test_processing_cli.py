@@ -699,3 +699,44 @@ class TestAirIsSizedFromTheTopOctave(unittest.TestCase):
             conn.close()
         self.assertEqual(amount, 0.0)
         self.assertIn("already within", why)
+
+
+@unittest.skipUnless(HAVE_FFMPEG, "ffmpeg/ffprobe not installed")
+class TestTheMudCutIsSizedFromTheReference(unittest.TestCase):
+    """--mud with --auto: each track gets what its 200-400 Hz sits above
+    the reference, up to the ceiling; a clean track gets none, and says so."""
+
+    def test_muddy_gets_its_excess_and_clean_gets_none(self):
+        import numpy as np
+        from scipy.signal import butter, sosfiltfilt
+        directory = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, directory, ignore_errors=True)
+        (directory / "ref").mkdir()
+        (directory / "src").mkdir()
+        x, _ = programme(seconds=8.0)
+        thick = sosfiltfilt(butter(2, [200, 400], btype="band", fs=RATE,
+                                   output="sos"), x, axis=0)
+        subbass.write_flac(directory / "ref" / "Reference.flac", x.astype(np.float32), RATE)
+        subbass.write_flac(directory / "src" / "Muddy.flac",
+                           (x + thick).astype(np.float32), RATE)
+        subbass.write_flac(directory / "src" / "Clean.flac", x.astype(np.float32), RATE)
+        out = subprocess.run(
+            [sys.executable, str(TOOL), "subbass", str(directory / "src"),
+             "--auto", "--amount", "0", "--mud", "10",
+             "--reference-folder", str(directory / "ref"),
+             "--db", str(directory / "l.db"), "--out", str(directory / "out"),
+             "--jobs", "1", "--porcelain"], capture_output=True, text=True)
+        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+        events = [json.loads(line) for line in out.stdout.splitlines() if line.strip()]
+        done = {e["name"]: e for e in events if e.get("phase") == "process"}
+        # +6 dB of band on a 2nd-order filter reads about +4.7 over the
+        # four third-octaves; the cut takes that much, not the 10 dB ceiling.
+        self.assertLess(done["Muddy"]["mud_db"], -3.5)
+        self.assertGreater(done["Muddy"]["mud_db"], -6.0)
+        # The clean track has nothing to cut and nothing to add: skipped,
+        # with the reason, rather than written unchanged.
+        self.assertEqual(done["Clean"]["status"], "skipped")
+        self.assertIn("already within", done["Clean"]["reason"])
+        manifest = json.loads(Path(events[-1]["manifest"]).read_text())["tracks"]
+        muddy = next(t for t in manifest if t["name"] == "Muddy")
+        self.assertAlmostEqual(muddy["mud_db"], done["Muddy"]["mud_db"], places=3)

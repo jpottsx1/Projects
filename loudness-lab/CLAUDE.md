@@ -1178,6 +1178,37 @@ differs by track, and a rotation can raise a peak. Must run causally: a
 zero-phase pass cancels an all-pass (tested). Nothing built into the
 chain until Jeff's report says tracks are held back.
 
+**Answered: not built.** Jeff's 132 processed tracks (6f97c7a): rotation
+RAISED the median true peak by about 1 dB at every strength (1.5 dB off
+at best) -- these masters were limited, their tops flattened level, and
+turning the bass's phase knocks those tops out of line. A rotator helps
+before a limiter, which is where broadcast chains put it, not after
+one. 28 of 132 were held under -16 by the ceiling, 1.4 dB (median), 3.6
+at most -- mostly the de-clipped tracks, whose restored peaks are the
+point of de-clipping; the level they cannot reach is the punch given
+back, and recovering it would mean limiting those peaks off again. A
+lower target does not fix it cleanly either (17 still held at -17, 10 at
+-18). The report's summary first said "peaks down -0.97 dB" for peaks
+that rose; it now uses the table's sign.
+
+**The bottom end, measured before anything is built (2026-09-28).**
+Jeff: why does BBE make such a difference, and what else can enhance
+the bottom end? BBE's audible effect is mostly level (unmatched A/B),
+its Lo Contour bass shelf, and its attack-tracking treble boost; Mach3Bass
+is dramatic only on small speakers. Chosen next: (1) mono bass -- club
+subs sum left and right, and bass differing between the channels
+cancels there, bass out of step between them largely vanishes; (3) mud,
+200-400 Hz, which Jeff wants sized per track against the reference like
+the sub AND following the music over time rather than a fixed cut.
+`Measure Low End.command` (`tools/low_end.py`) answers both from the
+library, processing nothing: dB a mono sum loses over 31.5-125 Hz,
+10 log10(mid / (mid + side)) weighted by each band's level (side/mid
+stored as "no value" for identical channels, counted as mono), and the
+200-400 Hz shape against the reference folder. On synthetic tracks a
+phase-flipped bass loses 17 dB; its mud reads +11 too, because the bass
+cancelling in the mid channel makes everything else read louder against
+it -- fix the mono problem before trusting a mud figure on that track.
+
 **Profiles per kind of music.** Jeff: "build profiles ... let the user
 measure a series of folders per profile, such as dance, 2020s, pop,
 disco". A profile now carries `references`, more folders pooled with

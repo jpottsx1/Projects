@@ -119,8 +119,13 @@ def summary(rows: list[dict]) -> list[str]:
                 for r in held]
         moved = max(max(r["rotations"][name]["loudness_moved"],
                         r["rotations"][name]["band_moved"]) for r in rows)
-        lines.append(f"  {name:<10} peaks down {np.median(down):+.2f} dB (median), "
-                     f"{max(down):+.2f} at best"
+        # In the table's sign: + is a peak that ROSE. The first version said
+        # "peaks down -0.97 dB" for peaks that went up, and read backwards.
+        change = -np.median(down)
+        lowered = sum(1 for d in down if d > 0.05)
+        lines.append(f"  {name:<10} peak {change:+.2f} dB (median, "
+                     f"{'up' if change > 0 else 'down'}), {-max(down):+.2f} at "
+                     f"best; lowers the peak on {lowered} of {len(rows)}"
                      + (f"; gives back {np.median(back):.2f} dB of the held-back "
                         f"level (median)" if held else "")
                      + f"; loudness and bands moved at most {moved:.3f} dB")

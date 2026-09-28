@@ -10,8 +10,14 @@ tuning it away.
 ## Standing rules
 
 - **Originals are never written to.** Processing writes copies. The only
-  exception is an explicit `--in-place`, which logs what it did so it can
-  be undone.
+  exceptions are an explicit `--in-place`, which logs what it did so it can
+  be undone, and `subbass --replace-originals --yes` (the app's "Replace
+  originals when done", confirmed each run, never remembered), which MOVES
+  each original into `~/Music/LoudnessLab/Replaced originals/<stamp>/`
+  under its full path, logs every swap in `replaced.jsonl`, and is undone
+  by `loudness-lab restore <batch>` / `Restore Originals.command`. It only
+  swaps a finished track (`--no-compare`) in the original's own format.
+  Jeff asked for it 2026-09-28; `tests/test_replace.py` holds it.
 - **Serato metadata must survive byte for byte.** Cue points and beatgrids
   live in GEOB frames. The MP3 gain path changes `global_gain` inside audio
   frames and nothing else; `testTheID3RegionIsNeverTouched` and

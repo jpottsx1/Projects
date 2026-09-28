@@ -179,6 +179,9 @@ public struct Profile: Codable, Equatable, Sendable {
         // because the damage is real and the method is self-limiting, not
         // because it is free. Listen before committing a folder to it.
         disco.declip = true
+        // A ceiling, sized per track: seventies tracks sat 1-4.8 dB above
+        // a disco reference in 200-400 Hz (see profiles.py).
+        disco.mud = 5
 
         // Measured the same way, on a library this project did not come
         // from: five discs of "100 Hits - The New Romantics (2011)", 100

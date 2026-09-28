@@ -37,6 +37,10 @@ struct ContentView: View {
     @State private var limited = false
     @State private var compare = true
     @State private var dryRun = false
+    /// Never remembered between launches: replacing originals is asked
+    /// for each time, and confirmed each time.
+    @State private var replaceOriginals = false
+    @State private var confirmingReplace = false
     @State private var chosen: Manifest.Track?
     @State private var blind = false
     @State private var rightTab = RightTab.survey
@@ -92,6 +96,7 @@ struct ContentView: View {
                 SettingsPanel(profile: $profile, profileName: $profileName,
                               limit: $limit, limited: $limited,
                               compare: $compare, dryRun: $dryRun,
+                              replaceOriginals: $replaceOriginals,
                               personal: personal,
                               folders: engine.survey?.folders.map(\.folder) ?? [])
                 Divider()
@@ -193,12 +198,34 @@ struct ContentView: View {
     private var runControls: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Button(engine.isRunning ? "Running…" : "Process") { start() }
+                Button(engine.isRunning ? "Running…" : "Process") {
+                    if replaceOriginals { confirmingReplace = true } else { start() }
+                }
                     .disabled(engine.isRunning || folders.isEmpty
                               || queue.includedPaths.isEmpty)
                     .keyboardShortcut(.return, modifiers: .command)
-                    .help("Measure, then process the chosen folders (⌘↩). "
-                          + "Originals are never written to.")
+                    .help(replaceOriginals
+                          ? "Measure, process the chosen folders, then put each "
+                            + "finished track in its original's place (⌘↩). "
+                            + "The originals are kept."
+                          : "Measure, then process the chosen folders (⌘↩). "
+                            + "Originals are never written to.")
+                    .confirmationDialog(
+                        "Replace the originals?",
+                        isPresented: $confirmingReplace
+                    ) {
+                        Button("Process and Replace") { start() }
+                        Button("Cancel", role: .cancel) {}
+                    } message: {
+                        Text("Each finished \(format.rawValue.uppercased()) "
+                             + "is put where its original was, same name, same "
+                             + "folder. Originals in another format are left "
+                             + "alone. Nothing is deleted: the originals are "
+                             + "moved to Music › LoudnessLab › Replaced "
+                             + "originals, and Restore Originals puts them "
+                             + "back. Check one song's cue points in Serato "
+                             + "before doing a whole library.")
+                    }
                 if engine.isRunning {
                     Button("Stop") { engine.cancel() }
                 }
@@ -219,7 +246,10 @@ struct ContentView: View {
             }
             if CLI.locate() == nil { toolMissing }
             output
-            Text("Originals are never written to. Every version is rendered "
+            Text((replaceOriginals
+                  ? "Originals will be replaced, and kept in Replaced originals. "
+                  : "Originals are never written to. ")
+                 + "Every version is rendered "
                  + "from one decode, which is what lets them be switched "
                  + "between mid-bar.")
                 .font(.caption)
@@ -361,10 +391,12 @@ struct ContentView: View {
         Task {
             await engine.run(folders: folders, profile: profile,
                              limit: limited ? limit : Int.max,
-                             compare: compare, dryRun: dryRun,
+                             compare: compare && !replaceOriginals,
+                             dryRun: dryRun && !replaceOriginals,
                              outputDirectory: outputDirectory,
                              databaseURL: databaseURL, format: format,
-                             only: queue.includedPaths)
+                             only: queue.includedPaths,
+                             replaceOriginals: replaceOriginals)
             chosen = engine.manifest?.tracks.first
             // Measurements exist now that did not before, so the order and
             // the numbers in the list are no longer the best available.

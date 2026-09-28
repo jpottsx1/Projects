@@ -107,8 +107,10 @@ struct QueuePanel: View {
         .padding(.vertical, 5)
         // Out of range is dimmed rather than hidden: the track IS in the
         // folder, and saying so is the difference between "not chosen" and
-        // "not found", which are very different problems.
-        .opacity(item.included ? (inRange ? 1.0 : 0.45) : 0.3)
+        // "not found", which are very different problems. Unticked is NOT
+        // dimmed: the empty checkbox says it, and a greyed-out name after
+        // "None" read as the tracks having gone somewhere (Jeff, 2026-09-28).
+        .opacity(item.included && !inRange ? 0.45 : 1.0)
         .background(inRange && item.included
                     ? Color.accentColor.opacity(0.08) : Color.clear)
     }

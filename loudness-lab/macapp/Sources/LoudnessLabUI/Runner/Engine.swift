@@ -315,7 +315,8 @@ final class Engine: ObservableObject {
     func run(folders: [URL], profile: Profile, limit: Int, compare: Bool,
              dryRun: Bool, outputDirectory: URL, databaseURL: URL,
              format: AudioWriter.Format = .flac,
-             only: Set<String>? = nil) async {
+             only: Set<String>? = nil,
+             replaceOriginals: Bool = false) async {
         guard !isRunning, !folders.isEmpty else { return }
         isRunning = true; flag.reset(); failure = nil; manifest = nil
         log = ""; progress = nil
@@ -392,8 +393,11 @@ final class Engine: ObservableObject {
             if profile.stemKicks && profile.bassSub { arguments += ["--bass-sub"] }
             if profile.airFixed { arguments += ["--air-fixed"] }
             if profile.airStems { arguments += ["--air-stems"] }
-            if !compare { arguments += ["--no-compare"] }
-            if dryRun { arguments += ["--dry-run"] }
+            if !compare || replaceOriginals { arguments += ["--no-compare"] }
+            if dryRun && !replaceOriginals { arguments += ["--dry-run"] }
+            // Confirmed in the app before the run starts; the tool asks for
+            // --yes so that nothing replaces originals without being asked.
+            if replaceOriginals { arguments += ["--replace-originals", "--yes"] }
             if let selection { arguments += ["--select", selection.path] }
 
             try await CLI.run(tool, arguments,

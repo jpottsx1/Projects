@@ -121,6 +121,7 @@ struct SettingsPanel: View {
     @Binding var limited: Bool
     @Binding var compare: Bool
     @Binding var dryRun: Bool
+    @Binding var replaceOriginals: Bool
     @ObservedObject var personal: PersonalProfiles
     /// The folders already measured, for the reference list.
     let folders: [String]
@@ -378,8 +379,17 @@ struct SettingsPanel: View {
                 .help(Help.limit.summary)
                 Toggle("Write A/B pairs", isOn: $compare)
                     .help(Help.compare.summary)
+                    .disabled(replaceOriginals)
                 Toggle("Dry run (measure, write nothing)", isOn: $dryRun)
                     .help(Help.dryRun.summary)
+                    .disabled(replaceOriginals)
+                // A pair's B is level-matched for listening and a dry run
+                // writes nothing to swap in, so replacing turns both off.
+                Toggle("Replace originals when done", isOn: $replaceOriginals)
+                    .help(Help.replaceOriginals.summary)
+                    .onChange(of: replaceOriginals) { _, on in
+                        if on { compare = false; dryRun = false }
+                    }
             }
         }
     }

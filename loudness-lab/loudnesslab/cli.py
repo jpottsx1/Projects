@@ -105,9 +105,39 @@ def reference_folder(wanted: str | None) -> Path | None:
     return Path(os.path.expanduser(text)).resolve() if text else None
 
 
-def _reference_curve(conn, wanted: str,
-                     bands=report.LOW_SHAPE_BANDS) -> tuple[str | None, dict]:
-    """Median shape of the folder named by `wanted`, over `bands`.
+def _references(args) -> list[str]:
+    """Every reference folder asked for: `--reference` and each
+    `--reference-folder`, in order, blanks and repeats dropped."""
+    out = []
+    for item in [getattr(args, "reference", None), *(getattr(args, "references", None) or [])]:
+        text = (item or "").strip()
+        if text and text not in out:
+            out.append(text)
+    return out
+
+
+def _reference_curve_of(conn, wanted: list[str], bands=report.LOW_SHAPE_BANDS
+                        ) -> tuple[str | None, dict, str | None]:
+    """(name, curve, the first reference that matched nothing): the target
+    pooled over every reference folder -- each track in any of them counts
+    once, so a folder of 200 tracks weighs more than one of 20, as it
+    should. One that matches nothing stops the run, named: silently
+    pooling the rest would size every track against a target nobody chose."""
+    pooled: dict = {}
+    names = []
+    for item in wanted:
+        name, values = _reference_values(conn, item, bands)
+        if name is None:
+            return None, {}, item
+        names.append(name)
+        for band, found in values.items():
+            pooled.setdefault(band, []).extend(found)
+    curve = {b: float(np.median(pooled[b])) for b in bands if pooled.get(b)}
+    return " + ".join(names), curve, None
+
+
+def _reference_values(conn, wanted: str, bands) -> tuple[str | None, dict]:
+    """(name, {band: [each track's value]}) for one reference folder.
 
     Low bands for the sub stage, top bands for air -- same query, same
     resolution of which folder "the reference" names, different slice of
@@ -119,7 +149,7 @@ def _reference_curve(conn, wanted: str,
     folder never matched (2026-09-27: "New Music 2026-09-23 matched none").
     A label names one folder -- or, if it names a folder whose tracks are
     all in subfolders, all of them together, where it used to match
-    "several" and give up.
+    "several" and give up. Two albums' "CD1" are never pooled.
     """
     folder = reference_folder(wanted)
     if folder is not None:
@@ -133,17 +163,14 @@ def _reference_curve(conn, wanted: str,
             (like,)).fetchall()
         values: dict = {}
         for row in rows:
-            values.setdefault(row["band_hz"], []).append(row["shape_db"])
-        curve = {b: float(np.median(values[b])) for b in bands if values.get(b)}
-        return (base, curve) if curve else (None, {})
+            if row["band_hz"] in bands:
+                values.setdefault(row["band_hz"], []).append(row["shape_db"])
+        return (base, values) if values else (None, {})
     matrix_bands, shape = report._band_matrix(conn, "shape_db", group_by="folder")
     name = report.resolve_reference(shape, wanted)
     if name is not None:
         groups = [name]
     else:
-        # Every folder under one folder of that name: the name as whole
-        # folders somewhere in the label, and one place it points to --
-        # two albums' "CD1" are two corpora, never pooled.
         key = wanted.strip().strip("/").lower()
         parents = {}
         for g in shape:
@@ -155,12 +182,15 @@ def _reference_curve(conn, wanted: str,
         name = wanted.strip() if groups else None
     if name is None:
         return None, {}
-    curve = {}
-    for b in bands:
-        pooled = [v for g in groups for v in shape[g].get(b, [])]
-        if pooled:
-            curve[b] = float(np.median(pooled))
-    return name, curve
+    values = {b: [v for g in groups for v in shape[g].get(b, [])] for b in bands}
+    return name, {b: v for b, v in values.items() if v}
+
+
+def _reference_curve(conn, wanted: str,
+                     bands=report.LOW_SHAPE_BANDS) -> tuple[str | None, dict]:
+    """Median shape of the one folder named by `wanted`, over `bands`."""
+    name, curve, missing = _reference_curve_of(conn, [wanted], bands)
+    return (None, {}) if missing is not None else (name, curve)
 
 
 def _auto_amount(conn, path: str, curve: dict, cap: float,
@@ -576,7 +606,8 @@ def cmd_subbass(args: argparse.Namespace) -> int:
             "attack and air are all off).\nNothing to do -- levelling is the "
             "gain command:\n  ./loudness-lab gain <path> --profile "
             f"{args.profile or 'level-only'}", 0)
-    if args.auto and not args.reference:
+    wanted_references = _references(args)
+    if args.auto and not wanted_references:
         return fail("error: --auto needs a reference corpus. Give --reference, "
                     "or set it in the profile.")
     if (args.stem_kicks or (args.air_stems and args.air > 0)) \
@@ -621,13 +652,15 @@ def cmd_subbass(args: argparse.Namespace) -> int:
     # choosing a new one should not first need a separate Measure. Only
     # measured: the processing scope below is still `args.path`.
     roots = list(args.path)
-    chosen = reference_folder(args.reference) if args.auto else None
-    if chosen is not None:
+    for wanted in (wanted_references if args.auto else []):
+        chosen = reference_folder(wanted)
+        if chosen is None:
+            continue
         if not chosen.is_dir():
             return fail(f"--auto needs a reference folder; {str(chosen)!r} "
                         f"is not a folder on this Mac.")
         if not any(chosen == Path(r).resolve() or Path(r).resolve() in chosen.parents
-                   for r in args.path):
+                   for r in roots):
             roots.append(chosen)
     counts = analyze.run(roots=roots, db_path=database, jobs=args.jobs,
                          progress=reporter)
@@ -684,15 +717,16 @@ def cmd_subbass(args: argparse.Namespace) -> int:
         reference_name, curve = (None, {})
         top_curve = {}
         if args.auto:
-            reference_name, curve = _reference_curve(conn, args.reference or "")
-            if reference_name is None:
-                if reference_folder(args.reference) is not None:
+            reference_name, curve, missing = _reference_curve_of(
+                conn, wanted_references)
+            if missing is not None:
+                if reference_folder(missing) is not None:
                     return fail(
                         f"--auto needs a reference folder; "
-                        f"{args.reference.strip()!r} has no measured tracks "
+                        f"{missing.strip()!r} has no measured tracks "
                         f"in it -- no audio files, or none could be read.")
                 return fail(
-                    f"--auto needs a reference folder; {args.reference!r} "
+                    f"--auto needs a reference folder; {missing!r} "
                     f"matched none (or matched several).\nName one of the "
                     f"folders that report lowend --by folder lists.")
             if args.air > 0 and not args.air_fixed:
@@ -700,8 +734,8 @@ def cmd_subbass(args: argparse.Namespace) -> int:
                 # measured in: --air becomes the ceiling per track gets
                 # sized up to, rather than a flat amount every track gets
                 # regardless of how much brighter the reference already is.
-                _, top_curve = _reference_curve(conn, args.reference or "",
-                                                bands=report.TOP_SHAPE_BANDS)
+                _, top_curve, _ = _reference_curve_of(
+                    conn, wanted_references, bands=report.TOP_SHAPE_BANDS)
         amounts = {}
         air_amounts = {}
         if args.auto:
@@ -1487,6 +1521,10 @@ def build_parser() -> argparse.ArgumentParser:
                           "one figure for everything")
     sub.add_argument("--reference", default=None, metavar="TEXT",
                      help="--auto: the folder whose low end is the target")
+    sub.add_argument("--reference-folder", dest="references", action="append",
+                     default=None, metavar="PATH",
+                     help="--auto: another reference folder, pooled with "
+                          "--reference into one target; repeat for more")
     sub.add_argument("--min-activity", type=float, default=None,
                      help="skip a track whose sub octave swings less than this "
                           f"many dB (default: {subbass.MIN_LOW_ACTIVITY_DB:.0f}). "

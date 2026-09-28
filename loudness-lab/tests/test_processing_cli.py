@@ -561,3 +561,90 @@ class TestTheReferenceAsAFolder(unittest.TestCase):
              "--porcelain"], capture_output=True, text=True)
         self.assertEqual(out.returncode, 2)
         self.assertIn("matched none (or matched several)", out.stdout)
+
+
+@unittest.skipUnless(HAVE_FFMPEG, "ffmpeg/ffprobe not installed")
+class TestAProfileWithSeveralReferenceFolders(unittest.TestCase):
+    """Jeff, 2026-09-28: "build profiles for music to be run against
+    specifically -- let the user measure a series of folders per profile,
+    such as dance, 2020s, pop, disco". Several folders, one target."""
+
+    def setUp(self):
+        self.dir = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.dir, ignore_errors=True)
+        self.src = self.dir / "src"
+        _fixture(self.src, ("Bee Gees - Night Fever",))
+        self.disco_a = self.dir / "Disco" / "Remasters"
+        self.disco_b = self.dir / "Disco" / "12 inch"
+        _fixture(self.disco_a, ("One",))
+        # Different music in the second folder, or pooling one folder and
+        # pooling both would read the same.
+        _fixture(self.disco_b, ("Two", "Three"), seconds=11.0)
+
+    def run_it(self, *refs: str, code: int = 0) -> list[dict]:
+        args = [sys.executable, str(TOOL), "subbass", str(self.src), "--auto",
+                "--db", str(self.dir / "l.db"), "--out", str(self.dir / "out"),
+                "--jobs", "1", "--porcelain"]
+        for ref in refs:
+            args += ["--reference-folder", ref]
+        out = subprocess.run(args, capture_output=True, text=True)
+        self.assertEqual(out.returncode, code, out.stdout + out.stderr)
+        return [json.loads(line) for line in out.stdout.splitlines() if line.strip()]
+
+    def test_two_folders_measured_and_pooled(self):
+        events = self.run_it(str(self.disco_a), str(self.disco_b))
+        measured = [e for e in events if e["event"] == "measured"][0]
+        self.assertEqual(measured["analysed"], 4)          # 1 to process + 3 reference
+        selected = [e for e in events if e["event"] == "selected"][0]
+        self.assertEqual(selected["reference"],
+                         f"{self.disco_a.resolve()} + {self.disco_b.resolve()}")
+        processed = [e for e in events if e.get("phase") == "process"]
+        self.assertEqual([e["name"] for e in processed], ["Bee Gees - Night Fever"])
+
+    def test_one_folder_missing_stops_the_run_naming_it(self):
+        events = self.run_it(str(self.disco_a), str(self.dir / "Gone"), code=2)
+        self.assertIn("Gone", events[-1]["message"])
+        self.assertIn("is not a folder", events[-1]["message"])
+
+    def test_pooled_means_every_track_counts_once(self):
+        from loudnesslab import cli, db
+        self.run_it(str(self.disco_a), str(self.disco_b))
+        conn = db.connect(self.dir / "l.db")
+        try:
+            name, curve, missing = cli._reference_curve_of(
+                conn, [str(self.disco_a), str(self.disco_b)])
+            _, values_a = cli._reference_values(conn, str(self.disco_a), report_bands())
+            _, values_b = cli._reference_values(conn, str(self.disco_b), report_bands())
+        finally:
+            conn.close()
+        self.assertIsNone(missing)
+        import numpy as np
+        differs = False
+        for band, value in curve.items():
+            pooled = values_a[band] + values_b[band]
+            self.assertEqual(len(pooled), 3)
+            self.assertAlmostEqual(value, float(np.median(pooled)))
+            differs |= abs(value - float(np.median(values_a[band]))) > 0.01
+        self.assertTrue(differs, "the second folder changed nothing")
+
+    def test_a_folder_name_that_matches_nothing_stops_the_run(self):
+        # A name rather than a path: it gets past measuring and has to be
+        # caught where the target is built, named, not pooled around.
+        events = self.run_it(str(self.disco_a), "No Such Folder", code=2)
+        self.assertIn("'No Such Folder' matched none", events[-1]["message"])
+
+    def test_the_manifest_records_them(self):
+        self.run_it(str(self.disco_a))   # measure; nothing written for a skipped track
+        out = subprocess.run(
+            [sys.executable, str(TOOL), "subbass", str(self.src), "--amount", "3",
+             "--reference-folder", str(self.disco_a), "--db", str(self.dir / "l.db"),
+             "--out", str(self.dir / "out2"), "--jobs", "1", "--porcelain"],
+            capture_output=True, text=True)
+        done = json.loads(out.stdout.splitlines()[-1])
+        settings = json.loads(Path(done["manifest"]).read_text())["settings"]
+        self.assertEqual(settings["references"], [str(self.disco_a)])
+
+
+def report_bands():
+    from loudnesslab import report
+    return report.LOW_SHAPE_BANDS

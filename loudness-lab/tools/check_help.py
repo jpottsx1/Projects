@@ -33,6 +33,7 @@ DOCUMENTED_BY = {
     "peakCeiling": "peakCeiling",
     "auto": "auto",
     "reference": "reference",
+    "references": "references",
     "amount": "amount",
     "maxAmount": "maxAmount",
     "subOffset": "subOffset",

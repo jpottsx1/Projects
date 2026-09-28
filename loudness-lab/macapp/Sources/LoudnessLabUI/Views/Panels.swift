@@ -247,6 +247,7 @@ struct SettingsPanel: View {
                             set: { profile.reference = $0 }))
                             .help(Help.reference.summary)
                     }
+                    referenceFolders
                     slider(Help.maxAmount, $profile.maxAmount, 1...12, "dB",
                            // disco-70s caps at 8, eighties at 11, both
                            // just above their measured worst.
@@ -405,6 +406,46 @@ struct SettingsPanel: View {
             Text("Other…").tag(SettingsPanel.otherReference)
         }
         .help(Help.reference.summary)
+    }
+
+    /// More folders pooled into the target: a profile per kind of music
+    /// ("Disco", "2020s pop"), each measured against several folders of
+    /// it. Saved with the profile; measured the first time it is used.
+    private var referenceFolders: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            ForEach(profile.references, id: \.self) { folder in
+                HStack(spacing: 4) {
+                    Image(systemName: "folder")
+                        .foregroundStyle(.secondary)
+                    Text(URL(fileURLWithPath: folder).lastPathComponent)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .help(folder)
+                    Spacer()
+                    Button {
+                        profile.references.removeAll { $0 == folder }
+                    } label: {
+                        Image(systemName: "minus.circle")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Stop measuring against this folder")
+                }
+            }
+            Button("Add reference folders…") { addReferenceFolders() }
+                .help(Help.references.summary)
+        }
+    }
+
+    private func addReferenceFolders() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = true
+        panel.message = "Folders of music that sound the way this kind of music should."
+        guard panel.runModal() == .OK else { return }
+        for url in panel.urls where !profile.references.contains(url.path) {
+            profile.references.append(url.path)
+        }
     }
 
     private var isTypedReference: Bool {

@@ -21,6 +21,9 @@ public struct Profile: Codable, Equatable, Sendable {
     public var peakCeiling: Double = -1.0    // dBTP no gain may exceed
     public var auto: Bool = false            // size the sub from each track
     public var reference: String?            // the corpus --auto measures against
+    // More reference folders, pooled with `reference` into one target: a
+    // profile per kind of music, measured against several folders of it.
+    public var references: [String] = []
     public var amount: Double = 5.0          // fixed sub, when auto is off
     public var maxAmount: Double = 6.0
     public var subOffset: Double = 0.0       // dB more or less than the reference
@@ -56,7 +59,8 @@ public struct Profile: Codable, Equatable, Sendable {
     /// snake_case on the wire, matching what the Python writes, so a
     /// manifest from either side is readable by the other.
     public enum CodingKeys: String, CodingKey {
-        case description, target, estimator, auto, reference, amount, punch, declip
+        case description, target, estimator, auto, reference, references
+        case amount, punch, declip
         case peakCeiling = "peak_ceiling"
         case maxAmount = "max_amount"
         case subOffset = "sub_offset"
@@ -100,6 +104,8 @@ public struct Profile: Codable, Equatable, Sendable {
         peakCeiling = try number(.peakCeiling, fallback.peakCeiling)
         auto = try values.decodeIfPresent(Bool.self, forKey: .auto) ?? fallback.auto
         reference = try values.decodeIfPresent(String.self, forKey: .reference)
+        references = try values.decodeIfPresent([String].self, forKey: .references)
+            ?? fallback.references
         amount = try number(.amount, fallback.amount)
         maxAmount = try number(.maxAmount, fallback.maxAmount)
         subOffset = try number(.subOffset, fallback.subOffset)

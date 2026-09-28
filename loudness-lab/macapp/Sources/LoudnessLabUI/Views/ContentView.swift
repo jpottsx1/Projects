@@ -405,12 +405,24 @@ struct ContentView: View {
     }
 
     private func loadIntoPlayer(_ track: Manifest.Track?) {
+        // Stepping through the results with the arrow keys while listening
+        // carries on listening: the next song starts from the top, on the
+        // same side (A or B) that was playing (Jeff, 2026-09-28). Stopped
+        // stays stopped.
+        let wasPlaying = player.isPlaying
+        let side = player.selected.flatMap { id in
+            player.loaded.firstIndex { $0.id == id }
+        }
         guard let track else { player.stop(); return }
         let gains = track.matchGains(using: estimatorPath)
         player.loadOrReport(track.variants.map {
             ABPlayer.Source(id: $0.id, label: $0.label, url: $0.url,
                             matchGainDB: gains[$0.id] ?? 0)
         })
+        if let side, side < player.loaded.count {
+            player.select(player.loaded[side].id)
+        }
+        if wasPlaying && !player.loaded.isEmpty { player.play() }
     }
 
     private var estimatorPath: KeyPath<Manifest.Variant, Double?> {

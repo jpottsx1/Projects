@@ -562,6 +562,12 @@ land wherever the ceiling stops them, which is the opposite of levelling.
 Moving to -11 would buy nothing for range and cost the headroom the
 transient stage spends.
 
+Only a `--no-compare` run is levelled. A/B pairs are both brought DOWN to
+the quieter of the two, so a pair reads anywhere (-22, -18.5 on Jeff's
+first look, 2026-09-28) and is not a level to judge by. `Check
+Levels.command` (`tools/check_levels.py`) reads a folder back and says
+per file: levelled, held by the peak ceiling, A/B pair, or not levelled.
+
 ### Low LRA is not always damage
 
 The survey used to mark every disco compilation as wanting the range

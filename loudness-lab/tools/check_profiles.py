@@ -25,7 +25,7 @@ NAMES = {
     "targetLRA": "target_lra", "maxAttenuation": "max_attenuation",
     "transient": "transient", "minCrest": "min_crest",
     "air": "air", "airTune": "air_tune", "stemKicks": "stem_kicks",
-    "airFixed": "air_fixed", "airStems": "air_stems", "bassSub": "bass_sub",
+    "airFixed": "air_fixed", "mud": "mud", "airStems": "air_stems", "bassSub": "bass_sub",
     "target": "target", "estimator": "estimator", "peakCeiling": "peak_ceiling",
     "auto": "auto", "reference": "reference", "references": "references",
     "amount": "amount",

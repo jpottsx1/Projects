@@ -48,6 +48,7 @@ DOCUMENTED_BY = {
     "minCrest": "minCrest",
     "air": "air",
     "airTune": "airTune",
+    "mud": "mud",
     "stemKicks": "stemKicks",
     "airFixed": "airFixed",
     "airStems": "airStems",

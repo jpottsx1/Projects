@@ -24,6 +24,10 @@ struct Manifest: Codable {
         /// Nil for a manifest written before this was added -- an older
         /// run genuinely has no air figure to show, not a zero one.
         let airDB: Double?
+        /// The 200-400 Hz change the mud cut made (negative), and why a
+        /// track got none. Nil in a manifest from before the cut existed.
+        let mudDB: Double?
+        let mudNote: String?
         let clipsRestored: Int
         let clipLiftDB: Double
         let variants: [Variant]
@@ -40,6 +44,8 @@ struct Manifest: Codable {
             case subDB = "sub_db"
             case punchDB = "punch_db"
             case airDB = "air_db"
+            case mudDB = "mud_db"
+            case mudNote = "mud_note"
             case clipsRestored = "clips_restored"
             case clipLiftDB = "clip_lift_db"
             case subAskedDB = "sub_asked_db"

@@ -311,6 +311,16 @@ struct SettingsPanel: View {
 
                 Divider()
 
+                slider(Help.mud, $profile.mud, 0...8, "dB",
+                       // Jeff's seventies records sat 1-4.8 dB above his
+                       // disco reference in 200-400 Hz, 3 the median.
+                       sweet: 2...5)
+                Text("200–400 Hz, cut where it builds up. Zero turns it off.")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .help(Help.mud.detail)
+
+                Divider()
+
                 slider(Help.air, $profile.air, 0...24, "dB",
                        // dB in the top octave (16-20 kHz). A missing top
                        // octave fills to 12 for nothing; a full one costs
@@ -550,6 +560,10 @@ struct ResultsPanel: View {
                     }
                     TableColumn("Air") { row in
                         Text(row.airDB.map { String(format: "%+.2f dB", $0) } ?? "—")
+                    }
+                    TableColumn("Mud") { row in
+                        Text(row.mudDB.map { String(format: "%+.2f dB", $0) } ?? "—")
+                            .help(row.mudNote ?? "")
                     }
                     TableColumn("Punch") { Text(String(format: "%+.1f dB", $0.punchDB)) }
                     TableColumn("Clips") { Text("\($0.clipsRestored)") }

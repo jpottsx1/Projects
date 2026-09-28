@@ -375,6 +375,7 @@ final class Engine: ObservableObject {
                 "--transient", String(profile.transient),
                 "--min-crest", String(profile.minCrest),
                 "--air", String(profile.air),
+                "--mud", String(profile.mud),
                 "--air-tune", String(profile.airTune),
             ]
             if profile.auto { arguments += ["--auto"] }

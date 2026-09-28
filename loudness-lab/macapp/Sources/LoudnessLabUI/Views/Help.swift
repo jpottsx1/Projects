@@ -260,6 +260,28 @@ enum Help {
         it would cost.
         """)
 
+    static let mud = HelpEntry(
+        title: "Clear the mud",
+        summary: "Take the thickness out of 200–400 Hz, where it builds up. Off at zero.",
+        detail: """
+        Early-seventies records sit thick in the lower midrange: measured \
+        against a disco reference, 16 of 20 tracks were more than 1 dB above \
+        it in 200–400 Hz, 3 dB the median. That thickness blurs the bass \
+        line and the kick into each other.
+
+        A threshold, as a dynamic EQ has: every moment where the band is \
+        built up above it is cut by how far above it is, and moments below \
+        it -- a sparse verse -- are left alone. The threshold is set so the \
+        band as a whole comes down by this many dB, measured and reported. \
+        A track thick all the way through is cut nearly evenly; one that \
+        thickens in places is cut there. It moves over 400 ms, too slowly to \
+        pump or click, and nothing outside 200–400 Hz is touched.
+
+        With "Size it per track against a reference" on, this is a ceiling: \
+        each track gets what its 200–400 Hz sits above the reference folders, \
+        and a track already at or under them gets none.
+        """)
+
     static let airTune = HelpEntry(
         title: "Air from",
         summary: "Where the harmonics are generated from, upward.",
@@ -756,6 +778,9 @@ enum Help {
         reads "—" for a manifest written before this column existed, rather \
         than a false "+0.00 dB".
 
+        Mud is how far the 200-400 Hz band came down (hover for why a track \
+        got none).
+
         Asked is what the sub was asked for: with per-track sizing, how far \
         the track's low end sat under the reference (capped). Why says why \
         it got what it got -- "already within 0.3 dB of the reference" for a \
@@ -784,6 +809,7 @@ enum Help {
                                  stemKicks, bassSub]),
         HelpSection("Attack", [punch, punchDecay]),
         HelpSection("Dynamics", [targetLRA, maxAttenuation, transient, minCrest]),
+        HelpSection("Mud", [mud]),
         HelpSection("Air", [air, airFixed, airStems, airTune]),
         HelpSection("Level", [target, estimator, peakCeiling]),
         HelpSection("The run", [limit, format, output, compare, dryRun]),

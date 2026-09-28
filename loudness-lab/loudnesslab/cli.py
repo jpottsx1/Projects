@@ -226,7 +226,8 @@ def _air_for(args: argparse.Namespace, conn, path: str, top_curve: dict) -> floa
     """The air one track gets.
 
     With --auto the --air figure is a ceiling and each track gets its own
-    shortfall against the reference over 8-20 kHz, as the sub does -- unless
+    shortfall against the reference over the top octave, 16-20 kHz, as the
+    sub does -- unless
     --air-fixed, which gives every track the figure as set. Without it, a
     folder brighter than the reference gets no air at any setting: the 1988
     folder, 4.56 dB brighter, got none on every track.
@@ -234,7 +235,7 @@ def _air_for(args: argparse.Namespace, conn, path: str, top_curve: dict) -> floa
     if args.air <= 0 or args.air_fixed or not (args.auto and top_curve):
         return args.air
     amount, _ = _auto_amount(conn, path, top_curve, args.air,
-                             bands=report.TOP_SHAPE_BANDS)
+                             bands=report.AIR_SHAPE_BANDS)
     return amount
 
 
@@ -735,7 +736,7 @@ def cmd_subbass(args: argparse.Namespace) -> int:
                 # sized up to, rather than a flat amount every track gets
                 # regardless of how much brighter the reference already is.
                 _, top_curve, _ = _reference_curve_of(
-                    conn, wanted_references, bands=report.TOP_SHAPE_BANDS)
+                    conn, wanted_references, bands=report.AIR_SHAPE_BANDS)
         amounts = {}
         air_amounts = {}
         if args.auto:

@@ -60,9 +60,10 @@ class TestTheAmountIsTheAmount(unittest.TestCase):
     def test_the_cross_term_is_solved_and_not_assumed_away(self):
         """Dry and wet are correlated, so the addition is not incoherent.
 
-        The second harmonic of 4-8 kHz material lands at 8-16 kHz, where
-        the source already is. How much that matters depends on the drive:
-        at the default it is a 0.07 dB error, at drive 3 it is 0.55 dB.
+        Harmonics land where the source already has content. How much that
+        matters depends on the drive: measured in the top octave (the band
+        since 2026-09-28), at the default it is a 0.05 dB error, at drive 3
+        0.15 dB (in 8-20 kHz it was 0.07 and 0.55).
         Tested on the outcome rather than on the correlation, because the
         correlation is only a reason and the accuracy is the promise.
         """
@@ -83,7 +84,7 @@ class TestTheAmountIsTheAmount(unittest.TestCase):
                 got = before + 2 * naive * cross + naive * naive * added
                 if drive == 3.0:
                     # Visibly wrong here, which is what the solve is for.
-                    self.assertLess(10 * np.log10(got / before), 2.7)
+                    self.assertLess(10 * np.log10(got / before), 2.9)
 
     def test_it_works_on_a_track_that_was_not_cut_at_all(self):
         y, report = air.excite(self.full, RATE, amount_db=2.0)
@@ -99,22 +100,31 @@ class TestItGeneratesRatherThanBoosts(unittest.TestCase):
         x, _ = programme(seconds=8.0)
         cut = codec_cut(x)
         before = band_db(cut, 16000.0, 22000.0)
-        y, _ = air.excite(cut, RATE, amount_db=3.0)
+        y, _ = air.excite(cut, RATE, amount_db=12.0)
         after = band_db(y, 16000.0, 22000.0)
         self.assertGreater(after - before, 10.0)
 
     def test_a_high_shelf_cannot_do_the_same(self):
         """Measured side by side, because this is the claim the stage rests
-        on and it should not be taken on trust."""
+        on and it should not be taken on trust: to put 12 dB into an empty
+        top octave a shelf has to lift everything above 8 kHz with it --
+        the hi-hats nearly as much (10.2 dB, measured) -- where the
+        exciter moves them 1.5."""
         x, _ = programme(seconds=8.0)
         cut = codec_cut(x)
-        before = band_db(cut, 16000.0, 22000.0)
+        top, hats = (16000.0, 22000.0), (8000.0, 12000.0)
         sos = butter(2, 8000.0, btype="high", fs=RATE, output="sos")
-        shelved = (cut + sosfiltfilt(sos, cut, axis=0)
-                   * (10 ** (3 / 20) - 1)).astype(np.float32)
-        excited, _ = air.excite(cut, RATE, amount_db=3.0)
-        self.assertLess(band_db(shelved, 16000.0, 22000.0) - before, 4.0)
-        self.assertGreater(band_db(excited, 16000.0, 22000.0) - before, 10.0)
+        # The shelf gain that lifts the top octave by 12 dB.
+        high = sosfiltfilt(sos, cut, axis=0)
+        gain = 1.0
+        for _ in range(60):
+            shelved = cut + high * (gain - 1)
+            if band_db(shelved, *top) - band_db(cut, *top) >= 12.0:
+                break
+            gain *= 1.12
+        excited, _ = air.excite(cut, RATE, amount_db=12.0)
+        self.assertGreater(band_db(shelved, *hats) - band_db(cut, *hats), 6.0)
+        self.assertLess(band_db(excited, *hats) - band_db(cut, *hats), 3.0)
 
     def test_the_new_content_is_harmonically_related_to_the_source(self):
         """Not noise. A 7 kHz tone should come back with energy at 14 kHz
@@ -216,12 +226,17 @@ class TestWhatItCosts(unittest.TestCase):
         self.assertLess(abs(report["lufs_change_db"]), 0.2)
 
     def test_the_peak_cost_is_reported(self):
-        """It is not small. Harmonics are generated from the source, so
-        they land on its peaks, and the file goes above full scale -- the
-        levelling that ends the chain is what takes it back out."""
+        """Not small on a track with a full top end. Harmonics are generated
+        from the source, so they land on its peaks, and the file goes above
+        full scale -- the levelling that ends the chain takes it back out.
+        Measured: +6 dB in the top octave of a full-range track costs about
+        4.7 dB of peak; of a rolled-off one, nothing -- which is why air
+        sized per track from the top octave spends it where it is cheap."""
         x, _ = programme(seconds=8.0)
-        _, report = air.excite(codec_cut(x), RATE, amount_db=3.0)
+        _, report = air.excite(x.astype(np.float32), RATE, amount_db=6.0)
         self.assertGreater(report["peak_change_db"], 1.0)
+        _, cheap = air.excite(codec_cut(x), RATE, amount_db=6.0)
+        self.assertLess(cheap["peak_change_db"], 1.0)
 
     def test_nothing_below_the_tune_frequency_is_touched(self):
         """The harmonic path is high-passed twice. An asymmetric curve

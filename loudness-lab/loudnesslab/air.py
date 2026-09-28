@@ -49,10 +49,22 @@ DEFAULT_AIR_DB = 0.0            # off
 # and more above this, so 3.5 kHz feeds 7 kHz upward -- presence and air,
 # not the sibilance region, which is what a lower tune would emphasise.
 DEFAULT_TUNE_HZ = 3500.0
-# The band the amount is measured in, matching what the survey reports as
-# the top end. The control means "raise this band by N dB", which is a
-# statement that can be checked afterwards rather than a mix knob.
-BAND_LOW_HZ = 8000.0
+# The band the amount is measured in: the top octave. The control means
+# "raise this band by N dB", a statement that can be checked afterwards
+# rather than a mix knob. It was 8-20 kHz, and that band is mostly hi-hats:
+# on a tape-rolled-off track, +1 dB "of 8-20 kHz" lifted 16-20 kHz by 27 dB
+# and 8-12 kHz by 0.3 -- so the number said nothing about what changed,
+# and sizing it against a reference read Night Fever's bright hi-hats as
+# "top end enough" (2026-09-28). Measured per unit in the top octave:
+#
+#                      +12 dB costs: peak    8-12 kHz
+#   tape roll-off                   -0.04     +0.01
+#   codec cut at 16 kHz             -0.16     +0.02
+#   full, bright top end           +10.64     +2.74
+#
+# so sized per track, the tracks missing a top octave get plenty for
+# nothing, and a bright one gets little, where it would cost.
+BAND_LOW_HZ = 16000.0
 BAND_HIGH_HZ = 20000.0
 OVERSAMPLE = 4
 # Asymmetry. A symmetric curve gives odd harmonics only, which is the
@@ -155,7 +167,7 @@ def excite(x: np.ndarray, rate: int, amount_db: float = DEFAULT_AIR_DB,
            drive: float = DRIVE, bias: float = BIAS,
            guide: np.ndarray | None = None,
            measure=None) -> tuple[np.ndarray, dict]:
-    """Add `amount_db` of generated harmonics to the 8-20 kHz band.
+    """Add `amount_db` of generated harmonics to the top octave (16-20 kHz).
 
     The amount is measured, not mixed: the harmonic signal is scaled so the
     band actually rises by the figure asked for, and the report says what
@@ -279,7 +291,7 @@ def summarise(reports: list[dict]) -> str:
     asked = np.median([r["amount_db"] for r in done])
     got = np.median([r["measured_db"] for r in done])
     loud = np.median([r["lufs_change_db"] for r in done])
-    return (f"  Air: {len(done)} of {len(reports)} excited. 8-20 kHz up "
+    return (f"  Air: {len(done)} of {len(reports)} excited. top octave up "
             f"{got:+.2f} dB against {asked:+.1f} asked, loudness "
             f"{loud:+.2f} dB.\n"
             f"    These harmonics were not in the recording. This is the one "

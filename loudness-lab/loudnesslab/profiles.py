@@ -52,7 +52,7 @@ FIELDS = {
     "min_crest": 11.0,      # above this a track was never flattened
     # Air. The one stage that invents rather than restores, so off by
     # default and a taste control rather than a repair.
-    "air": 0.0,             # dB added to 8-20 kHz as generated harmonics
+    "air": 0.0,             # dB added to the top octave (16-20 kHz) as harmonics
     "air_tune": 3500.0,     # Hz the harmonics are generated from, upward
     # Find the kicks on a Demucs drum stem instead of the full mix, and
     # skip the sub where they disagree with the BPM tag. Off by default:

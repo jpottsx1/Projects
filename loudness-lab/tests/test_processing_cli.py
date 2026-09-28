@@ -648,3 +648,54 @@ class TestAProfileWithSeveralReferenceFolders(unittest.TestCase):
 def report_bands():
     from loudnesslab import report
     return report.LOW_SHAPE_BANDS
+
+
+@unittest.skipUnless(HAVE_FFMPEG, "ffmpeg/ffprobe not installed")
+class TestAirIsSizedFromTheTopOctave(unittest.TestCase):
+    """Night Fever got "virtually no air when it clearly needs it"
+    (2026-09-28): bright hi-hats made its 8-20 kHz average read as enough
+    while its top octave was missing. Sized from 16-20 kHz it is short."""
+
+    def test_bright_hats_do_not_hide_a_missing_top_octave(self):
+        import numpy as np
+        from scipy.signal import butter, sosfiltfilt
+        from loudnesslab import db, report
+        directory = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, directory, ignore_errors=True)
+        (directory / "ref").mkdir()
+        (directory / "src").mkdir()
+        x, _ = programme(seconds=8.0)
+        rng = np.random.default_rng(1)
+        top = sosfiltfilt(butter(4, 14000, btype="high", fs=RATE, output="sos"),
+                          rng.standard_normal(x.shape[0]))
+        hats = sosfiltfilt(butter(4, [7000, 11000], btype="band", fs=RATE,
+                                  output="sos"), rng.standard_normal(x.shape[0]))
+        reference = x + 0.02 * np.stack([top] * 2, 1) + 0.03 * np.stack([hats] * 2, 1)
+        track = x + 0.8 * np.stack([hats] * 2, 1)
+        track = sosfiltfilt(butter(8, 15000, fs=RATE, output="sos"), track, axis=0)
+        subbass.write_flac(directory / "ref" / "Reference.flac",
+                           reference.astype(np.float32), RATE)
+        path = directory / "src" / "Bee Gees - Night Fever.flac"
+        subbass.write_flac(path, track.astype(np.float32), RATE)
+        # A real run, the way the app drives it: what the track actually got.
+        out = subprocess.run(
+            [sys.executable, str(TOOL), "subbass", str(directory / "src"),
+             "--auto", "--amount", "0", "--air", "12",
+             "--reference-folder", str(directory / "ref"),
+             "--db", str(directory / "l.db"), "--out", str(directory / "out"),
+             "--jobs", "1", "--porcelain"], capture_output=True, text=True)
+        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+        events = [json.loads(line) for line in out.stdout.splitlines() if line.strip()]
+        processed = [e for e in events if e.get("phase") == "process"][0]
+        self.assertAlmostEqual(processed["air_db"], 12.0, delta=0.1)
+        # What the old band made of the same track: nothing to add.
+        conn = db.connect(directory / "l.db")
+        try:
+            _, old, _ = cli._reference_curve_of(conn, [str(directory / "ref")],
+                                                bands=report.TOP_SHAPE_BANDS)
+            amount, why = cli._auto_amount(conn, str(path), old, 12.0,
+                                           bands=report.TOP_SHAPE_BANDS)
+        finally:
+            conn.close()
+        self.assertEqual(amount, 0.0)
+        self.assertIn("already within", why)

@@ -411,6 +411,24 @@ enum Help {
         message, rather than picking one and leaving you to wonder which.
         """)
 
+    static let references = HelpEntry(
+        title: "Reference folders",
+        summary: "More folders the target is measured from, pooled into one. Save them with a profile per kind of music.",
+        detail: """
+        The per-track amounts are "how far this track sits from the \
+        reference", so the reference decides what every track is pushed \
+        towards. One modern folder is the wrong target for 1977 disco: a \
+        disco profile wants disco that sounds right, a 2020s pop profile \
+        wants 2020s pop. Add several folders of the music the profile is \
+        for; every track in them counts once, pooled into one target, \
+        together with the folder chosen above if there is one.
+
+        Each folder is measured the first time a run uses it -- a slower \
+        start once, then nothing. Save the settings as a profile (Disco, \
+        Dance, 2020s, Pop) and the folders are saved with it. A folder that \
+        cannot be found stops the run and says which.
+        """)
+
     static let maxAmount = HelpEntry(
         title: "Cap",
         summary: "Ceiling on the per-track amount when sizing automatically.",
@@ -757,7 +775,7 @@ enum Help {
         HelpSection("Choosing music", [folders, queue, survey]),
         HelpSection("Policy", [profile]),
         HelpSection("Clipped peaks", [declip, declipMax]),
-        HelpSection("Sub bass", [amount, auto, reference, maxAmount, subOffset,
+        HelpSection("Sub bass", [amount, auto, reference, references, maxAmount, subOffset,
                                  minActivity,
                                  stemKicks, bassSub]),
         HelpSection("Attack", [punch, punchDecay]),

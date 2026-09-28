@@ -27,7 +27,8 @@ NAMES = {
     "air": "air", "airTune": "air_tune", "stemKicks": "stem_kicks",
     "airFixed": "air_fixed", "airStems": "air_stems", "bassSub": "bass_sub",
     "target": "target", "estimator": "estimator", "peakCeiling": "peak_ceiling",
-    "auto": "auto", "reference": "reference", "amount": "amount",
+    "auto": "auto", "reference": "reference", "references": "references",
+    "amount": "amount",
     "maxAmount": "max_amount", "minActivity": "min_activity",
     "subOffset": "sub_offset",
     "punch": "punch", "punchDecay": "punch_decay",
@@ -39,7 +40,7 @@ def swift_defaults(source: str) -> dict:
     """The `public var x: T = v` lines on Profile itself."""
     out = {}
     for name, value in re.findall(
-            r"public var (\w+)\s*:\s*[\w?]+\s*=\s*([^\s/]+)", source):
+            r"public var (\w+)\s*:\s*[\w?\[\]]+\s*=\s*([^\s/]+)", source):
         out[name] = value.strip()
     # An optional declared without an initialiser defaults to nil, which is
     # a real default and not a missing one.

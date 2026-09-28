@@ -1124,6 +1124,32 @@ over the graphics chip that is not assured (operations the Neural Engine
 lacks fall back to the GPU; 16-bit may move kicks). Worth it only if the
 speed test's best is still well short of what is wanted.
 
+**"September gets lots of bass, Night Fever none; both about +8"
+(2026-09-28).** Three things, none of them a fault in the stage:
+- The picture is not the numbers. The waveform's red band is everything
+  under 200 Hz and its blue band everything over 2 kHz (round numbers,
+  `WaveformEnvelope`); the sub works only in 31.5-63 Hz and air only in
+  8-20 kHz. Night Fever's bass lives around 80-200 Hz and fills the red
+  whatever is added under it; September's line goes down to ~41 Hz and
+  the bassline tone follows it, so there the addition shows.
+- "+8 dB" is a ratio: 8 dB more than that octave already held (x6.3 its
+  energy), not a fixed amount of bass.
+- Air with `auto` is the track's 8-20 kHz shortfall against the reference,
+  averaged over those bands. Disco's hi-hats at 8-10 kHz can make that
+  average read "bright enough" while 16-20 kHz is missing; and with air
+  following the stems, hi-hat-carried top end gets less. One modern
+  reference folder is the wrong target for 1977 disco anyway.
+
+**Profiles per kind of music.** Jeff: "build profiles ... let the user
+measure a series of folders per profile, such as dance, 2020s, pop,
+disco". A profile now carries `references`, more folders pooled with
+`reference` into one target (every track in any of them counts once);
+`--reference-folder` on the command line, a folder list with "Add
+reference folders..." in the app, saved with a personal profile. Each is
+measured the first time a run uses it. One that matches nothing stops the
+run, named, rather than being pooled around. Still open: the Survey's "vs
+ref" reads only the single `reference`.
+
 **"+0.00 dB" with no reason (2026-09-27).** Jeff was surprised by small
 or zero sub on Prince-era and 90s tracks (Mary Jane Girls, Basement Jaxx,
 Real McCoy at 0.00). With `--auto`, Sub is the track's shortfall under the

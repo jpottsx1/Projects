@@ -381,6 +381,11 @@ final class Engine: ObservableObject {
             if let reference = profile.reference, !reference.isEmpty {
                 arguments += ["--reference", reference]
             }
+            // Each further reference folder: pooled with the one above
+            // into a single target, and measured first if it never was.
+            for folder in profile.references where !folder.isEmpty {
+                arguments += ["--reference-folder", folder]
+            }
             if profile.declip { arguments += ["--declip"] }
             if profile.stemKicks { arguments += ["--stem-kicks"] }
             if profile.stemKicks && profile.bassSub { arguments += ["--bass-sub"] }

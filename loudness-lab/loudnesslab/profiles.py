@@ -31,6 +31,10 @@ FIELDS = {
     "peak_ceiling": -1.0,   # dBTP no gain may exceed
     "auto": False,          # size the sub from each track's own shortfall
     "reference": None,      # the corpus --auto measures against
+    # More reference folders, pooled with `reference` into one target: a
+    # profile per kind of music ("disco", "2020s pop") measured against
+    # several folders of it. Paths; each is measured when first used.
+    "references": [],
     "amount": 5.0,          # fixed sub, when auto is off. level-only zeroes it
     "max_amount": 6.0,      # cap on the per-track sub
     "sub_offset": 0.0,      # dB more (or less) than matching the reference

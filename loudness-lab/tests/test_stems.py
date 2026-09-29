@@ -1523,7 +1523,11 @@ class TestAGpuThatFailsIsGivenUp(unittest.TestCase):
         self.addCleanup(stems._loaded.pop, "mps_failed", None)
         with mock.patch.dict(sys.modules, modules):
             for _ in range(3):
-                out = stems._demucs(x, model)
+                # With a shift, the path through Demucs's own apply_model,
+                # which is what is faked here; without one (the setting
+                # since 2026-09-29) separate_in_batches runs, and its GPU
+                # fallback is the same code around it.
+                out = stems._demucs(x, model, shifts=1)
         self.assertEqual(tried, ["mps", "cpu", "cpu", "cpu"])
         self.assertEqual(stems.last_device["name"], "cpu")
         self.assertIn("an operation the GPU lacks", stems.gpu_failure())
@@ -1555,6 +1559,57 @@ class TestHowManyAtATime(unittest.TestCase):
         self.assertGreater(result["peak_gb"], 0.0)
 
 
+def _mlx_with_metal() -> bool:
+    """demucs-mlx's spectrogram needs Metal: a Mac. On Linux its MLX
+    installs and imports, and then fails on the first STFT."""
+    if not (importlib.util.find_spec("demucs_mlx") and importlib.util.find_spec("demucs")):
+        return False
+    try:
+        import mlx.core as mx
+        return bool(mx.metal.is_available())
+    except Exception:
+        return False
+
+
+@unittest.skipUnless(_mlx_with_metal(), "demucs-mlx needs a Mac (Metal)")
+class TestSeparatingWithMLX(unittest.TestCase):
+    def test_the_same_parts_as_pytorch(self):
+        """The MLX separator, as `stems` calls it, against PyTorch Demucs on
+        one model: random weights converted with the package's own
+        converter (the real ones cannot be downloaded here). What this
+        holds is the wrapper -- the normalising, the channel order, the
+        lengths, the stem names -- which the package's own parity claim
+        does not cover. A quiet input catches a wrapper that forgets to
+        normalise."""
+        import torch
+        from demucs.htdemucs import HTDemucs
+        from demucs_mlx import model_converter
+        from demucs_mlx.mlx_convert import convert_single_model
+
+        torch.manual_seed(0)
+        model = HTDemucs(sources=list(stems.STEMS), samplerate=stems.MODEL_RATE,
+                         segment=4, channels=8, t_layers=1).eval()
+        converted = convert_single_model(model)
+        rng = np.random.default_rng(1)
+        x = (rng.standard_normal((int(9.3 * RATE), 2)) * 0.02).astype(np.float32)
+        for key in [k for k in stems._loaded if k.startswith("demucs-mlx")]:
+            del stems._loaded[key]
+        with mock.patch.object(model_converter, "get_mlx_model",
+                               return_value=converted):
+            mlx = stems.separate(x, RATE, "demucs-mlx")
+        for key in [k for k in stems._loaded if k.startswith("demucs-mlx")]:
+            del stems._loaded[key]
+        torch_parts = stems.separate(x, RATE, "demucs", model=model,
+                                     options={"shifts": 0})
+        self.assertEqual(sorted(mlx), sorted(stems.STEMS))
+        for name in stems.STEMS:
+            self.assertEqual(mlx[name].shape, x.shape, name)
+            ref = torch_parts[name].astype(np.float64)
+            diff = ref - mlx[name]
+            close = 10 * np.log10(np.sum(ref ** 2) / max(np.sum(diff ** 2), 1e-30))
+            self.assertGreater(close, 60.0, f"{name}: {close:.1f} dB")
+
+
 class TestTheSeparationSpeedTest(unittest.TestCase):
     """tools/separation_speed.py: what it compares, and what it will
     recommend. The timings only mean anything on the Mac that runs it."""
@@ -1581,18 +1636,23 @@ class TestTheSeparationSpeedTest(unittest.TestCase):
         return {"name": name, "seconds": seconds, "kicks": kicks}
 
     def test_the_fastest_that_finds_the_same_kicks(self):
-        rows = [self.row("now", 100, 0.985), self.row("no shift", 98, 1.0),
-                self.row("4 at once", 60, 1.0),
-                self.row("4 at once, less overlap", 45, 0.90)]
+        rows = [self.row("now", 100, 1.0), self.row("random shift", 104, 0.985),
+                self.row("MLX", 40, 1.0), self.row("MLX, 1 at once", 30, 0.90)]
         said = self.tool.recommend(rows)
-        self.assertIn("Recommendation: 4 at once -- 40% faster", said)
+        self.assertIn("Recommendation: MLX -- 60% faster", said)
+
+    def test_the_yardstick_itself_is_never_recommended(self):
+        rows = [self.row("now", 100, 1.0), self.row("random shift", 90, 0.985)]
+        self.assertIn("keep separating as now", self.tool.recommend(rows))
 
     def test_a_failure_is_never_recommended(self):
-        rows = [self.row("now", 100, 0.99), self.row("8 at once", None, 1.0)]
+        rows = [self.row("now", 100, 1.0), self.row("random shift", 104, 0.99),
+                self.row("MLX", None, 1.0)]
         self.assertIn("keep separating as now", self.tool.recommend(rows))
 
     def test_a_loose_yardstick_still_needs_95_percent(self):
-        rows = [self.row("now", 100, 0.10), self.row("less overlap", 50, 0.40)]
+        rows = [self.row("now", 100, 1.0), self.row("random shift", 104, 0.10),
+                self.row("MLX", 50, 0.40)]
         self.assertIn("keep separating as now", self.tool.recommend(rows))
 
 

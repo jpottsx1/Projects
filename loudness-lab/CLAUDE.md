@@ -1153,6 +1153,15 @@ torch -- already installed for PyTorch. Moving to no shift broke one
 test that faked Demucs's `apply_model`, which no shift no longer calls;
 it now names `shifts=1`, the path it fakes.
 
+**MLX measured (2026-09-29, 2186ea9):** the same kicks as PyTorch (1.000,
+102 dB) but slower -- 104 s at 1 piece, 300 s at 2, against 47 s. Two
+pieces taking 3x one is running out of memory, not being slow, and MLX
+ran after PyTorch in one process, which keeps its model and MPS cache.
+The published 2.6x is an M4 Max with 128 GB; Jeff has 16. So each way
+now runs in a fresh process (`one_way`, `--one`), reporting its peak
+memory and how much the Mac swapped during it. If MLX alone is still
+slower, it is slower on this Mac, and PyTorch stays.
+
 Core ML (Neural Engine), estimated not built: htdemucs's STFT and
 complex-number steps do not convert, so the spectrogram would be done
 outside (Accelerate) and only the network body converted; coremltools

@@ -112,7 +112,12 @@ def _stereo(x: np.ndarray) -> np.ndarray:
 # time on the GPU. `tools/separation_speed.py` measures the alternatives
 # on the Mac that will use them -- several pieces at once (`batch`), no
 # random shift, less overlap -- and these change only when it says so.
-DEMUCS = {"batch": 1, "shifts": 1, "overlap": 0.25}
+# No random shift: measured on Jeff's Mac (2026-09-29, 3 songs, 9 min of
+# music), 4% faster and the SAME kicks every run -- Demucs's own shift
+# moved 2.4% of them between runs. Batching gained nothing (2 or 4 pieces
+# at once took as long; 8 swapped, 16x slower), less overlap and half
+# precision were 3-4x slower on the graphics chip. It is already busy.
+DEMUCS = {"batch": 1, "shifts": 0, "overlap": 0.25}
 
 
 def _demucs(x: np.ndarray, model=None, batch: int | None = None,

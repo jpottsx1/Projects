@@ -31,12 +31,24 @@ if ! .venv/bin/python -c "import demucs, torch" 2>/dev/null; then
         || fail "The install failed. The errors above are the whole story -- copy them and send them on."
 fi
 
+MLX_NOTE=""
 if ! .venv/bin/python -c "import demucs_mlx, mlx" 2>/dev/null; then
     # The same separator rewritten for Apple's MLX, tested beside PyTorch.
-    # If it will not install, the test runs without it and says so.
-    echo "Installing demucs-mlx, this once."
-    .venv/bin/python -m pip install --quiet demucs-mlx \
-        || echo "demucs-mlx did not install; testing without it."
+    # If it will not install, the test runs without it and says why at
+    # the top of the report, where it cannot scroll away.
+    PYV="$(.venv/bin/python -c 'import sys; print("%d.%d" % sys.version_info[:2])')"
+    if ! .venv/bin/python -c 'import sys; sys.exit(sys.version_info < (3, 10))'; then
+        MLX_NOTE="MLX not tested: it needs Python 3.10 or newer, and Loudness Lab runs on Python ${PYV}."
+    else
+        echo "Installing demucs-mlx, this once."
+        if ! .venv/bin/python -m pip install --quiet demucs-mlx > /tmp/loudness-lab-mlx.log 2>&1; then
+            MLX_NOTE="MLX not tested: demucs-mlx did not install on Python ${PYV}. What pip said, last lines:
+$(tail -n 8 /tmp/loudness-lab-mlx.log)"
+        elif ! .venv/bin/python -c "import demucs_mlx, mlx" > /tmp/loudness-lab-mlx.log 2>&1; then
+            MLX_NOTE="MLX not tested: demucs-mlx installed but will not load. What Python said, last lines:
+$(tail -n 8 /tmp/loudness-lab-mlx.log)"
+        fi
+    fi
 fi
 
 FOLDER="$(osascript -e 'POSIX path of (choose folder with prompt "Which folder? Three songs from it are separated several ways.")' 2>/dev/null)" \
@@ -45,6 +57,7 @@ FOLDER="$(osascript -e 'POSIX path of (choose folder with prompt "Which folder? 
 mkdir -p scans
 REPORT="scans/separation-speed-$(date +%Y-%m-%d-%H%M%S).txt"
 echo "Loudness Lab version ${VERSION}" | tee "$REPORT"
+[ -z "$MLX_NOTE" ] || printf '%s\n' "$MLX_NOTE" | tee -a "$REPORT"
 .venv/bin/python -u tools/separation_speed.py "$FOLDER" 2>&1 | tee -a "$REPORT" \
     || fail "The test stopped. The errors above are the whole story -- copy them and send them on."
 

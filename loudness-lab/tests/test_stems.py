@@ -1635,6 +1635,35 @@ class TestTheSeparationSpeedTest(unittest.TestCase):
     def row(self, name, seconds, kicks):
         return {"name": name, "seconds": seconds, "kicks": kicks}
 
+    def test_one_way_keeps_its_drum_parts_and_its_numbers(self):
+        """The child half: each way runs in a process of its own and
+        hands back its timing as JSON and its drum parts in a file."""
+        rng = np.random.default_rng(0)
+        songs = [rng.standard_normal((RATE * 2, 2)).astype(np.float32) for _ in range(2)]
+        with tempfile.TemporaryDirectory() as scratch:
+            files = [Path(scratch) / f"{i}.wav" for i in range(2)]
+            decoded = dict(zip(files, songs))
+            fake = lambda x, rate, backend, options=None: {"drums": x * 0.5}
+            with mock.patch.object(self.tool.decode, "decode",
+                                   side_effect=lambda path, rate: decoded[path]), \
+                    mock.patch.object(self.tool.stems, "separate", side_effect=fake), \
+                    mock.patch.object(self.tool.stems, "available",
+                                      return_value=["demucs", "demucs-mlx"]):
+                result = self.tool.one_way("MLX", files, Path(scratch) / "out.npz")
+            json.dumps(result)           # it travels to the parent as JSON
+            self.assertIsNone(result["failure"])
+            self.assertGreaterEqual(result["seconds"], 0.0)
+            with np.load(Path(scratch) / "out.npz") as held:
+                back = [held[f"arr_{i}"] for i in range(len(held.files))]
+        self.assertEqual(len(back), 2)
+        for got, song in zip(back, songs):
+            np.testing.assert_array_equal(got, song * 0.5)
+
+    def test_a_way_not_installed_is_said_not_run(self):
+        with mock.patch.object(self.tool.stems, "available", return_value=["demucs"]):
+            result = self.tool.one_way("MLX", [], Path("unused.npz"))
+        self.assertIn("not installed", result["failure"])
+
     def test_the_fastest_that_finds_the_same_kicks(self):
         rows = [self.row("now", 100, 1.0), self.row("random shift", 104, 0.985),
                 self.row("MLX", 40, 1.0), self.row("MLX, 1 at once", 30, 0.90)]

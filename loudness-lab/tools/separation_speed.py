@@ -28,7 +28,12 @@ those is recommended.
 from __future__ import annotations
 
 import argparse
+import json
+import re
+import resource
+import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -111,54 +116,108 @@ def recommend(rows: list[dict]) -> str:
             f"{floor:.1%}: Demucs's own random shift leaves {yardstick:.1%}).")
 
 
+def swap_used_mb() -> float | None:
+    """How much of the Mac's swap is in use, in MB (`sysctl vm.swapusage`).
+    None where there is no such thing to ask, as on Linux."""
+    try:
+        text = subprocess.run(["sysctl", "-n", "vm.swapusage"], capture_output=True,
+                              text=True, timeout=5).stdout
+    except (OSError, subprocess.SubprocessError):
+        return None
+    found = re.search(r"used\s*=\s*([\d.]+)([MG])", text)
+    if not found:
+        return None
+    return float(found.group(1)) * (1024 if found.group(2) == "G" else 1)
+
+
+def peak_memory_gb() -> float:
+    """This process's peak resident memory: bytes on macOS, KB on Linux."""
+    peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    return peak / (1024 ** 3 if sys.platform == "darwin" else 1024 ** 2)
+
+
+def one_way(name: str, files: list[Path], save: Path) -> dict:
+    """Separate `files` one way, in a process of its own, and keep the drum
+    parts in `save`. Run by `run` as a child: PyTorch holds on to its model
+    and a graphics-memory cache when it is done, so on a 16 GB Mac a way
+    run after it in the same process was measured squeezed for memory --
+    MLX at 2 pieces took 3x as long as at 1 (Jeff, 2026-09-29), the shape
+    of running out, not of being slow."""
+    backend, options = next((b, o) for n, b, o in CONFIGS if n == name)
+    result = {"name": name, "seconds": None, "failure": None, "devices": [],
+              "swap_mb": None, "peak_gb": None}
+    if backend not in stems.available():
+        result["failure"] = f"{backend} is not installed"
+        return result
+    tracks = [decode.decode(path, RATE) for path in files]
+    try:
+        # Loads the model (MLX converts its weights the very first time)
+        # and warms the graphics chip up; not timed.
+        stems.separate(tracks[0][:RATE * 10], RATE, backend, options=options)
+    except Exception:  # the timed run below says what went wrong
+        pass
+    swap_before = swap_used_mb()
+    seconds, drums, devices = 0.0, [], set()
+    for x in tracks:
+        started = time.monotonic()
+        try:
+            separated = stems.separate(x, RATE, backend, options=options)
+        except Exception as exc:  # one way failing is a result, not the end
+            result["failure"] = f"{type(exc).__name__}: {exc}"[:200]
+            return result
+        seconds += time.monotonic() - started
+        devices.add(stems.last_device.get("name", "?"))
+        if stems.gpu_failure():
+            result["failure"] = stems.gpu_failure()
+        drums.append(separated["drums"])
+    swap_after = swap_used_mb()
+    np.savez(save, *drums)
+    result.update(seconds=seconds, devices=sorted(devices),
+                  peak_gb=round(peak_memory_gb(), 2),
+                  swap_mb=(None if swap_before is None or swap_after is None
+                           else round(swap_after - swap_before)))
+    return result
+
+
 def run(folder: Path, songs: int = 3, out=print) -> str:
     files = decode.find_audio(folder)[:songs]
     if not files:
         out(f"No audio files in {folder}.")
         return ""
-    out(f"{len(files)} song(s) from {folder}, each separated {len(CONFIGS)} ways.")
+    out(f"{len(files)} song(s) from {folder}, each separated {len(CONFIGS)} ways, "
+        f"each way in a fresh process.")
     tracks = [(path.name, decode.decode(path, RATE)) for path in files]
     parts: dict[str, list] = {}
     rows = []
-    warmed = set()
-    for name, backend, options in CONFIGS:
-        if backend not in stems.available():
-            out(f"  {name:<26} not installed")
-            rows.append({"name": name, "seconds": None, "devices": set(),
-                         "failure": f"{backend} is not installed",
-                         "minutes": sum(x.shape[0] for _, x in tracks) / RATE / 60})
-            parts[name] = []
-            continue
-        if (backend, options.get("batch")) not in warmed:
-            # The first separation loads the model (MLX converts its weights
-            # the very first time) and warms the graphics chip up; not timed.
+    with tempfile.TemporaryDirectory() as scratch:
+        for name, _, _ in CONFIGS:
+            save = Path(scratch) / f"{len(rows)}.npz"
+            done = subprocess.run(
+                [sys.executable, "-u", str(Path(__file__).resolve()), str(folder),
+                 "--songs", str(songs), "--one", name, "--save", str(save)],
+                capture_output=True, text=True)
             try:
-                stems.separate(tracks[0][1][:RATE * 10], RATE, backend,
-                               options=options)
-            except Exception:  # the timed run below says what went wrong
-                pass
-            warmed.add((backend, options.get("batch")))
-        stems._loaded.pop("mps_failed", None)
-        seconds, failure, devices = 0.0, None, set()
-        drums = []
-        for _, x in tracks:
-            started = time.monotonic()
-            try:
-                separated = stems.separate(x, RATE, backend, options=options)
-            except Exception as exc:  # one way failing is a result, not the end
-                failure = f"{type(exc).__name__}: {exc}"[:200]
-                break
-            seconds += time.monotonic() - started
-            devices.add(stems.last_device.get("name", "?"))
-            if stems.gpu_failure():
-                failure = stems.gpu_failure()
-            drums.append(separated["drums"])
-        parts[name] = drums
-        rows.append({"name": name, "seconds": None if failure else seconds,
-                     "failure": failure, "devices": devices,
-                     "minutes": sum(x.shape[0] for _, x in tracks) / RATE / 60})
-        out(f"  {name:<26} {seconds:6.1f} s"
-            + (f"  -- failed: {failure}" if failure else ""))
+                row = json.loads(done.stdout.strip().splitlines()[-1])
+            except (IndexError, json.JSONDecodeError):
+                tail = (done.stderr or done.stdout).strip().splitlines()[-3:]
+                row = {"name": name, "seconds": None, "devices": [],
+                       "failure": " / ".join(tail)[-200:] or "stopped",
+                       "swap_mb": None, "peak_gb": None}
+            row["minutes"] = sum(x.shape[0] for _, x in tracks) / RATE / 60
+            if row["seconds"] is not None and save.exists():
+                with np.load(save) as held:
+                    parts[name] = [held[f"arr_{i}"] for i in range(len(held.files))]
+            else:
+                parts[name] = []
+            rows.append(row)
+            if "not installed" in (row["failure"] or ""):
+                out(f"  {name:<26} not installed")
+                continue
+            swapped = ("" if row["swap_mb"] is None
+                       else f"  swapped {row['swap_mb']:+.0f} MB")
+            memory = "" if row["peak_gb"] is None else f"  peak {row['peak_gb']:.1f} GB"
+            out(f"  {name:<26} {row['seconds'] or 0.0:6.1f} s{memory}{swapped}"
+                + (f"  -- failed: {row['failure']}" if row["failure"] else ""))
     reference = parts[REFERENCE]
     for row in rows:
         if row["failure"] or len(parts[row["name"]]) < len(tracks):
@@ -198,7 +257,13 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("folder", type=Path)
     parser.add_argument("--songs", type=int, default=3)
+    parser.add_argument("--one", help=argparse.SUPPRESS)    # a child: one way
+    parser.add_argument("--save", type=Path, help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
+    if args.one:
+        files = decode.find_audio(args.folder)[:args.songs]
+        print(json.dumps(one_way(args.one, files, args.save)))
+        return 0
     if "demucs" not in stems.available():
         print("Demucs is not installed: .venv/bin/pip install demucs")
         return 2

@@ -176,6 +176,10 @@ def run(folder: Path, songs: int = 3, out=print) -> str:
     lines = ["", f"{'way':<26}{'seconds':>9}{'a song':>9}{'kicks':>8}"
                  f"{'closeness':>12}  (against '{REFERENCE}')"]
     for row in rows:
+        if "not installed" in (row.get("failure") or ""):
+            # Not a slow or wrong result -- no result at all.
+            lines.append(f"{row['name']:<26}{'not tested: not installed':>35}")
+            continue
         per_song = (f"{row['seconds'] / len(tracks):>9.1f}"
                     if row["seconds"] is not None else f"{'failed':>9}")
         lines.append(f"{row['name']:<26}"

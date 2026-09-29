@@ -6,7 +6,7 @@
 # stay the same. It ends with a recommendation. Nothing is written next to
 # the music; the report is printed here and saved in scans/.
 #
-# About ten minutes for three songs. See tools/separation_speed.py.
+# About five minutes for three songs. See tools/separation_speed.py.
 set -eu
 set -o pipefail
 cd "$(dirname "$0")"
@@ -29,6 +29,14 @@ if ! .venv/bin/python -c "import demucs, torch" 2>/dev/null; then
     echo "Installing Demucs and PyTorch, this once."
     .venv/bin/python -m pip install --quiet demucs \
         || fail "The install failed. The errors above are the whole story -- copy them and send them on."
+fi
+
+if ! .venv/bin/python -c "import demucs_mlx, mlx" 2>/dev/null; then
+    # The same separator rewritten for Apple's MLX, tested beside PyTorch.
+    # If it will not install, the test runs without it and says so.
+    echo "Installing demucs-mlx, this once."
+    .venv/bin/python -m pip install --quiet demucs-mlx \
+        || echo "demucs-mlx did not install; testing without it."
 fi
 
 FOLDER="$(osascript -e 'POSIX path of (choose folder with prompt "Which folder? Three songs from it are separated several ways.")' 2>/dev/null)" \

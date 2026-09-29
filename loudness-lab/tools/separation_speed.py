@@ -39,20 +39,22 @@ sys.path.insert(0, str(ROOT))
 from loudnesslab import decode, stems, subbass  # noqa: E402
 
 RATE = decode.TARGET_RATE
-# (name, what is passed to Demucs). "now" is what processing does today.
+# (name, separator, what is passed to it). "now" is what processing does
+# today: PyTorch Demucs with no random shift (Jeff's first run of this
+# test, 2026-09-29, found batching, less overlap and half precision no
+# faster or much slower, so they are gone from the list). "random shift"
+# is Demucs's own default, kept as the yardstick for how much a result
+# may move and still count as the same. "MLX" is the same htdemucs
+# rewritten for Apple's MLX (the demucs-mlx package), said to be 2.6x
+# faster on the graphics chip; 2 at once is its own recommendation.
 CONFIGS = [
-    ("now", {"batch": 1, "shifts": 1, "overlap": 0.25}),
-    ("no shift", {"batch": 1, "shifts": 0, "overlap": 0.25}),
-    ("2 at once", {"batch": 2, "shifts": 0, "overlap": 0.25}),
-    ("4 at once", {"batch": 4, "shifts": 0, "overlap": 0.25}),
-    ("8 at once", {"batch": 8, "shifts": 0, "overlap": 0.25}),
-    ("4 at once, less overlap", {"batch": 4, "shifts": 0, "overlap": 0.1}),
-    # 16-bit arithmetic on the graphics chip: often much faster on Apple
-    # chips, and the one most likely to change what is found.
-    ("4 at once, half precision", {"batch": 4, "shifts": 0, "overlap": 0.25,
-                                   "half": True}),
+    ("now", "demucs", {"batch": 1, "shifts": 0, "overlap": 0.25}),
+    ("random shift", "demucs", {"batch": 1, "shifts": 1, "overlap": 0.25}),
+    ("MLX", "demucs-mlx", {"batch": 2, "shifts": 0, "overlap": 0.25}),
+    ("MLX, 1 at once", "demucs-mlx", {"batch": 1, "shifts": 0, "overlap": 0.25}),
 ]
-REFERENCE = "no shift"         # deterministic, so the others compare to it
+REFERENCE = "now"              # deterministic, so the others compare to it
+YARDSTICK = "random shift"
 MATCH_S = 0.010
 # And never below this, whatever the yardstick: a model whose random shift
 # moved the kicks a lot (a stand-in with random weights moved 90% of them)
@@ -90,15 +92,18 @@ def recommend(rows: list[dict]) -> str:
     well as Demucs's own random shift does, allowing a hair for rounding.
     `rows`: name, seconds (None if it failed), kicks."""
     by_name = {row["name"]: row for row in rows}
-    now = by_name.get("now")
+    now = by_name.get(REFERENCE)
+    shifted = by_name.get(YARDSTICK)
     if not now or now["seconds"] is None:
         return "No recommendation: the current way did not run."
-    yardstick = now["kicks"]
+    yardstick = (shifted["kicks"] if shifted and shifted["seconds"] is not None
+                 else 1.0)
     floor = max(MIN_KICKS, yardstick - 0.005)
     usable = [row for row in rows if row["seconds"] is not None
-              and (row["name"] == "now" or row["kicks"] >= floor)]
+              and row["name"] != YARDSTICK
+              and (row["name"] == REFERENCE or row["kicks"] >= floor)]
     best = min(usable, key=lambda row: row["seconds"])
-    if best["name"] == "now":
+    if best["name"] == REFERENCE:
         return "Recommendation: keep separating as now; nothing was faster."
     saved = 1 - best["seconds"] / now["seconds"]
     return (f"Recommendation: {best['name']} -- {saved:.0%} faster than now, "
@@ -113,19 +118,33 @@ def run(folder: Path, songs: int = 3, out=print) -> str:
         return ""
     out(f"{len(files)} song(s) from {folder}, each separated {len(CONFIGS)} ways.")
     tracks = [(path.name, decode.decode(path, RATE)) for path in files]
-    # The first separation loads the model and warms the graphics chip up;
-    # it is not timed.
-    stems.separate(tracks[0][1][:RATE * 10], RATE, "demucs")
     parts: dict[str, list] = {}
     rows = []
-    for name, options in CONFIGS:
+    warmed = set()
+    for name, backend, options in CONFIGS:
+        if backend not in stems.available():
+            out(f"  {name:<26} not installed")
+            rows.append({"name": name, "seconds": None, "devices": set(),
+                         "failure": f"{backend} is not installed",
+                         "minutes": sum(x.shape[0] for _, x in tracks) / RATE / 60})
+            parts[name] = []
+            continue
+        if (backend, options.get("batch")) not in warmed:
+            # The first separation loads the model (MLX converts its weights
+            # the very first time) and warms the graphics chip up; not timed.
+            try:
+                stems.separate(tracks[0][1][:RATE * 10], RATE, backend,
+                               options=options)
+            except Exception:  # the timed run below says what went wrong
+                pass
+            warmed.add((backend, options.get("batch")))
         stems._loaded.pop("mps_failed", None)
         seconds, failure, devices = 0.0, None, set()
         drums = []
         for _, x in tracks:
             started = time.monotonic()
             try:
-                separated = stems.separate(x, RATE, "demucs", options=options)
+                separated = stems.separate(x, RATE, backend, options=options)
             except Exception as exc:  # one way failing is a result, not the end
                 failure = f"{type(exc).__name__}: {exc}"[:200]
                 break
@@ -163,8 +182,8 @@ def run(folder: Path, songs: int = 3, out=print) -> str:
                      + (f"{row['seconds']:>9.1f}" if row["seconds"] is not None
                         else f"{'-':>9}")
                      + per_song + f"{row['kicks']:>8.3f}{row['closeness']:>9.1f} dB")
-    lines += ["", f"{minutes:.1f} minutes of music. 'now' against '{REFERENCE}' "
-                  f"is Demucs's own random shift: the yardstick.",
+    lines += ["", f"{minutes:.1f} minutes of music. '{YARDSTICK}' against "
+                  f"'{REFERENCE}' is Demucs's own random shift: the yardstick.",
               recommend(rows)]
     text = "\n".join(lines)
     out(text)

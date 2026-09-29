@@ -46,7 +46,7 @@ import numpy as np
 import soxr
 
 STEMS = ("drums", "bass", "other", "vocals")
-BACKENDS = ("demucs", "spleeter")
+BACKENDS = ("demucs", "demucs-mlx", "spleeter")
 # Both models were trained at 44.1 kHz. Feeding them anything else is not
 # an error they report -- it is just a worse separation.
 MODEL_RATE = 44100
@@ -98,6 +98,8 @@ def available() -> list[str]:
     found = []
     if importlib.util.find_spec("demucs") and importlib.util.find_spec("torch"):
         found.append("demucs")
+    if importlib.util.find_spec("demucs_mlx") and importlib.util.find_spec("mlx"):
+        found.append("demucs-mlx")
     if importlib.util.find_spec("spleeter"):
         found.append("spleeter")
     return found
@@ -112,7 +114,37 @@ def _stereo(x: np.ndarray) -> np.ndarray:
 # time on the GPU. `tools/separation_speed.py` measures the alternatives
 # on the Mac that will use them -- several pieces at once (`batch`), no
 # random shift, less overlap -- and these change only when it says so.
-DEMUCS = {"batch": 1, "shifts": 1, "overlap": 0.25}
+# No random shift: measured on Jeff's Mac (2026-09-29, 3 songs, 9 min of
+# music), 4% faster and the SAME kicks every run -- Demucs's own shift
+# moved 2.4% of them between runs. Batching gained nothing (2 or 4 pieces
+# at once took as long; 8 swapped, 16x slower), less overlap and half
+# precision were 3-4x slower on the graphics chip. It is already busy.
+DEMUCS = {"batch": 1, "shifts": 0, "overlap": 0.25}
+
+
+def _demucs_mlx(x: np.ndarray, batch: int = 2, shifts: int = 0,
+                overlap: float = 0.25) -> dict[str, np.ndarray]:
+    """The same htdemucs, rewritten for Apple's MLX (the `demucs-mlx`
+    package): said to be 2.6x faster than PyTorch on the graphics chip
+    with the same stems. Jeff asked about it (2026-09-29); the separation
+    speed test puts it beside `_demucs` on his Mac before processing uses
+    it. Normalised exactly as `_demucs` is: the MLX package's own
+    `separate_tensor` does not, and a quiet track would separate as a
+    different recording. `batch` 2 is the package's own recommendation."""
+    from demucs_mlx import Separator
+
+    key = f"demucs-mlx {batch} {shifts} {overlap}"
+    if key not in _loaded:
+        _loaded[key] = Separator(model="htdemucs", shifts=shifts,
+                                 overlap=overlap, batch_size=batch)
+    separator = _loaded[key]
+    wav = np.ascontiguousarray(x.T, dtype=np.float32)
+    ref = wav.mean(0)
+    mean, std = float(ref.mean()), float(ref.std()) or 1.0
+    _, parts = separator.separate_tensor((wav - mean) / std)
+    last_device["name"] = "mlx"
+    return {name: (np.asarray(part) * std + mean).T.astype(np.float32)
+            for name, part in parts.items()}
 
 
 def _demucs(x: np.ndarray, model=None, batch: int | None = None,
@@ -282,8 +314,12 @@ def separate(x: np.ndarray, rate: int, backend: str = "demucs",
     n = source.shape[0]
     at_model = (soxr.resample(source, rate, MODEL_RATE, quality="VHQ")
                 if rate != MODEL_RATE else source)
-    stems = (_demucs(at_model, model, **(options or {})) if backend == "demucs"
-             else _spleeter(at_model))
+    if backend == "demucs":
+        stems = _demucs(at_model, model, **(options or {}))
+    elif backend == "demucs-mlx":
+        stems = _demucs_mlx(at_model, **(options or {}))
+    else:
+        stems = _spleeter(at_model)
 
     out = {}
     for name in STEMS:

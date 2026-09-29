@@ -1126,6 +1126,33 @@ the no-shift reference. A way is recommended if it agrees on as many
 kicks as Demucs's own random shift does, and never under 95%.
 `stems.DEMUCS` keeps Demucs's defaults until that report says otherwise.
 
+**Answered (2026-09-29, a030896, 3 songs, 9.0 min of music):** 16 s a
+song on the graphics chip. No shift 46.7 s against 48.6 now, every kick
+the same (Demucs's own shift moved 2.4%); 2 or 4 pieces at once no
+faster; 8 at once 786 s (swapping); less overlap 196 s, half precision
+142 s. The chip is already saturated, so `DEMUCS` is now no shift --
+for repeatability more than the 4%. What is left for new songs is
+separating ahead of time or Core ML. The 36 s a track of the timed runs
+against 16 here: longer tracks, and three processing workers sharing
+the machine.
+
+**demucs-mlx (Jeff asked, 2026-09-29).** The same htdemucs rewritten for
+Apple's MLX, claiming 2.6x PyTorch on the graphics chip with the same
+stems. `stems.separate(..., "demucs-mlx")` (`_demucs_mlx`) normalises as
+`_demucs` does -- its `separate_tensor` does not -- and the speed test
+now runs: now (PyTorch, no shift, the reference), random shift (the
+yardstick, never recommended), MLX at 2 pieces (its own default) and 1.
+Processing stays on PyTorch until that report recommends MLX. Not run
+here: its spectrogram (mlx-spectro) needs Metal, and on Linux it imports
+and then fails on the first STFT; `TestSeparatingWithMLX` (MLX against
+PyTorch on one random-weight model, via the package's own converter)
+skips without Metal. mlx-audio-io does not build on Linux either; we
+never use it (we hand it arrays), so it installs with `--no-deps` here.
+The first MLX run converts the official weights, which needs demucs and
+torch -- already installed for PyTorch. Moving to no shift broke one
+test that faked Demucs's `apply_model`, which no shift no longer calls;
+it now names `shifts=1`, the path it fakes.
+
 Core ML (Neural Engine), estimated not built: htdemucs's STFT and
 complex-number steps do not convert, so the spectrogram would be done
 outside (Accelerate) and only the network body converted; coremltools

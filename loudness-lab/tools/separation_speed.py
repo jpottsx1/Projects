@@ -158,7 +158,11 @@ def one_way(name: str, files: list[Path], save: Path) -> dict:
         pass
     swap_before = swap_used_mb()
     seconds, drums, devices = 0.0, [], set()
-    for x in tracks:
+    for number, x in enumerate(tracks, 1):
+        # To stderr, which the parent passes straight through: a way that
+        # takes minutes must not look like a crash (Jeff, 2026-09-29).
+        print(f"      {name}: song {number} of {len(tracks)}...",
+              file=sys.stderr, flush=True)
         started = time.monotonic()
         try:
             separated = stems.separate(x, RATE, backend, options=options)
@@ -192,14 +196,15 @@ def run(folder: Path, songs: int = 3, out=print) -> str:
     with tempfile.TemporaryDirectory() as scratch:
         for name, _, _ in CONFIGS:
             save = Path(scratch) / f"{len(rows)}.npz"
+            out(f"  {name}: starting (a fresh process, loading the model)")
             done = subprocess.run(
                 [sys.executable, "-u", str(Path(__file__).resolve()), str(folder),
                  "--songs", str(songs), "--one", name, "--save", str(save)],
-                capture_output=True, text=True)
+                stdout=subprocess.PIPE, text=True)
             try:
                 row = json.loads(done.stdout.strip().splitlines()[-1])
             except (IndexError, json.JSONDecodeError):
-                tail = (done.stderr or done.stdout).strip().splitlines()[-3:]
+                tail = (done.stdout or "").strip().splitlines()[-3:]
                 row = {"name": name, "seconds": None, "devices": [],
                        "failure": " / ".join(tail)[-200:] or "stopped",
                        "swap_mb": None, "peak_gb": None}

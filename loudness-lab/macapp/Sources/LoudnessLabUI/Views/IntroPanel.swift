@@ -256,6 +256,9 @@ struct IntroPanel: View {
                         : String(format: "vocal %+.0f dB", render.vocalDB ?? 0),
                         render.repeatScore))
                 .font(.caption).foregroundStyle(.secondary)
+            if let envelope = render.envelope {
+                EditStrip(engine: engine, render: render, envelope: envelope)
+            }
             if render.cutSeconds > 0.5 {
                 Text("The song arrives at bar \(render.joinBar); the first "
                      + "\(JoinMath.clock(render.cutSeconds)) of the original is replaced.")

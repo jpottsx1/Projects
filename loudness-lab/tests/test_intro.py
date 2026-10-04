@@ -800,6 +800,22 @@ class TestASession(unittest.TestCase):
         self.assertEqual(events[-1]["event"], "error")
         self.assertIn("outside the track", events[-1]["message"])
 
+    def test_a_render_also_sends_the_finished_edits_envelope(self):
+        session, _ = self.prepared()
+        events, _ = self.ask(session, id=11, cmd="render", bars=8, loop_bars=4,
+                             join_bar=3)
+        made = [e for e in events if e["event"] == "intro"][0]
+        drawn = [e for e in events if e["event"] == "render_envelope"][0]
+        self.assertEqual(drawn["output"], made["output"])
+        self.assertEqual(len(drawn["bass"]), len(drawn["mid"]))
+        joined = made["seconds_of_intro"] + made["lead_seconds"]
+        self.assertGreater(drawn["seconds"], joined)
+        # the intro part is drawn, not silence, and so is the song after it
+        per = drawn["per_second"]
+        cut = int(joined * per)
+        self.assertGreater(max(drawn["bass"][:cut]), 20)
+        self.assertGreater(max(drawn["bass"][cut:]), 20)
+
     def test_sources_come_back_as_plain_json(self):
         session, _ = self.prepared()
         events, _ = self.ask(session, id=2, cmd="sources", loop_bars=4, count=3)

@@ -48,6 +48,9 @@ final class IntroEngine: ObservableObject {
         /// opening was cut out to make room for the intro.
         var joinBar: Int = 0
         var cutSeconds: Double = 0
+        /// The finished file drawn the way the original is; nil if the tool
+        /// did not send it.
+        var envelope: JoinEnvelope?
 
         var id: String { url.path }
         var name: String { url.deletingPathExtension().lastPathComponent }
@@ -220,7 +223,11 @@ final class IntroEngine: ObservableObject {
             do {
                 let events = try await ask("render", fields)
                 if let made = events.first(where: { $0.event == "intro" }),
-                   let render = Self.render(from: made) {
+                   var render = Self.render(from: made) {
+                    if let drawn = events.first(where: { $0.event == "render_envelope"
+                                                         && $0.output == made.output }) {
+                        render.envelope = JoinEnvelope(event: drawn)
+                    }
                     renders.removeAll { $0.id == render.id }
                     renders.insert(render, at: 0)
                 }

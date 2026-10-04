@@ -514,8 +514,13 @@ def envelope(a: Analysis, per_second: int = ENVELOPE_PER_SECOND) -> dict:
     1/per_second, compressed (x ** 0.6) so quiet openings stay visible beside
     loud drops, on one shared 0-255 scale so the bands' balance is true.
     """
-    mono = a.original.mean(axis=1).astype(np.float64)
-    rate = a.rate
+    return envelope_of(a.original, a.rate, per_second)
+
+
+def envelope_of(audio: np.ndarray, rate: int, per_second: int = ENVELOPE_PER_SECOND) -> dict:
+    """`envelope` for any stereo audio: the picker uses it on the original,
+    the result card on the finished edit, so the two are drawn alike."""
+    mono = audio.mean(axis=1).astype(np.float64)
     low = sosfilt(butter(2, 200.0, btype="low", fs=rate, output="sos"), mono)
     high = sosfilt(butter(2, 2000.0, btype="high", fs=rate, output="sos"), mono)
     mid = mono - low - high
@@ -1023,6 +1028,9 @@ class Session:
         target = write_intro(a, self.path, audio, bars, out_dir,
                              request.get("format"))
         say("intro", **info, source=str(self.path), output=str(target))
+        # The finished edit as it will be heard, drawn the way the original
+        # is, so the join can be judged in the result and not only before it.
+        say("render_envelope", output=str(target), **envelope_of(audio, a.rate))
 
 
 def source_fields(s: Source) -> dict:

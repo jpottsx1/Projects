@@ -123,23 +123,7 @@ struct JoinPicker: View {
     /// covers: a mean would flatten the kicks the picture is for.
     private func drawBands(_ context: inout GraphicsContext, size: CGSize,
                            envelope: JoinEnvelope, window: ClosedRange<Double>) {
-        let midY = size.height / 2
-        let columns = max(1, Int(size.width))
-        let span = window.upperBound - window.lowerBound
-        let step = span / Double(columns)
-        for column in 0..<columns {
-            let t0 = window.lowerBound + Double(column) * step
-            let t1 = t0 + step
-            let x = CGFloat(column)
-            for (band, color, opacity) in [(envelope.treble, WaveformView.treble, 0.55),
-                                           (envelope.mid, WaveformView.mid, 0.55),
-                                           (envelope.bass, WaveformView.bass, 0.75)] {
-                let height = CGFloat(envelope.peak(band, from: t0, to: t1)) * midY * 0.95
-                guard height > 0.2 else { continue }
-                context.fill(Path(CGRect(x: x, y: midY - height, width: 1, height: height * 2)),
-                             with: .color(color.opacity(opacity)))
-            }
-        }
+        StripDrawing.bands(&context, size: size, envelope: envelope, window: window)
     }
 
     /// Bar lines, the replaced part dimmed, and the join itself.
@@ -298,6 +282,97 @@ private struct PlayheadLayer: View {
                   let t = engine.originalTime(atPlayerPosition: player.position),
                   t >= window.lowerBound, t <= window.upperBound else { return }
             let x = JoinMath.x(for: t, in: window, width: size.width)
+            var line = Path()
+            line.move(to: CGPoint(x: x, y: 0)); line.addLine(to: CGPoint(x: x, y: size.height))
+            context.stroke(line, with: .color(.white), lineWidth: 2)
+            context.stroke(line, with: .color(.black.opacity(0.5)), lineWidth: 0.5)
+        }
+        .allowsHitTesting(false)
+    }
+}
+
+
+/// Drawing shared by the picker's strips and the finished edit's strip, so the
+/// two are read the same way.
+enum StripDrawing {
+    static func bands(_ context: inout GraphicsContext, size: CGSize,
+                           envelope: JoinEnvelope, window: ClosedRange<Double>) {
+        let midY = size.height / 2
+        let columns = max(1, Int(size.width))
+        let span = window.upperBound - window.lowerBound
+        let step = span / Double(columns)
+        for column in 0..<columns {
+            let t0 = window.lowerBound + Double(column) * step
+            let t1 = t0 + step
+            let x = CGFloat(column)
+            for (band, color, opacity) in [(envelope.treble, WaveformView.treble, 0.55),
+                                           (envelope.mid, WaveformView.mid, 0.55),
+                                           (envelope.bass, WaveformView.bass, 0.75)] {
+                let height = CGFloat(envelope.peak(band, from: t0, to: t1)) * midY * 0.95
+                guard height > 0.2 else { continue }
+                context.fill(Path(CGRect(x: x, y: midY - height, width: 1, height: height * 2)),
+                             with: .color(color.opacity(opacity)))
+            }
+        }
+    }
+}
+
+/// The finished edit as it will be heard: the same three bands, the stretch
+/// the new intro occupies tinted, the join marked, and the playhead on it.
+/// Clicking it plays from there.
+struct EditStrip: View {
+    @ObservedObject var engine: IntroEngine
+    let render: IntroEngine.Render
+    let envelope: JoinEnvelope
+
+    var body: some View {
+        GeometryReader { geo in
+            let window = 0...max(envelope.seconds, 0.001)
+            Canvas { context, size in
+                StripDrawing.bands(&context, size: size, envelope: envelope, window: window)
+                let joinX = JoinMath.x(for: render.joinSeconds, in: window, width: size.width)
+                context.fill(Path(CGRect(x: 0, y: 0, width: max(0, min(joinX, size.width)),
+                                         height: size.height)),
+                             with: .color(.accentColor.opacity(0.16)))
+                if joinX > 60 {
+                    context.draw(Text("new intro").font(.system(size: 10).weight(.medium))
+                                    .foregroundColor(.primary.opacity(0.7)),
+                                 at: CGPoint(x: 6, y: size.height - 9), anchor: .leading)
+                }
+                var line = Path()
+                line.move(to: CGPoint(x: joinX, y: 0)); line.addLine(to: CGPoint(x: joinX, y: size.height))
+                context.stroke(line, with: .color(.accentColor), lineWidth: 2)
+            }
+            .overlay(EditPlayhead(engine: engine, render: render, total: envelope.seconds))
+            .contentShape(Rectangle())
+            .gesture(DragGesture(minimumDistance: 0).onEnded { value in
+                engine.play(render, from: JoinMath.seconds(forX: value.location.x, in: window,
+                                                           width: geo.size.width))
+            })
+        }
+        .frame(height: 56)
+        .clipShape(RoundedRectangle(cornerRadius: 4))
+        .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.secondary.opacity(0.3)))
+        .help("The finished edit: the new intro (tinted), then the song from the join. "
+              + "Click anywhere to play from there.")
+    }
+}
+
+private struct EditPlayhead: View {
+    let engine: IntroEngine
+    let render: IntroEngine.Render
+    let total: Double
+    @ObservedObject private var player: ABPlayer
+
+    init(engine: IntroEngine, render: IntroEngine.Render, total: Double) {
+        self.engine = engine; self.render = render; self.total = total
+        self.player = engine.player
+    }
+
+    var body: some View {
+        Canvas { context, size in
+            guard player.isPlaying, engine.playing == render.id else { return }
+            let x = JoinMath.x(for: player.position, in: 0...max(total, 0.001), width: size.width)
             var line = Path()
             line.move(to: CGPoint(x: x, y: 0)); line.addLine(to: CGPoint(x: x, y: size.height))
             context.stroke(line, with: .color(.white), lineWidth: 2)

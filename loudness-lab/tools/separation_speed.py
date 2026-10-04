@@ -34,7 +34,9 @@ import resource
 import subprocess
 import sys
 import tempfile
+import threading
 import time
+from collections import deque
 from pathlib import Path
 
 import numpy as np
@@ -183,6 +185,35 @@ def one_way(name: str, files: list[Path], save: Path) -> dict:
     return result
 
 
+def _run_child(command: list[str], keep: int = 3) -> tuple[str, list[str]]:
+    """Run one way's process; return (its stdout, the last `keep` lines of
+    its stderr).
+
+    stderr is shown AS IT ARRIVES -- a way that takes minutes must not look
+    like a crash (Jeff, 2026-09-29) -- and also kept. Passing it straight
+    through alone lost the second half: when a way dies, its traceback is on
+    stderr, and the report's "failed:" text used to quote it and then said
+    only "stopped". A thread drains stderr so a full pipe can never stall
+    the child while stdout is read."""
+    tail: deque[str] = deque(maxlen=keep)
+    child = subprocess.Popen(command, stdout=subprocess.PIPE,
+                             stderr=subprocess.PIPE, text=True)
+
+    def pump() -> None:
+        for line in child.stderr:
+            sys.stderr.write(line)
+            sys.stderr.flush()
+            if line.strip():
+                tail.append(line.rstrip())
+
+    reader = threading.Thread(target=pump, daemon=True)
+    reader.start()
+    stdout = child.stdout.read()
+    child.wait()
+    reader.join()
+    return stdout, list(tail)
+
+
 def run(folder: Path, songs: int = 3, out=print) -> str:
     files = decode.find_audio(folder)[:songs]
     if not files:
@@ -197,14 +228,16 @@ def run(folder: Path, songs: int = 3, out=print) -> str:
         for name, _, _ in CONFIGS:
             save = Path(scratch) / f"{len(rows)}.npz"
             out(f"  {name}: starting (a fresh process, loading the model)")
-            done = subprocess.run(
+            stdout, stderr_tail = _run_child(
                 [sys.executable, "-u", str(Path(__file__).resolve()), str(folder),
-                 "--songs", str(songs), "--one", name, "--save", str(save)],
-                stdout=subprocess.PIPE, text=True)
+                 "--songs", str(songs), "--one", name, "--save", str(save)])
             try:
-                row = json.loads(done.stdout.strip().splitlines()[-1])
+                row = json.loads(stdout.strip().splitlines()[-1])
             except (IndexError, json.JSONDecodeError):
-                tail = (done.stdout or "").strip().splitlines()[-3:]
+                # What the child said as it died: its traceback is on
+                # stderr, which is why stderr is kept (as well as shown)
+                # and not only passed through.
+                tail = stderr_tail or (stdout or "").strip().splitlines()[-3:]
                 row = {"name": name, "seconds": None, "devices": [],
                        "failure": " / ".join(tail)[-200:] or "stopped",
                        "swap_mb": None, "peak_gb": None}

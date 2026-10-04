@@ -1664,6 +1664,57 @@ class TestTheSeparationSpeedTest(unittest.TestCase):
             result = self.tool.one_way("MLX", [], Path("unused.npz"))
         self.assertIn("not installed", result["failure"])
 
+    def test_a_child_stderr_is_shown_as_it_comes_and_kept(self):
+        """Progress must reach the screen (a way taking minutes looked like
+        a crash) AND be kept: passing stderr straight through alone made a
+        dead way's report say "stopped" where it used to say why."""
+        command = [sys.executable, "-c",
+                   "import sys; sys.stderr.write('one\\ntwo\\n\\nthree\\nfour\\n'); print('out')"]
+        shown = io.StringIO()
+        with contextlib.redirect_stderr(shown):
+            stdout, tail = self.tool._run_child(command, keep=3)
+        self.assertEqual(stdout.strip(), "out")
+        # The child's lines, in order. Not "nothing else": Python itself warns
+        # on stderr about forking a process that already has threads, which
+        # other tests in this file leave behind.
+        said = [line for line in shown.getvalue().splitlines()
+                if line in ("one", "two", "three", "four")]
+        self.assertEqual(said, ["one", "two", "three", "four"])
+        self.assertEqual(tail, ["two", "three", "four"])     # blank lines skipped
+
+    def test_a_child_with_a_lot_to_say_on_stderr_does_not_stall(self):
+        """A full stderr pipe blocks the child while the parent waits on its
+        stdout: a deadlock that would look exactly like a slow way."""
+        command = [sys.executable, "-c",
+                   "import sys; sys.stderr.write('x' * 400000 + '\\n'); print('done')"]
+        with contextlib.redirect_stderr(io.StringIO()):
+            stdout, tail = self.tool._run_child(command)
+        self.assertEqual(stdout.strip(), "done")
+        self.assertEqual(len(tail[-1]), 400000)
+
+    def test_a_way_that_dies_says_why_in_the_report(self):
+        """Through the real child: a way the child does not know about dies
+        with a traceback, and that traceback is what the report quotes."""
+        import wave
+        with tempfile.TemporaryDirectory() as scratch:
+            with wave.open(str(Path(scratch) / "song.wav"), "wb") as handle:
+                handle.setnchannels(1)
+                handle.setsampwidth(2)
+                handle.setframerate(RATE)
+                handle.writeframes(bytes(RATE * 2))
+            lines, shown = [], io.StringIO()
+            with mock.patch.object(self.tool, "CONFIGS",
+                                   [("nope", "demucs", {"batch": 1})]), \
+                    mock.patch.object(self.tool, "REFERENCE", "nope"), \
+                    contextlib.redirect_stderr(shown):
+                self.tool.run(Path(scratch), songs=1, out=lines.append)
+        failed = [line for line in lines if "failed:" in line]
+        self.assertEqual(len(failed), 1, lines)
+        self.assertIn("StopIteration", failed[0])             # not just "stopped"
+        self.assertNotIn("failed: stopped", failed[0])
+        self.assertIn("StopIteration", shown.getvalue())      # and it was shown live
+        self.assertTrue(any("nope: starting" in line for line in lines))
+
     def test_the_fastest_that_finds_the_same_kicks(self):
         rows = [self.row("now", 100, 1.0), self.row("random shift", 104, 0.985),
                 self.row("MLX", 40, 1.0), self.row("MLX, 1 at once", 30, 0.90)]

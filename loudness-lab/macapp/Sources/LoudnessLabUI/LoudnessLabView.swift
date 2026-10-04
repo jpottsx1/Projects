@@ -94,6 +94,14 @@ public enum LoudnessLab {
         NotificationCenter.default.post(name: .loudnessLabAddSources, object: urls)
     }
 
+    /// The help page that ships in this library's bundle, for a host that
+    /// wants to open it in a browser. Public because the resource belongs to
+    /// this module: `Bundle.module` is not reachable from the app target.
+    public static var helpPageURL: URL? {
+        Bundle.module.url(forResource: "loudness-lab", withExtension: "html",
+                          subdirectory: "Help")
+    }
+
     /// Shows the Intro tab, which makes intro edits from the ticked tracks.
     /// A host pairs it with `addSources` to say "make intros for these".
     /// `focus` is the track the tab should have selected, which is not

@@ -63,6 +63,16 @@ struct LoudnessLabUIApp: App {
                     NotificationCenter.default.post(name: .showHelp, object: nil)
                 }
                 .keyboardShortcut("?", modifiers: [.command])
+
+                // The same document, in a browser: printable, searchable
+                // with the browser's own find, and readable with the app
+                // closed. It is the file that ships in the bundle, so the
+                // two cannot say different things.
+                Button("Open the Help Page in a Browser") {
+                    if let url = LoudnessLab.helpPageURL {
+                        NSWorkspace.shared.open(url)
+                    }
+                }
             }
         }
 

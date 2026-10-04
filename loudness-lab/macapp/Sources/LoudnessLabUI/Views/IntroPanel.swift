@@ -198,6 +198,11 @@ struct IntroPanel: View {
                         Text(String(format: "repeats %.2f", source.repeatScore))
                             .foregroundStyle(source.repeatScore >= 0.6 ? Color.secondary : Color.orange)
                         if !source.snapped { Text("grid-timed").foregroundStyle(.orange) }
+                        if (source.fill ?? 0) >= 0.5 {
+                            Text("has a fill").foregroundStyle(.orange)
+                                .help("A bar here differs from the groove around it, and a loop "
+                                      + "repeats it every time, the last one running into the song.")
+                        }
                     }
                     .font(.caption)
                 }

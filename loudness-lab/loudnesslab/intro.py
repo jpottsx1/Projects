@@ -119,6 +119,14 @@ REPEAT_WEIGHT = 15.0
 # outweigh it.
 VOCAL_FLOOR_DB = -30.0
 MIN_REPEAT = 0.6
+# A loop is repeated four times in a 16 bar intro, so a fill in it is heard
+# four times, the last one right before the song arrives. Each unit above
+# FILL_OK that its most unusual bar deviates from the groove around it
+# (`bar_deviation`) costs this many dB.
+FILL_OK = 0.3
+FILL_WEIGHT = 30.0
+FILL_NOTED = 0.5                # from here the loop is called out as having a fill
+DEVIATION_SLOTS = 16
 
 
 @dataclass
@@ -152,6 +160,7 @@ class Source:
     length: int = 0                 # samples from its first bar line to the one after
     snapped: bool = True            # both ends tied to a real kick
     repeat: float = 1.0             # how well the drums repeat one loop later, -1..1
+    fill: float = 0.0               # most unusual bar's deviation from the groove, 0 = none
 
 
 @dataclass
@@ -361,12 +370,25 @@ def analyse(x: np.ndarray, parts: dict[str, np.ndarray], rate: int,
                 coherence=coherence, downbeat_phase=phase,
                 confidence=confidence, how=how)
 
+    return _layout(x, instrumental, parts["vocals"], parts["drums"], kicks, rate,
+                   grid, first_sound)
+
+
+def _layout(x: np.ndarray, instrumental: np.ndarray, vocals: np.ndarray,
+            drums: np.ndarray, kicks: np.ndarray, rate: int, grid: Grid,
+            first_sound: int) -> Analysis:
+    """Bar lines, join and pickup for a grid whose downbeat phase is decided.
+    Split from `analyse` so `rephase` can lay the same track out again with
+    another beat as the first of the bar, without separating anything."""
+    period, coherence = grid.period, grid.coherence
+    first = grid.first_beat
+    phase = grid.downbeat_phase
     # The first bar line at or just before the first sound; a vocal that
     # begins ahead of it is a pickup.
     n = int(np.ceil((first_sound - ON_BEAT * period - first) / period))
     while n % BEATS_PER_BAR != phase:
         n += 1
-    drums_abs = np.abs(parts["drums"].mean(axis=1))
+    drums_abs = np.abs(drums.mean(axis=1))
     join, join_found = attack(drums_abs, grid.beat(n), kicks, period, rate)
     join = max(join, 0)
     pickup = max(0, join - first_sound) if join - first_sound > ON_BEAT * period else 0
@@ -392,18 +414,31 @@ def analyse(x: np.ndarray, parts: dict[str, np.ndarray], rate: int,
             f"the kicks agree on a grid only {coherence:.2f} (want "
             f"{MIN_COHERENCE:.2f}+): a live or drifting record, so the loop "
             "may not sit on the beat")
-    if grid.confidence < DOWNBEAT_CONFIDENCE and downbeat_s is None:
+    if grid.confidence < DOWNBEAT_CONFIDENCE:
         warnings.append("which beat is the bar's first was a guess from the "
                         "song's start; check the join by ear")
     analysis = Analysis(
         rate=rate, original=x, instrumental=instrumental,
-        vocals=parts["vocals"], drums=parts["drums"], grid=grid,
+        vocals=vocals, drums=drums, grid=grid,
         first_sound=first_sound, join=join, pickup=pickup,
         bar_lines=bar_lines, snapped=snapped, kicks=kicks,
         envelope=uniform_filter1d(drums_abs, max(1, int(0.003 * rate))),
         warnings=warnings)
     analysis.suggested_join_bar, analysis.join_reason = suggest_join(analysis)
     return analysis
+
+
+def rephase(a: Analysis, beats: int) -> Analysis:
+    """The same track with the bar lines moved `beats` beats later (negative:
+    earlier): another beat is called the first of the bar. For when the
+    accents misled the downbeat search. Nothing is separated again."""
+    g = a.grid
+    moved = Grid(bpm=g.bpm, period=g.period, first_beat=g.first_beat,
+                 coherence=g.coherence,
+                 downbeat_phase=(g.downbeat_phase + beats) % BEATS_PER_BAR,
+                 confidence=1.0, how="set by hand")
+    return _layout(a.original, a.instrumental, a.vocals, a.drums, a.kicks,
+                   a.rate, moved, a.first_sound)
 
 
 # ------------------------------------------------------------ where it joins
@@ -587,12 +622,58 @@ def refine_length(a: Analysis, bar: int, loop_bars: int) -> tuple[int, float]:
     return direct + best - reach, r
 
 
+def bar_deviation(a: Analysis) -> np.ndarray:
+    """Per bar: how far its rhythm is from the groove around it, 0 for the
+    same pattern again, about 1 for a bar that is mostly something else.
+
+    Each bar is read as 16 slots (sixteenth notes, so half beats and the
+    offbeats between them are in it): the loudest the instrumental gets within
+    a few milliseconds of each slot, scaled to the bar's own mean. A bar is
+    then compared slot by slot with the MEDIAN of the four bars either side.
+    A fill, a break or a walking bass line is a bar that does not look like
+    its neighbours; steady groove bars sit at 0.03-0.15 and fills at 0.6-1.0
+    (measured on Break My Soul, 2026-10-04). Counting hits did not separate
+    them: a groove already full of eighth notes has as many in a fill bar.
+    """
+    lines = a.bar_lines
+    bars = len(lines) - 1
+    if bars < 1:
+        return np.zeros(0)
+    env = uniform_filter1d(np.abs(a.instrumental.mean(axis=1)).astype(np.float64),
+                           max(1, int(0.01 * a.rate)))
+    half = max(1, int(0.015 * a.rate))
+    pattern = np.zeros((bars, DEVIATION_SLOTS))
+    for i in range(bars):
+        length = lines[i + 1] - lines[i]
+        for k in range(DEVIATION_SLOTS):
+            c = int(lines[i] + k * length / DEVIATION_SLOTS)
+            window = env[max(0, c - half):c + half]
+            pattern[i, k] = window.max() if window.size else 0.0
+    pattern /= pattern.mean(axis=1, keepdims=True) + 1e-12
+    deviation = np.zeros(bars)
+    for i in range(bars):
+        near = [j for j in range(max(0, i - 4), min(bars, i + 5)) if j != i]
+        if not near:
+            continue
+        usual = np.median(pattern[near], axis=0)
+        deviation[i] = np.abs(pattern[i] - usual).sum() / (np.abs(usual).sum() + 1e-12)
+    return deviation
+
+
+def fill_of(deviation: np.ndarray, i: int, loop_bars: int) -> float:
+    """The loop's most unusual bar: its `bar_deviation`. A loop is heard
+    several times over, so one fill in it is heard every time."""
+    window = deviation[i:i + loop_bars]
+    return float(window.max()) if window.size else 0.0
+
+
 def cost(s: Source) -> float:
     """Lower is a better loop: how much vocal is in it (floored), how far
     its level is from the track's typical bar, and how badly it fails to
     repeat. Dimensions are all roughly dB so they can be traded."""
     return (max(s.vocal_db, VOCAL_FLOOR_DB) + 0.5 * abs(s.level_db)
-            + REPEAT_WEIGHT * (1.0 - max(s.repeat, 0.0)))
+            + REPEAT_WEIGHT * (1.0 - max(s.repeat, 0.0))
+            + FILL_WEIGHT * max(0.0, s.fill - FILL_OK))
 
 
 def _bar_powers(a: Analysis) -> dict | None:
@@ -609,7 +690,7 @@ def _bar_powers(a: Analysis) -> dict | None:
                          for i in range(bars)])
 
     inst, voc, drm = power(a.instrumental), power(a.vocals), power(a.drums)
-    return {"inst": inst, "voc": voc, "drm": drm,
+    return {"inst": inst, "voc": voc, "drm": drm, "dev": bar_deviation(a),
             "typical_inst": np.median(inst[inst > 0]) if np.any(inst > 0) else 1.0,
             "typical_drm": np.median(drm[drm > 0]) if np.any(drm > 0) else 1.0}
 
@@ -626,7 +707,8 @@ def _measure(a: Analysis, powers: dict, i: int, loop_bars: int) -> Source:
         drums_db=float(_db(powers["drm"][w].mean() / powers["typical_drm"])),
         vocal_free=vocal_db <= VOCAL_FREE_DB, seconds=a.bar_lines[i] / a.rate,
         length=int(a.bar_lines[end] - a.bar_lines[i]),
-        snapped=bool(a.snapped[i] and a.snapped[end]))
+        snapped=bool(a.snapped[i] and a.snapped[end]),
+        fill=fill_of(powers["dev"], i, loop_bars))
 
 
 def candidates(a: Analysis, loop_bars: int = DEFAULT_LOOP_BARS,
@@ -958,6 +1040,10 @@ class Session:
             elif command == "release":
                 self.release()
                 say("released", reason="asked")
+            elif command == "rephase":
+                a = rephase(self._need(), int(request.get("beats", 1)))
+                self.analysis = a
+                say("grid", **self._grid_fields(a))
             elif command == "envelope":
                 say("envelope", **envelope(self._need(),
                                            int(request.get("per_second", ENVELOPE_PER_SECOND))))
@@ -989,17 +1075,23 @@ class Session:
                     downbeat_s=request.get("downbeat"),
                     separator=request.get("separator"))
         self.analysis, self.path = a, path
-        join, pickup = resolve_join(a, a.suggested_join_bar)
         say("prepared", path=str(path), name=path.name,
             seconds=round(len(a.original) / a.rate, 3),
-            bpm=round(a.grid.bpm, 3),
+            bpm=round(a.grid.bpm, 3), grid_coherence=round(a.grid.coherence, 3),
+            **self._grid_fields(a))
+
+    @staticmethod
+    def _grid_fields(a: Analysis) -> dict:
+        """What the bar lines are, which `prepare` and `rephase` both report."""
+        join, pickup = resolve_join(a, a.suggested_join_bar)
+        return dict(
             first_bar_seconds=round(a.join / a.rate, 3),
             suggested_join_bar=a.suggested_join_bar,
             join_reason=a.join_reason,
             join_seconds=round(join / a.rate, 3),
             pickup_seconds=round(pickup / a.rate, 3),
             bar_seconds=[round(float(t) / a.rate, 3) for t in a.bar_lines],
-            downbeat_from=a.grid.how, grid_coherence=round(a.grid.coherence, 3),
+            downbeat_from=a.grid.how,
             bars_after_join=len(a.bar_lines) - 1, warnings=list(a.warnings))
 
     def _sources(self, request: dict, say) -> None:
@@ -1043,6 +1135,7 @@ def source_fields(s: Source) -> dict:
         "vocal_free": bool(s.vocal_free),
         "repeat": round(float(s.repeat), 2),
         "snapped": bool(s.snapped),
+        "fill": round(float(s.fill), 2),
     }
 
 

@@ -92,6 +92,9 @@ final class IntroEngine: ObservableObject {
     /// Bumped on every request, so asking for the track already named
     /// still moves the picker back to it.
     @Published private(set) var focusTick = 0
+    /// Beats the bar lines have been moved by hand from where the tool put
+    /// them, 0-3. Kept here so a reloaded track can be put back the same way.
+    @Published private(set) var beatShift = 0
     func focus(_ path: String) { focusPath = path; focusTick += 1 }
 
     let player = ABPlayer()
@@ -118,6 +121,7 @@ final class IntroEngine: ObservableObject {
         failure = nil
         stopPlaying()
         track = nil; sources = []; chosenBar = nil; envelope = nil; joinBar = 0
+        beatShift = 0
         if session == nil { session = IntroSession(tool: tool) }
         busy = "Separating into stems… about half a minute."
         defer { busy = nil }
@@ -167,7 +171,42 @@ final class IntroEngine: ObservableObject {
         } catch let failure as IntroSession.Failure where failure.code == "no_track" {
             busy = "Loading the track again… about half a minute."
             _ = try await session.request("prepare", ["path": track.path])
+            if beatShift != 0 { _ = try await session.request("rephase", ["beats": beatShift]) }
             return try await session.request(command, fields)
+        }
+    }
+
+    /// Calls another beat the first of the bar, by `beats` (negative: earlier).
+    /// The tool picks the downbeat from the accents in the low end, which a
+    /// four-on-the-floor record does not have; this is how to correct it by
+    /// ear. Nothing is separated again, so it is quick.
+    func moveBeatOne(by beats: Int) async {
+        guard let old = track, !isBusy else { return }
+        failure = nil
+        stopPlaying()
+        busy = "Moving the bar lines…"
+        defer { busy = nil }
+        do {
+            let events = try await ask("rephase", ["beats": beats])
+            guard let grid = events.first(where: { $0.event == "grid" }) else {
+                failure = "The intro tool did not report the new bar lines."
+                return
+            }
+            beatShift = ((beatShift + beats) % 4 + 4) % 4
+            track = Track(path: old.path, name: old.name, seconds: old.seconds, bpm: old.bpm,
+                          joinSeconds: grid.joinSeconds ?? old.joinSeconds,
+                          pickupSeconds: grid.pickupSeconds ?? 0,
+                          downbeatFrom: grid.downbeatFrom ?? "",
+                          barsAfterJoin: grid.barsAfterJoin ?? 0,
+                          warnings: grid.warnings ?? [],
+                          barSeconds: grid.barSeconds ?? old.barSeconds,
+                          suggestedJoinBar: grid.suggestedJoinBar ?? 0,
+                          joinReason: grid.joinReason ?? "")
+            joinBar = track?.suggestedJoinBar ?? 0
+            chosenBar = nil
+            await loadSources(whileBusy: true)
+        } catch {
+            failure = error.localizedDescription
         }
     }
 
@@ -357,7 +396,7 @@ final class IntroEngine: ObservableObject {
         stopPlaying()
         session?.close(); session = nil
         track = nil; sources = []; chosenBar = nil; batch = nil; failure = nil
-        envelope = nil; joinBar = 0
+        envelope = nil; joinBar = 0; beatShift = 0
     }
 
     nonisolated static func render(from event: IntroEvent) -> Render? {

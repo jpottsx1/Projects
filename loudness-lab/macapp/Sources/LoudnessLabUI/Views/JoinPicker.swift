@@ -149,6 +149,26 @@ struct JoinPicker: View {
             }
         }
 
+        // Beats and half beats, only where there is room to read them: the
+        // evidence for whether the bar line is on the right beat.
+        if labels {
+            let beatPixels = pixelsPerBar / 4
+            for (index, t) in barSeconds.enumerated() where index + 1 < barSeconds.count {
+                let next = barSeconds[index + 1]
+                guard next >= window.lowerBound, t <= window.upperBound else { continue }
+                for k in 1..<8 {
+                    let isBeat = k % 2 == 0
+                    guard isBeat ? beatPixels >= 14 : beatPixels >= 36 else { continue }
+                    let tick = t + (next - t) * Double(k) / 8
+                    guard tick >= window.lowerBound, tick <= window.upperBound else { continue }
+                    let x = JoinMath.x(for: tick, in: window, width: size.width)
+                    var mark = Path()
+                    mark.move(to: CGPoint(x: x, y: size.height)); mark.addLine(to: CGPoint(x: x, y: size.height - (isBeat ? 12 : 6)))
+                    context.stroke(mark, with: .color(.primary.opacity(isBeat ? 0.45 : 0.25)), lineWidth: 1)
+                }
+            }
+        }
+
         // What the intro replaces.
         if joinX > 0 {
             context.fill(Path(CGRect(x: 0, y: 0, width: min(joinX, size.width), height: size.height)),
@@ -212,6 +232,19 @@ struct JoinPicker: View {
                 HearButton(engine: engine)
             }
             .controlSize(.small)
+            HStack(spacing: 6) {
+                Text("Beat one").frame(width: 56, alignment: .leading)
+                Button("◀ 1 beat") { Task { await engine.moveBeatOne(by: -1) } }
+                Button("1 beat ▶") { Task { await engine.moveBeatOne(by: 1) } }
+                Text(engine.beatShift == 0 ? track.downbeatFrom
+                     : "moved \(engine.beatShift) beat\(engine.beatShift == 1 ? "" : "s") by hand")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .lineLimit(1).truncationMode(.tail)
+            }
+            .controlSize(.small)
+            .help("Which beat is the first of the bar. If the numbered bar lines in the zoomed "
+                  + "strip do not sit on the heaviest kick and bass hit, move them a beat "
+                  + "either way. The small ticks are the beats, the fainter ones the half beats.")
             HStack(spacing: 8) {
                 Text("Zoom").frame(width: 44, alignment: .leading)
                 Slider(value: Binding(get: { log(detailSeconds) },

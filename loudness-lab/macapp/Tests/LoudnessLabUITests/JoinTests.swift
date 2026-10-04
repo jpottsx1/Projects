@@ -209,6 +209,14 @@ final class IntroEngineJoinTests: XCTestCase {
             if cmd == "envelope" and \(envelopeFails ? "True" : "False"):
                 print(json.dumps({"event": "error", "id": rid, "message": "no picture today"}), flush=True)
                 continue
+            if cmd == "rephase":
+                open(os.path.join(here, "rephases.log"), "a").write(str(request["beats"]) + "\\n")
+                event = dict(canned["prepared"]); event["event"] = "grid"; event["id"] = rid
+                event["bar_seconds"] = [t + 0.5 * request["beats"] for t in event["bar_seconds"]]
+                event["downbeat_from"] = "set by hand"; event["suggested_join_bar"] = 2
+                print(json.dumps(event), flush=True)
+                print(json.dumps({"event": "done", "id": rid}), flush=True)
+                continue
             event = dict(canned[by[cmd]]); event["id"] = rid
             if cmd == "render":
                 event["join_bar"] = request.get("join_bar")      # echo what it was asked for
@@ -228,6 +236,47 @@ final class IntroEngineJoinTests: XCTestCase {
     private var prepareCount: Int {
         (try? String(contentsOf: directory.appendingPathComponent("prepares.log"), encoding: .utf8))?
             .split(separator: "\n").count ?? 0
+    }
+
+    private var rephases: [String] {
+        (try? String(contentsOf: directory.appendingPathComponent("rephases.log"), encoding: .utf8))?
+            .split(separator: "\n").map(String.init) ?? []
+    }
+
+    func testMovingBeatOneRelaysTheBarLinesAndOffersANewJoin() async throws {
+        let engine = IntroEngine(tool: try fakeTool())
+        await engine.prepare("/tmp/x/Song.flac")
+        let before = engine.track!.barSeconds
+        await engine.moveBeatOne(by: 1)
+        XCTAssertNil(engine.failure)
+        XCTAssertEqual(engine.track?.barSeconds.first ?? 0, before[0] + 0.5, accuracy: 1e-9)
+        XCTAssertEqual(engine.track?.downbeatFrom, "set by hand")
+        XCTAssertEqual(engine.beatShift, 1)
+        XCTAssertEqual(engine.joinBar, 2)                       // the new suggestion
+        engine.reset()
+    }
+
+    func testTheBeatShiftWrapsAroundTheBar() async throws {
+        let engine = IntroEngine(tool: try fakeTool())
+        await engine.prepare("/tmp/x/Song.flac")
+        await engine.moveBeatOne(by: -1)
+        XCTAssertEqual(engine.beatShift, 3)
+        await engine.moveBeatOne(by: 1)
+        XCTAssertEqual(engine.beatShift, 0)
+        engine.reset()
+    }
+
+    func testAReloadedTrackKeepsTheBeatItWasMovedTo() async throws {
+        let tool = try fakeTool()
+        let engine = IntroEngine(tool: tool)
+        await engine.prepare("/tmp/x/Song.flac")
+        await engine.moveBeatOne(by: 1)
+        touch("forget")                                     // the idle session let go
+        await engine.loadSources()
+        XCTAssertNil(engine.failure)
+        XCTAssertEqual(prepareCount, 2)
+        XCTAssertEqual(rephases, ["1", "1"])                // moved, then put back
+        engine.reset()
     }
 
     func testPreparingStartsOnTheSuggestedJoinWithItsPicture() async throws {

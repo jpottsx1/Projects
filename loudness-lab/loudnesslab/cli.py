@@ -513,7 +513,8 @@ def cmd_intro(args: argparse.Namespace) -> int:
                 _print_sources(source, a, chosen, args.json)
                 continue
             for bars in args.bars:
-                audio, info = intro.render(a, bars, chosen[0], loop_bars)
+                audio, info = intro.render(a, bars, chosen[0], loop_bars,
+                                           args.join_bar)
                 target = intro.write_intro(a, source, audio, bars, out_dir,
                                            args.format)
                 info.update(source=str(source), output=str(target))
@@ -539,45 +540,21 @@ def cmd_intro(args: argparse.Namespace) -> int:
 
 def _serve_intro(args: argparse.Namespace) -> int:
     """`intro --serve`: JSON requests on stdin, JSON events on stdout, one
-    track kept in memory between them (see `intro.Session`)."""
+    track kept in memory between them (see `intro.Session`), let go after
+    sitting idle (see `intro.serve`)."""
     session = intro.Session(out_dir=args.out)
 
     def emit(event: dict) -> None:
         print(json.dumps(event), flush=True)
 
-    for line in sys.stdin:
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            request = json.loads(line)
-        except json.JSONDecodeError as exc:
-            emit({"event": "error", "id": None, "message": f"not JSON: {exc}"})
-            continue
-        if not session.handle(request, emit):
-            break
+    try:
+        source = intro.FdLines(sys.stdin.fileno())
+    except (AttributeError, ValueError, OSError):      # not a real descriptor (a test)
+        source = intro.IterLines(sys.stdin)
+    intro.serve(session, source, emit,
+                release_after=args.idle_release or None,
+                exit_after=args.idle_exit or None)
     return 0
-
-
-def _print_sources(source: Path, a, chosen, as_json: bool) -> None:
-    if as_json:
-        print(json.dumps({
-            "event": "sources", "source": str(source),
-            "bpm": round(a.grid.bpm, 3), "join_seconds": round(a.join / a.rate, 3),
-            "sources": [{"bar": s.bar, "seconds": round(s.seconds, 3),
-                         "vocal_db": round(s.vocal_db, 1),
-                         "vocal_free": s.vocal_free,
-                         "repeat": round(s.repeat, 2)} for s in chosen]}),
-            flush=True)
-        return
-    print(f"{source.name}: {a.grid.bpm:.2f} BPM, first bar at "
-          f"{a.join / a.rate:.2f} s (from {a.grid.how})")
-    for note in a.warnings:
-        print(f"  NOTE: {note}")
-    for i, s in enumerate(chosen, 1):
-        clean = "no vocal" if s.vocal_free else f"vocal {s.vocal_db:+.0f} dB"
-        print(f"  {i}. bar {s.bar:3d}  {s.seconds:6.1f} s in   {clean:<12s} "
-              f"repeats {s.repeat:.2f}")
 
 
 def cmd_restore(args: argparse.Namespace) -> int:
@@ -1906,6 +1883,13 @@ def build_parser() -> argparse.ArgumentParser:
         "intro", help="give a cold-start track an intro made from itself")
     made.add_argument("path", type=Path, nargs="*",
                       help="audio files, or folders of them")
+    made.add_argument("--idle-release", type=float, default=intro.IDLE_RELEASE_S,
+                      metavar="SECONDS",
+                      help="with --serve: let go of the held track after this long "
+                           "idle, freeing its memory (0 never; default 600)")
+    made.add_argument("--idle-exit", type=float, default=intro.IDLE_EXIT_S,
+                      metavar="SECONDS",
+                      help="with --serve: exit after this long idle (0 never; default 1800)")
     made.add_argument("--serve", action="store_true",
                       help="read JSON requests on stdin and answer on stdout, "
                            "keeping one separated track in memory; for the app")
@@ -1919,6 +1903,10 @@ def build_parser() -> argparse.ArgumentParser:
     made.add_argument("--source-bar", type=int, default=None,
                       help="loop from this bar after the first one, instead "
                            "of the best stretch; see --list-sources")
+    made.add_argument("--join-bar", type=int, default=None,
+                      help="the bar line the song arrives at; everything before "
+                           "it is replaced by the intro (default: where the "
+                           "full groove lands; 0 keeps the whole opening)")
     made.add_argument("--list-sources", action="store_true",
                       help="print the best stretches to loop and stop")
     made.add_argument("--bpm", type=float, default=None,

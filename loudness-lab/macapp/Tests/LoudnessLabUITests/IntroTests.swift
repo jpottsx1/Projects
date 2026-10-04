@@ -229,11 +229,27 @@ final class IntroSessionTests: XCTestCase {
         let prepared = try await session.request("prepare", ["path": file])
         let info = try XCTUnwrap(prepared.first(where: { $0.event == "prepared" }))
         XCTAssertGreaterThan(info.bpm ?? 0, 60)
+        // Where the song arrives, and every bar line to snap to.
+        let bars = try XCTUnwrap(info.barSeconds)
+        XCTAssertGreaterThan(bars.count, 8)
+        XCTAssertEqual(bars, bars.sorted())
+        let suggested = try XCTUnwrap(info.suggestedJoinBar)
+        XCTAssertTrue((0..<(bars.count - 1)).contains(suggested))
+        // The picture of the track, from the same audio.
+        let pictured = try await session.request("envelope", ["per_second": 10])
+        let envelope = try XCTUnwrap(JoinEnvelope(event: try XCTUnwrap(
+            pictured.first(where: { $0.event == "envelope" }))))
+        XCTAssertEqual(envelope.seconds, info.seconds ?? 0, accuracy: 1.0)
         let sources = try await session.request("sources", ["loop_bars": 4])
         XCTAssertFalse((sources.compactMap(\.sources).first ?? []).isEmpty)
-        let made = try await session.request("render", ["bars": 8, "out": directory.path])
-        let output = try XCTUnwrap(made.first(where: { $0.event == "intro" })?.output)
+        let made = try await session.request("render", ["bars": 8, "out": directory.path,
+                                                        "join_bar": suggested])
+        let intro = try XCTUnwrap(made.first(where: { $0.event == "intro" }))
+        let output = try XCTUnwrap(intro.output)
         XCTAssertTrue(FileManager.default.fileExists(atPath: output), output)
+        XCTAssertEqual(intro.joinBar, suggested)
+        XCTAssertEqual(intro.cutSeconds ?? -1, max(0, bars[suggested] - (info.pickupSeconds ?? 0)),
+                       accuracy: 1.0)
     }
 }
 

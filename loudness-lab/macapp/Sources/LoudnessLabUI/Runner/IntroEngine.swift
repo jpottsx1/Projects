@@ -21,6 +21,13 @@ final class IntroEngine: ObservableObject {
         let downbeatFrom: String
         let barsAfterJoin: Int
         let warnings: [String]
+        /// Every bar line from the first, in seconds into the ORIGINAL.
+        let barSeconds: [Double]
+        let suggestedJoinBar: Int
+        let joinReason: String
+
+        /// The last bar the song can arrive at: it needs a bar of itself.
+        var lastJoinBar: Int { max(0, barSeconds.count - 2) }
     }
 
     /// One finished intro file.
@@ -37,6 +44,10 @@ final class IntroEngine: ObservableObject {
         let vocalFree: Bool
         let repeatScore: Double
         let warnings: [String]
+        /// The bar the song arrives at, and how much of the original's
+        /// opening was cut out to make room for the intro.
+        var joinBar: Int = 0
+        var cutSeconds: Double = 0
 
         var id: String { url.path }
         var name: String { url.deletingPathExtension().lastPathComponent }
@@ -53,6 +64,11 @@ final class IntroEngine: ObservableObject {
 
     @Published private(set) var track: Track?
     @Published private(set) var sources: [IntroSource] = []
+    /// The bar line the song arrives at; everything of the original before
+    /// it is replaced by the intro. Starts at the tool's suggestion (where
+    /// the groove lands) and is the person's to move.
+    @Published var joinBar = 0
+    @Published private(set) var envelope: JoinEnvelope?
     /// Nil means the best-ranked stretch, which is what a render uses when
     /// nothing has been picked.
     @Published var chosenBar: Int?
@@ -73,10 +89,15 @@ final class IntroEngine: ObservableObject {
 
     let player = ABPlayer()
     private var session: IntroSession?
+    /// A specific tool to run, for a test that stands one in. Nil means
+    /// the real one, found as the rest of the app finds it.
+    private let toolOverride: URL?
+
+    init(tool: URL? = nil) { toolOverride = tool }
     private let flag = Engine.CancelFlag()
 
     var isBusy: Bool { busy != nil }
-    var toolMissing: Bool { CLI.locate() == nil }
+    var toolMissing: Bool { toolOverride == nil && CLI.locate() == nil }
 
     /// The few seconds either side of the join that are worth hearing.
     static let auditionLead = 8.0
@@ -86,10 +107,10 @@ final class IntroEngine: ObservableObject {
     /// Separate the track and find its grid. Replaces any track already held.
     func prepare(_ path: String) async {
         guard !isBusy else { return }
-        guard let tool = CLI.locate() else { failure = CLI.missing; return }
+        guard let tool = toolOverride ?? CLI.locate() else { failure = CLI.missing; return }
         failure = nil
         stopPlaying()
-        track = nil; sources = []; chosenBar = nil
+        track = nil; sources = []; chosenBar = nil; envelope = nil; joinBar = 0
         if session == nil { session = IntroSession(tool: tool) }
         busy = "Separating into stems… about half a minute."
         defer { busy = nil }
@@ -111,11 +132,35 @@ final class IntroEngine: ObservableObject {
                           pickupSeconds: prepared.pickupSeconds ?? 0,
                           downbeatFrom: prepared.downbeatFrom ?? "",
                           barsAfterJoin: prepared.barsAfterJoin ?? 0,
-                          warnings: prepared.warnings ?? [])
+                          warnings: prepared.warnings ?? [],
+                          barSeconds: prepared.barSeconds ?? [],
+                          suggestedJoinBar: prepared.suggestedJoinBar ?? 0,
+                          joinReason: prepared.joinReason ?? "")
+            joinBar = track?.suggestedJoinBar ?? 0
             await loadSources(whileBusy: true)
+            await loadEnvelope()
         } catch {
             failure = error.localizedDescription
             session?.close(); session = nil
+        }
+    }
+
+    /// A request to the held session. If the tool says it no longer holds
+    /// the track (it lets it go after sitting idle, to give its memory back,
+    /// or was restarted after a crash), the track is prepared again and the
+    /// request retried ONCE, so an idle session costs the person a pause and
+    /// not an error. Once: a tool that still says so after a prepare is
+    /// broken, and looping on it would never end.
+    private func ask(_ command: String, _ fields: [String: Any] = [:]) async throws -> [IntroEvent] {
+        guard let session, let track else {
+            throw IntroSession.Failure("No track is held. Analyse one first.")
+        }
+        do {
+            return try await session.request(command, fields)
+        } catch let failure as IntroSession.Failure where failure.code == "no_track" {
+            busy = "Loading the track again… about half a minute."
+            _ = try await session.request("prepare", ["path": track.path])
+            return try await session.request(command, fields)
         }
     }
 
@@ -127,15 +172,29 @@ final class IntroEngine: ObservableObject {
         }
     }
 
+    /// The picture of the track for the join picker. A failure costs only
+    /// the picture: the slider still works, so it is not an error worth
+    /// stopping for.
+    private func loadEnvelope() async {
+        do {
+            let events = try await ask("envelope")
+            if let made = events.first(where: { $0.event == "envelope" }) {
+                envelope = JoinEnvelope(event: made)
+            }
+        } catch {
+            envelope = nil
+        }
+    }
+
     func loadSources(whileBusy: Bool = false) async {
-        guard let session, track != nil else { return }
+        guard track != nil else { return }
         if !whileBusy {
             guard !isBusy else { return }
             busy = "Finding loops…"
         }
         defer { if !whileBusy { busy = nil } }
         do {
-            let events = try await session.request("sources", ["loop_bars": loopBars, "count": 5])
+            let events = try await ask("sources", ["loop_bars": loopBars, "count": 5])
             sources = events.first(where: { $0.event == "sources" })?.sources ?? []
             if let chosenBar, !sources.contains(where: { $0.bar == chosenBar }) {
                 self.chosenBar = nil
@@ -145,16 +204,17 @@ final class IntroEngine: ObservableObject {
 
     /// Render every chosen length from the held track.
     func render(to outputDirectory: URL?) async {
-        guard let session, track != nil, !isBusy, !lengths.isEmpty else { return }
+        guard track != nil, !isBusy, !lengths.isEmpty else { return }
         failure = nil
         defer { busy = nil }
         for bars in lengths.sorted() {
             busy = "Rendering \(bars) bars…"
-            var fields: [String: Any] = ["bars": bars, "loop_bars": loopBars]
+            var fields: [String: Any] = ["bars": bars, "loop_bars": loopBars,
+                                         "join_bar": joinBar]
             if let chosenBar { fields["source_bar"] = chosenBar }
             if let outputDirectory { fields["out"] = outputDirectory.path }
             do {
-                let events = try await session.request("render", fields)
+                let events = try await ask("render", fields)
                 if let made = events.first(where: { $0.event == "intro" }),
                    let render = Self.render(from: made) {
                     renders.removeAll { $0.id == render.id }
@@ -181,6 +241,21 @@ final class IntroEngine: ObservableObject {
         player.play(from: start)
     }
 
+    /// Plays the ORIGINAL from `offset`: what the person is choosing a join
+    /// in, which the rendered file is not. Starts a few seconds before the
+    /// join by default so the lead-in and the downbeat are both heard.
+    func playOriginal(from offset: Double? = nil) {
+        guard let track else { return }
+        if playing != track.path {
+            player.loadOrReport([ABPlayer.Source(
+                id: track.path, label: track.name,
+                url: URL(fileURLWithPath: track.path), matchGainDB: 0)])
+            playing = track.path
+        }
+        let join = JoinMath.seconds(ofBar: joinBar, in: track.barSeconds)
+        player.play(from: offset ?? max(0, join - Self.auditionLead))
+    }
+
     func stopPlaying() {
         player.stop()
         playing = nil
@@ -194,7 +269,7 @@ final class IntroEngine: ObservableObject {
     /// memory for nothing.
     func renderBatch(_ paths: [String], to outputDirectory: URL?) async {
         guard !isBusy, !paths.isEmpty, !lengths.isEmpty else { return }
-        guard let tool = CLI.locate() else { failure = CLI.missing; return }
+        guard let tool = toolOverride ?? CLI.locate() else { failure = CLI.missing; return }
         failure = nil
         stopPlaying()
         session?.close(); session = nil; track = nil; sources = []
@@ -242,6 +317,7 @@ final class IntroEngine: ObservableObject {
         stopPlaying()
         session?.close(); session = nil
         track = nil; sources = []; chosenBar = nil; batch = nil; failure = nil
+        envelope = nil; joinBar = 0
     }
 
     nonisolated static func render(from event: IntroEvent) -> Render? {
@@ -255,7 +331,9 @@ final class IntroEngine: ObservableObject {
                       vocalDB: event.sourceVocalDB,
                       vocalFree: event.vocalFree ?? false,
                       repeatScore: event.loopRepeat ?? 0,
-                      warnings: event.warnings ?? [])
+                      warnings: event.warnings ?? [],
+                      joinBar: event.joinBar ?? 0,
+                      cutSeconds: event.cutSeconds ?? 0)
     }
 }
 
@@ -266,7 +344,10 @@ extension IntroEngine {
     /// cannot be judged from code.
     func seedForSnapshot(track: Track?, sources: [IntroSource] = [],
                          renders: [Render] = [], busy: String? = nil,
-                         batch: Batch? = nil, failure: String? = nil) {
+                         batch: Batch? = nil, failure: String? = nil,
+                         envelope: JoinEnvelope? = nil, joinBar: Int = 0) {
+        self.envelope = envelope
+        self.joinBar = joinBar
         self.track = track
         self.sources = sources
         self.renders = renders

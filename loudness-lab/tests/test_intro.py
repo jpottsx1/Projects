@@ -12,8 +12,10 @@ from __future__ import annotations
 
 import contextlib
 import io
+import os
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -35,18 +37,28 @@ BAR = 4 * BEAT
 
 def song(bars: int = 36, pickup_beats: int = 0, vocal_bars=(range(0, 8), range(16, 24)),
          breakdown=range(28, 32), accent: bool = True, seed: int = 0,
-         restless=range(0, 0)):
-    """(original, stems, join in seconds). Bar 0 starts at `pickup_beats`
-    beats in: before it, only a vocal pickup."""
+         restless=range(0, 0), soft_bars=range(0, 0), lead_in_vocal_beats: int = 0):
+    """`soft_bars`: an opening of the song's own, with no drums, no bass and
+    no vocal, only the quiet pad: the part an intro edit cuts out.
+    `lead_in_vocal_beats`: a sustained vocal over the last N beats of the
+    soft opening, running into the drop."""
+    # (original, stems, join in seconds). Bar 0 starts at `pickup_beats`
+    # beats in: before it, only a vocal pickup.
     rng = np.random.default_rng(seed)
     lead = pickup_beats * BEAT
     n = int((lead + bars * BAR + 2.0) * RATE)
     drums, bass, other, vocals = (np.zeros(n) for _ in range(4))
     quiet = {b for b in breakdown}
     voiced = {b for r in vocal_bars for b in r}
+    soft = set(soft_bars)
     for bar in range(bars):
         for beat in range(4):
             t = lead + bar * BAR + beat * BEAT
+            if bar in soft:
+                if (bar == max(soft) and beat >= 4 - lead_in_vocal_beats):
+                    d = np.arange(int(BEAT * RATE)) / RATE
+                    fx._place(vocals, t, 0.25 * np.sin(2 * np.pi * 880 * d))
+                continue
             if bar not in quiet:
                 fx._place(drums, t, fx._kick(int(0.3 * RATE), rng) * 0.9)
                 fx._place(drums, t + BEAT / 2, fx._hat(int(0.08 * RATE), rng) * 0.25)
@@ -138,6 +150,121 @@ class TestTheJoin(unittest.TestCase):
         x, parts, _ = song()
         with self.assertRaisesRegex(ValueError, "--bpm"):
             intro.analyse(x, parts, RATE, None)
+
+
+class TestWhereTheSongArrives(unittest.TestCase):
+    """The song's own opening is cut out and the intro takes its place, so
+    where the song joins matters: at the first bar where the groove lands."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.x, cls.parts, _ = song(soft_bars=range(0, 8), vocal_bars=(range(8, 16),),
+                                   lead_in_vocal_beats=2)
+        cls.a = intro.analyse(cls.x, cls.parts, RATE, BPM)
+
+    def test_a_soft_opening_joins_where_the_drums_come_in(self):
+        self.assertEqual(self.a.suggested_join_bar, 8)
+        join, _ = intro.resolve_join(self.a, 8)
+        self.assertAlmostEqual(join / RATE, 8 * BAR, delta=0.02)
+        self.assertIn("drums come in", self.a.join_reason)
+
+    def test_a_vocal_swelling_into_the_drop_does_not_move_it_a_bar_early(self):
+        # The first version read the whole mix, and the vocal over the last
+        # two beats of bar 7 made bar 7 look like the arrival.
+        self.assertNotEqual(self.a.suggested_join_bar, 7)
+
+    def test_a_track_that_starts_at_full_level_joins_at_its_first_bar(self):
+        x, parts, _ = song()
+        a = intro.analyse(x, parts, RATE, BPM)
+        self.assertEqual(a.suggested_join_bar, 0)
+        self.assertIn("starts at full level", a.join_reason)
+
+    def test_a_vocal_leading_into_the_drop_is_kept(self):
+        _, pickup = intro.resolve_join(self.a, 8)
+        self.assertAlmostEqual(pickup / self.a.grid.period, 2.0, delta=0.05)
+
+    def test_no_vocal_before_the_drop_keeps_nothing(self):
+        x, parts, _ = song(soft_bars=range(0, 8), vocal_bars=(range(8, 16),))
+        a = intro.analyse(x, parts, RATE, BPM)
+        self.assertEqual(intro.resolve_join(a, 8)[1], 0)
+
+    def test_a_join_outside_the_track_is_refused(self):
+        for bad in (-1, len(self.a.bar_lines) - 1, 10 ** 6):
+            with self.assertRaisesRegex(ValueError, "outside the track"):
+                intro.resolve_join(self.a, bad)
+
+    def test_the_opening_is_cut_out_of_the_file(self):
+        source = intro.candidates(self.a, 4)[0]
+        cut, info = intro.render(self.a, 16, source)                  # suggested: bar 8
+        whole, _ = intro.render(self.a, 16, source, join_bar=0)       # keep the opening
+        join, pickup = intro.resolve_join(self.a, 8)
+        # Same intro, so the files differ by exactly the bars between the
+        # first bar and the join: the opening that was cut out. (The lead-in
+        # kept ahead of the join changes where the original takes over, not
+        # how long the file is.)
+        self.assertEqual(len(whole) - len(cut), join - self.a.join)
+        self.assertAlmostEqual((len(whole) - len(cut)) / RATE, 8 * BAR, delta=0.02)
+        self.assertEqual(info["join_bar"], 8)
+        self.assertEqual(info["suggested_join_bar"], 8)
+        self.assertAlmostEqual(info["cut_seconds"], (join - pickup) / RATE, delta=0.001)
+
+    def test_the_song_arrives_untouched_at_the_join(self):
+        source = intro.candidates(self.a, 4)[0]
+        audio, info = intro.render(self.a, 16, source)
+        join, _ = intro.resolve_join(self.a, 8)
+        join_out = (16 // 4) * source.length + round(info["lead_seconds"] * RATE)
+        np.testing.assert_allclose(audio[join_out + 2000:], self.x[join + 2000:], atol=1e-6)
+
+    def test_the_intro_has_the_groove_where_the_original_had_a_pad(self):
+        source = intro.candidates(self.a, 4)[0]
+        audio, _ = intro.render(self.a, 8, source)
+
+        def low(y):
+            band = sosfilt(butter(2, 150, btype="low", fs=RATE, output="sos"), y.mean(axis=1))
+            return float(np.sqrt(np.mean(band ** 2)))
+
+        opening = self.x[:2 * RATE]                      # the original's pad
+        self.assertGreater(low(audio[RATE:3 * RATE]), 10 * max(low(opening), 1e-9))
+
+    def test_a_chosen_bar_overrides_the_suggestion(self):
+        source = intro.candidates(self.a, 4)[0]
+        _, info = intro.render(self.a, 8, source, join_bar=12)
+        self.assertEqual(info["join_bar"], 12)
+        self.assertEqual(info["suggested_join_bar"], 8)
+        self.assertAlmostEqual(info["join_seconds"], 12 * BAR, delta=0.02)
+
+    def test_a_render_with_a_bad_join_is_refused(self):
+        source = intro.candidates(self.a, 4)[0]
+        with self.assertRaisesRegex(ValueError, "outside the track"):
+            intro.render(self.a, 8, source, join_bar=10 ** 6)
+
+
+class TestThePickerEnvelope(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        x, parts, _ = song(soft_bars=range(0, 8), vocal_bars=(range(8, 16),))
+        cls.a = intro.analyse(x, parts, RATE, BPM)
+        cls.env = intro.envelope(cls.a)
+
+    def test_it_covers_the_track_at_the_stated_rate(self):
+        per = self.env["per_second"]
+        self.assertAlmostEqual(per, 50, delta=0.5)
+        for band in ("bass", "mid", "treble"):
+            self.assertAlmostEqual(len(self.env[band]), self.env["seconds"] * per, delta=2)
+
+    def test_it_is_plain_json_in_range(self):
+        import json
+        json.dumps(self.env)
+        for band in ("bass", "mid", "treble"):
+            values = self.env[band]
+            self.assertTrue(all(isinstance(v, int) and 0 <= v <= 255 for v in values))
+
+    def test_the_opening_is_visibly_quieter_than_the_groove(self):
+        per = self.env["per_second"]
+        bass = np.array(self.env["bass"], dtype=float)
+        opening = bass[int(1 * per):int(14 * per)].mean()
+        groove = bass[int(18 * per):int(30 * per)].mean()
+        self.assertGreater(groove, 3 * max(opening, 1.0))
 
 
 class TestChoosingTheLoop(unittest.TestCase):
@@ -341,6 +468,228 @@ class TestNothingTravelsThatWouldBeWrong(unittest.TestCase):
             self.assertNotIn(b"Serato Markers2", dropped.read_bytes())
 
 
+class TestLettingGoOfMemory(unittest.TestCase):
+    """A held session was measured at 6 GB on a 16 GB Mac, idle, for the best
+    part of an hour. These keep that from coming back."""
+
+    def test_the_gpu_caches_are_cleared_after_separating(self):
+        fake_mx = mock.MagicMock()
+        fake_torch = mock.MagicMock()
+        with mock.patch.dict(sys.modules, {"mlx": mock.MagicMock(core=fake_mx),
+                                           "mlx.core": fake_mx, "torch": fake_torch}):
+            intro.release_memory()
+        fake_mx.clear_cache.assert_called_once()
+        fake_torch.mps.empty_cache.assert_called_once()
+
+    def test_a_machine_with_neither_library_is_not_an_error(self):
+        with mock.patch.dict(sys.modules, {"mlx": None, "mlx.core": None}):
+            sys.modules.pop("torch", None)
+            intro.release_memory()                      # must simply return
+
+    def test_a_failing_cache_clear_does_not_break_a_separation(self):
+        fake_mx = mock.MagicMock()
+        fake_mx.clear_cache.side_effect = RuntimeError("no metal")
+        with mock.patch.dict(sys.modules, {"mlx": mock.MagicMock(core=fake_mx),
+                                           "mlx.core": fake_mx}):
+            intro.release_memory()
+
+    def test_separating_clears_the_caches_even_when_it_fails(self):
+        with mock.patch.object(intro.stems, "available", return_value=["demucs"]), \
+                mock.patch.object(intro.stems, "separate", side_effect=RuntimeError("boom")), \
+                mock.patch.object(intro, "release_memory") as release:
+            with self.assertRaisesRegex(RuntimeError, "boom"):
+                intro.separate(np.zeros((100, 2), dtype=np.float32), RATE)
+        release.assert_called_once()
+
+    def test_a_released_session_says_no_track_with_a_code_to_act_on(self):
+        x, parts, _ = song(bars=24, vocal_bars=(range(0, 4),), breakdown=range(0, 0))
+        with tempfile.TemporaryDirectory() as tmp:
+            source = write.write(Path(tmp) / "Song", x, RATE, fmt="flac")
+            session = intro.Session(out_dir=Path(tmp) / "o")
+            events = []
+            with mock.patch.object(intro, "separate", return_value=parts):
+                session.handle({"id": 1, "cmd": "prepare", "path": str(source), "bpm": 120},
+                               events.append)
+            self.assertIsNotNone(session.analysis)
+            events.clear()
+            session.handle({"id": 2, "cmd": "release"}, events.append)
+            self.assertEqual([e["event"] for e in events], ["released", "done"])
+            self.assertIsNone(session.analysis)
+            events.clear()
+            session.handle({"id": 3, "cmd": "render", "bars": 8}, events.append)
+            self.assertEqual(events[-1]["event"], "error")
+            self.assertEqual(events[-1]["code"], "no_track")
+
+    def test_an_ordinary_error_has_no_code(self):
+        session = intro.Session()
+        events = []
+        session.handle({"id": 1, "cmd": "dance"}, events.append)
+        self.assertEqual(events[-1]["event"], "error")
+        self.assertIsNone(events[-1]["code"])
+
+
+class _Scripted:
+    """A source of lines that also moves a fake clock: ('line', text),
+    ('wait', seconds) which times out after that long, or ('eof',)."""
+
+    def __init__(self, script, clock):
+        self.script, self.clock, self.asked = list(script), clock, []
+
+    def read(self, timeout):
+        self.asked.append(timeout)
+        kind, *rest = self.script.pop(0)
+        if kind == "eof":
+            return intro.EOF_LINE
+        if kind == "wait":
+            self.clock.now += rest[0]
+            return intro.TIMED_OUT
+        return rest[0]
+
+
+class _Clock:
+    now = 0.0
+
+    def __call__(self):
+        return self.now
+
+
+class TestServingWithIdleHandling(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.x, cls.parts, _ = song(bars=24, vocal_bars=(range(0, 4),), breakdown=range(0, 0))
+        cls.tmp = tempfile.TemporaryDirectory()
+        cls.source = write.write(Path(cls.tmp.name) / "Song", cls.x, RATE, fmt="flac")
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.tmp.cleanup()
+
+    def run_script(self, script, **kwargs):
+        import json
+        clock, events = _Clock(), []
+        session = intro.Session(out_dir=Path(self.tmp.name) / "o")
+        source = _Scripted(script, clock)
+        with mock.patch.object(intro, "separate", return_value=self.parts):
+            intro.serve(session, source, events.append, clock=clock, **kwargs)
+        return events, session, source
+
+    def prepare_line(self):
+        import json
+        return ("line", json.dumps({"id": 1, "cmd": "prepare", "path": str(self.source),
+                                    "bpm": 120}))
+
+    def test_a_quiet_session_lets_its_track_go_and_says_so(self):
+        events, session, _ = self.run_script(
+            [self.prepare_line(), ("wait", 700), ("eof",)],
+            release_after=600, exit_after=None)
+        released = [e for e in events if e["event"] == "released"]
+        self.assertEqual(len(released), 1)
+        self.assertEqual(released[0]["reason"], "idle")
+        self.assertIsNone(session.analysis)
+
+    def test_it_is_idle_from_the_answer_not_the_ask(self):
+        # The request took 500 s of (fake) time to answer; the clock for
+        # idleness starts when it is done, so 200 more is not yet 600.
+        import json
+        clock = _Clock()
+        session = intro.Session(out_dir=Path(self.tmp.name) / "o")
+        events = []
+
+        def slow_separate(*args, **kwargs):
+            clock.now += 500
+            return self.parts
+
+        source = _Scripted([self.prepare_line(), ("wait", 200), ("eof",)], clock)
+        with mock.patch.object(intro, "separate", side_effect=slow_separate):
+            intro.serve(session, source, events.append, clock=clock,
+                        release_after=600, exit_after=None)
+        self.assertEqual([e for e in events if e["event"] == "released"], [])
+
+    def test_nothing_is_released_when_nothing_is_held(self):
+        events, _, _ = self.run_script([("wait", 700), ("eof",)],
+                                       release_after=600, exit_after=None)
+        self.assertEqual(events, [])
+
+    def test_a_session_idle_long_enough_exits_and_says_so(self):
+        events, _, source = self.run_script(
+            [self.prepare_line(), ("wait", 700), ("wait", 1200), ("line", "never read")],
+            release_after=600, exit_after=1800)
+        self.assertEqual([e["event"] for e in events if e["event"] in ("released", "exit")],
+                         ["released", "exit"])
+        self.assertEqual(len(source.script), 1)            # it stopped before the last line
+
+    def test_the_wait_is_for_the_nearest_deadline(self):
+        _, _, source = self.run_script(
+            [self.prepare_line(), ("wait", 600), ("eof",)], release_after=600, exit_after=1800)
+        # After the prepare it waits 600 for the release; having released,
+        # only the exit deadline is left: 1800 - 600.
+        self.assertAlmostEqual(source.asked[1], 600, delta=1)
+        self.assertAlmostEqual(source.asked[2], 1200, delta=1)
+
+    def test_with_both_off_it_waits_for_ever(self):
+        _, _, source = self.run_script([("eof",)], release_after=None, exit_after=None)
+        self.assertIsNone(source.asked[0])
+
+    def test_blank_and_broken_lines_do_not_end_it(self):
+        events, _, _ = self.run_script(
+            [("line", ""), ("line", "not json"), ("line", '{"id": 5, "cmd": "quit"}'),
+             ("line", "never read")], release_after=None, exit_after=None)
+        self.assertEqual(events[0]["event"], "error")
+        self.assertIn("not JSON", events[0]["message"])
+        self.assertEqual(events[-1], {"event": "done", "id": 5})
+
+    def test_a_request_after_a_release_is_answered_with_the_code(self):
+        import json
+        events, _, _ = self.run_script(
+            [self.prepare_line(), ("wait", 700),
+             ("line", json.dumps({"id": 2, "cmd": "render", "bars": 8})), ("eof",)],
+            release_after=600, exit_after=None)
+        last = events[-1]
+        self.assertEqual((last["event"], last.get("code")), ("error", "no_track"))
+
+
+class TestReadingFromADescriptor(unittest.TestCase):
+    """With a real pipe: the reason this does not use `for line in
+    sys.stdin` is a buffering trap a mock cannot reproduce."""
+
+    def test_lines_arrive_split_across_writes_and_two_at_once(self):
+        r, w = os.pipe()
+        try:
+            source = intro.FdLines(r)
+            os.write(w, b"first\nsec")
+            self.assertEqual(source.read(1), "first")
+            os.write(w, b"ond\nthird\n")
+            self.assertEqual(source.read(1), "second")
+            self.assertEqual(source.read(1), "third")     # already buffered: no wait
+        finally:
+            os.close(r)
+            os.close(w)
+
+    def test_a_silent_pipe_times_out_and_then_still_works(self):
+        r, w = os.pipe()
+        try:
+            source = intro.FdLines(r)
+            started = time.monotonic()
+            self.assertIs(source.read(0.15), intro.TIMED_OUT)
+            self.assertGreaterEqual(time.monotonic() - started, 0.1)
+            os.write(w, b"late\n")
+            self.assertEqual(source.read(1), "late")
+        finally:
+            os.close(r)
+            os.close(w)
+
+    def test_a_closed_pipe_is_the_end_and_a_last_unterminated_line_is_kept(self):
+        r, w = os.pipe()
+        try:
+            source = intro.FdLines(r)
+            os.write(w, b"last line without a newline")
+            os.close(w)
+            self.assertEqual(source.read(1), "last line without a newline")
+            self.assertIs(source.read(1), intro.EOF_LINE)
+        finally:
+            os.close(r)
+
+
 class TestFromAFile(unittest.TestCase):
     """The whole path, with the separation standing in for Demucs."""
 
@@ -419,6 +768,37 @@ class TestASession(unittest.TestCase):
             self.ask(session, id=3, cmd="render", bars=8, loop_bars=4)
             self.ask(session, id=4, cmd="render", bars=16, loop_bars=4)
         self.assertEqual(sep.call_count, 1)
+
+    def test_prepared_says_where_the_song_arrives_and_where_every_bar_is(self):
+        _, events = self.prepared()
+        prepared = [e for e in events if e["event"] == "prepared"][0]
+        bars = prepared["bar_seconds"]
+        self.assertEqual(len(bars), prepared["bars_after_join"] + 1)
+        self.assertEqual(bars, sorted(bars))
+        self.assertEqual(prepared["suggested_join_bar"], 0)       # this song starts cold
+        self.assertIn("join_reason", prepared)
+        self.assertAlmostEqual(prepared["join_seconds"],
+                               bars[prepared["suggested_join_bar"]], delta=0.05)
+        self.assertAlmostEqual(prepared["first_bar_seconds"], bars[0], delta=0.001)
+
+    def test_the_envelope_is_sent_on_request(self):
+        session, _ = self.prepared()
+        events, _ = self.ask(session, id=7, cmd="envelope")
+        env = [e for e in events if e["event"] == "envelope"][0]
+        self.assertGreater(len(env["bass"]), 100)
+        self.assertEqual(len(env["bass"]), len(env["mid"]))
+        self.assertEqual(events[-1]["event"], "done")
+
+    def test_a_render_takes_the_chosen_join(self):
+        session, _ = self.prepared()
+        events, _ = self.ask(session, id=8, cmd="render", bars=8, loop_bars=4,
+                             join_bar=3)
+        made = [e for e in events if e["event"] == "intro"][0]
+        self.assertEqual(made["join_bar"], 3)
+        events, _ = self.ask(session, id=9, cmd="render", bars=8, loop_bars=4,
+                             join_bar=10 ** 6)
+        self.assertEqual(events[-1]["event"], "error")
+        self.assertIn("outside the track", events[-1]["message"])
 
     def test_sources_come_back_as_plain_json(self):
         session, _ = self.prepared()

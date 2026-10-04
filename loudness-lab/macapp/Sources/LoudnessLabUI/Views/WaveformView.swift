@@ -41,9 +41,9 @@ struct WaveformView: View {
     /// row was too short, but there is no reason not to give it room too.
     static let height: CGFloat = 132
 
-    private static let bass = Color(red: 0.92, green: 0.30, blue: 0.24)
-    private static let mid = Color(red: 0.30, green: 0.80, blue: 0.40)
-    private static let treble = Color(red: 0.28, green: 0.58, blue: 0.98)
+    static let bass = Color(red: 0.92, green: 0.30, blue: 0.24)
+    static let mid = Color(red: 0.30, green: 0.80, blue: 0.40)
+    static let treble = Color(red: 0.28, green: 0.58, blue: 0.98)
 
     /// Whether there is actually a second waveform to stack -- `mode` can
     /// say `.compare` while blind mode is withholding the processed side,

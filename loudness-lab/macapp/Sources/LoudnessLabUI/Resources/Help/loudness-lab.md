@@ -180,43 +180,67 @@ but a re-encoded MP3 may sit a few milliseconds off the original in Serato.
 
 ## Making an intro for a track that starts cold
 
-A song that opens straight into the groove or the vocal leaves you nowhere
-to mix in. The **Intro** tab, beside Survey and Results, gives it an intro
-made from itself: 8, 16 or 32 bars of the song's own instrumental, then the
-song arriving exactly where it always did, on the beat. It writes copies to
-Music › LoudnessLab › Intro Edits, never over the original.
+A song that opens straight into the groove, or that has a long opening of its
+own before the drop, leaves you nowhere to mix in. The **Intro** tab, beside
+Survey and Results, gives it an intro made from itself: 8, 16 or 32 bars of
+the song's own instrumental, then the song arriving exactly where it always
+did, on the beat. **The song's own opening is cut out and the intro takes its
+place**, so the file goes from the intro straight into the first big
+downbeat. It writes copies to Music › LoudnessLab › Intro Edits, never over
+the original.
 
 1. **Tick the track** in the list, choose it in the Intro tab, and press
    **Analyse**. It separates the song into drums, bass and the rest, which
    takes about half a minute, and finds the beat. After that, choosing and
    rendering takes seconds.
-2. **Choose the loop.** The tab ranks stretches of the song to repeat. Each
+2. **Check where the song starts.** *Where the song starts* shows the track
+   as a picture, bass in red, mids in green, treble in blue. The tool puts
+   the marker where the drums come in: a song that opens at full level starts
+   at its first bar, a song with a soft opening starts at the drop. Everything
+   to the left of the marker, shaded, is replaced by the intro. The top strip
+   is the whole track: click or drag in it to find the drop. The lower strip
+   is zoomed in on the marker, with the bar lines numbered: click or drag in
+   it to place the marker, which always snaps to a bar line, because the song
+   has to arrive on a downbeat. The **Bar** slider and the **−4 −1 +1 +4**
+   buttons move it a bar at a time, **Zoom** sets how many seconds the lower
+   strip shows, and **Suggested** puts it back where the tool chose. An
+   orange dashed line marks the suggestion once you have moved off it. Press
+   **Hear it** to play the original from a few seconds before the marker.
+   If a vocal leads into the drop, the lead-in is kept.
+3. **Choose the loop.** The tab ranks stretches of the song to repeat. Each
    shows how much vocal is in it (*no vocal* is what you want) and how well
    its drums *repeat* one loop later. A repeat score under 0.6 means a build
    or a fill: the seam will not land on the beat, and the tab says so.
    *Grid-timed* means the loop's ends could not be tied to a real kick.
-3. **Choose the lengths** (more than one is fine) and the loop size, and
+4. **Choose the lengths** (more than one is fine) and the loop size, and
    press **Make intro**.
-4. **Press Play the join.** It starts eight seconds before the song arrives,
+5. **Press Play the join.** It starts eight seconds before the song arrives,
    which is where a bad seam or a late downbeat shows. This is the check
    that matters: the numbers can tell you a seam is timed well, but not
    that it sounds right.
 
 The intro is built from the instrumental only, so the vocal is not in it,
 but a stretch where the separation leaked some vocal will carry a little of
-it, and the tab warns when no clean stretch exists. If the song starts with
-a vocal pickup just ahead of the first bar line, the pickup is kept.
+it, and the tab warns when no clean stretch exists.
 
 **Cue points and the beatgrid are not copied** to the new file. They
 describe the song without its intro and would all be an intro's length too
 early. Text tags and artwork do travel; set the cues again in Serato.
 
-It suits tracks that start cold on a steady groove. A song with a long
-opening and no kick drum, or a live record that drifts in tempo, fits less
+The suggestion is only a starting point. It reads the drums, so it can be
+fooled by a song whose drums play under a long opening, or by a drop that is
+quieter than what led into it; that is what the picture is for. It suits
+tracks with a steady groove: a live record that drifts in tempo fits less
 well, and the warnings under the track say when the beat was a guess. In
 Disco Tags, right-click a track and choose **Make Intro Edit…** to open this
-tab on it. **Make intros for all ticked** does the whole selection with the
-best loop for each, at about half a minute a song.
+tab on it. **Make intros for all ticked** does the whole selection, joining
+each where its groove lands and using the best loop, at about half a minute
+a song.
+
+**Memory.** Separating takes a lot of it while it runs. The tab hands it back
+when it is done, and a tab left alone for ten minutes lets go of the track
+altogether. The next thing you do loads it again, which takes the half minute
+once, and nothing is lost: your chosen marker and loop stay where they were.
 
 ## Listening to the result
 
@@ -255,6 +279,10 @@ declined and why. Most of what a good policy does is decline.
 **Replaced the wrong thing, or the cue points are off.** Double-click
 **Restore Originals** and choose the run. Nothing was deleted; every
 original is where the log says.
+
+**An intro that starts in the wrong place.** Move the marker: drag in the
+top strip to find the drop, then place it in the lower strip against the
+downbeat and press **Hear it**. Zero keeps the whole opening.
 
 **An intro whose seam sounds wrong.** Pick a different loop in the list, or
 a longer one. If every option scores low on *repeats*, the song has no

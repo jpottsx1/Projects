@@ -37,12 +37,18 @@ a loop that flams.
 
 from __future__ import annotations
 
+import gc
+import json
+import os
+import select
+import sys
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
 from scipy.ndimage import uniform_filter1d
-from scipy.signal import butter, fftconvolve, sosfiltfilt
+from scipy.signal import butter, fftconvolve, sosfilt, sosfiltfilt
 
 from . import decode, stems, subbass, write
 
@@ -78,6 +84,22 @@ MIN_COHERENCE = 0.6
 # ARE on the one.
 DOWNBEAT_CONFIDENCE = 0.10
 DOWNBEAT_CONFIDENCE_ON_START = 0.25
+
+# Where the groove lands: a bar counts as "full" when the drum stem's level is
+# within this many dB of its body level (the median of the track's middle
+# half), and the song is taken to have arrived at the first bar that starts
+# JOIN_SUSTAIN of them in a row. The bar line to join at is then the biggest
+# jump in level within JOIN_LOOKBACK bars before that, which is the drop's
+# own downbeat: a build that rises over several bars would otherwise be
+# joined late. Drums vary more than a whole mix does, hence -6 and not -3.
+JOIN_FULL_DB = -6.0
+JOIN_SUSTAIN = 4
+JOIN_LOOKBACK = 2
+# A vocal lead-in ahead of a join partway through the song is kept, up to
+# this many half-beats (2 beats), if the vocal there is at least this share
+# of the vocal in the first bar of the song proper.
+PICKUP_STEPS = 4
+PICKUP_SHARE = 0.25
 
 # What a loop source must be: this far under the instrumental in vocal
 # level to count as vocal-free, with drums and body not more than this far
@@ -147,6 +169,10 @@ class Analysis:
     snapped: np.ndarray = field(default_factory=lambda: np.array([], dtype=bool))
     kicks: np.ndarray = field(default_factory=lambda: np.array([], dtype=int))
     envelope: np.ndarray = field(default_factory=lambda: np.array([]))
+    # Which bar line the song should arrive at (an index into `bar_lines`;
+    # 0 is the first bar of the track), and why. See `suggest_join`.
+    suggested_join_bar: int = 0
+    join_reason: str = ""
     warnings: list[str] = field(default_factory=list)
 
 
@@ -369,12 +395,142 @@ def analyse(x: np.ndarray, parts: dict[str, np.ndarray], rate: int,
     if grid.confidence < DOWNBEAT_CONFIDENCE and downbeat_s is None:
         warnings.append("which beat is the bar's first was a guess from the "
                         "song's start; check the join by ear")
-    return Analysis(rate=rate, original=x, instrumental=instrumental,
-                    vocals=parts["vocals"], drums=parts["drums"], grid=grid,
-                    first_sound=first_sound, join=join, pickup=pickup,
-                    bar_lines=bar_lines, snapped=snapped, kicks=kicks,
-                    envelope=uniform_filter1d(drums_abs, max(1, int(0.003 * rate))),
-                    warnings=warnings)
+    analysis = Analysis(
+        rate=rate, original=x, instrumental=instrumental,
+        vocals=parts["vocals"], drums=parts["drums"], grid=grid,
+        first_sound=first_sound, join=join, pickup=pickup,
+        bar_lines=bar_lines, snapped=snapped, kicks=kicks,
+        envelope=uniform_filter1d(drums_abs, max(1, int(0.003 * rate))),
+        warnings=warnings)
+    analysis.suggested_join_bar, analysis.join_reason = suggest_join(analysis)
+    return analysis
+
+
+# ------------------------------------------------------------ where it joins
+
+def suggest_join(a: Analysis) -> tuple[int, str]:
+    """(bar index, why): the bar line where the song's groove lands.
+
+    A track that opens straight into the groove joins at its first bar, as
+    before. One with a long opening of its own (a pad, a fade-in, a soft
+    verse before the drop) joins where the opening ends, and the opening is
+    cut out: the new intro takes its place.
+
+    The drop is where the DRUMS come in, so it is read off the drum stem's
+    level bar by bar, not the whole mix's: a first version judged the mix,
+    and a vocal swelling into the drop made the bar before it look like the
+    arrival. Where the drum stem has nothing to find (a track with no
+    drums), the whole mix is used instead.
+
+    Only a starting point, and meant to be moved: "where the song really
+    begins" is a judgement, and this can be fooled by drums that play under
+    a long opening, or a drop that is quieter than what led into it.
+    """
+    lines = a.bar_lines
+    bars = len(lines) - 1
+    if bars < JOIN_SUSTAIN * 2:
+        return 0, "the track is too short to look for a drop"
+
+    def bar_levels(y: np.ndarray) -> np.ndarray:
+        mono = y.mean(axis=1).astype(np.float64)
+        return np.array([10.0 * np.log10(np.mean(mono[lines[i]:lines[i + 1]] ** 2) + 1e-12)
+                         for i in range(bars)])
+
+    mix = bar_levels(a.original)
+    drums = bar_levels(a.drums)
+    middle = slice(bars // 4, max(bars // 4 + 1, 3 * bars // 4))
+    # Drums to read the drop from, unless they are not really there.
+    use_drums = float(np.median(drums[middle])) > float(np.median(mix[middle])) - 30.0
+    level = drums if use_drums else mix
+    body = float(np.median(level[middle]))
+    full = level >= body + JOIN_FULL_DB
+    arrived = next((i for i in range(bars - JOIN_SUSTAIN + 1)
+                    if full[i:i + JOIN_SUSTAIN].all()), None)
+    if arrived is None:
+        return 0, "nothing holds full level, so the first bar is used"
+    if arrived == 0:
+        return 0, "the track starts at full level"
+    window = range(max(1, arrived - JOIN_LOOKBACK), arrived + 1)
+    best = max(window, key=lambda k: level[k] - level[k - 1])
+    what = "the drums come in" if use_drums else "the groove reaches full level"
+    return int(best), (f"{what} at bar {best} ({lines[best] / a.rate:.1f} s in); "
+                       "the opening before it is replaced")
+
+
+def resolve_join(a: Analysis, join_bar: int) -> tuple[int, int]:
+    """(sample of the join, samples of lead-in kept before it) for a bar.
+
+    Bar 0 is the track's first bar, which keeps the lead-in found from the
+    song's first sound; any later bar looks for a vocal lead-in on the
+    vocal stem. Raises for a bar outside the track."""
+    if not 0 <= join_bar < len(a.bar_lines) - 1:
+        raise ValueError(f"join bar {join_bar} is outside the track "
+                         f"(0 to {len(a.bar_lines) - 2})")
+    join = int(a.bar_lines[join_bar])
+    return join, (a.pickup if join_bar == 0 else pickup_before(a, join))
+
+
+def pickup_before(a: Analysis, join: int) -> int:
+    """Samples of vocal lead-in to keep ahead of a join partway through the
+    song: the original takes over this long before the bar line, so a vocal
+    that starts a beat or two ahead of the drop comes in as it was sung.
+
+    Walks back from the join in half-beat steps while the vocal stem there is
+    at least PICKUP_SHARE of what it is in the first bar after the join, up
+    to PICKUP_STEPS of them. None of it if the song has no vocal there."""
+    step = max(1, int(a.grid.period / 2))
+    vocal = a.vocals.mean(axis=1).astype(np.float64)
+
+    def rms(lo: int, hi: int) -> float:
+        lo, hi = max(0, lo), min(len(vocal), hi)
+        return float(np.sqrt(np.mean(vocal[lo:hi] ** 2))) if hi > lo else 0.0
+
+    reference = rms(join, join + int(a.grid.bar))
+    if reference <= 1e-6:
+        return 0
+    kept = 0
+    for k in range(1, PICKUP_STEPS + 1):
+        if rms(join - k * step, join - (k - 1) * step) >= PICKUP_SHARE * reference:
+            kept = k * step
+        else:
+            break
+    return kept
+
+
+ENVELOPE_PER_SECOND = 50
+
+
+def envelope(a: Analysis, per_second: int = ENVELOPE_PER_SECOND) -> dict:
+    """The finished mix as three bands over time, for drawing the picker.
+
+    Made here, from the same decoded audio the bar lines were found in, so
+    a marker on a bar line sits on the transient it names: a picture decoded
+    separately by another program can start a few tens of milliseconds
+    off (decoders differ about an MP3's priming samples), and at full zoom
+    that is visibly a different place.
+
+    Bass is under 200 Hz, treble over 2 kHz, mid between: round numbers for
+    a picture, the same split the app's waveform uses. RMS in windows of
+    1/per_second, compressed (x ** 0.6) so quiet openings stay visible beside
+    loud drops, on one shared 0-255 scale so the bands' balance is true.
+    """
+    mono = a.original.mean(axis=1).astype(np.float64)
+    rate = a.rate
+    low = sosfilt(butter(2, 200.0, btype="low", fs=rate, output="sos"), mono)
+    high = sosfilt(butter(2, 2000.0, btype="high", fs=rate, output="sos"), mono)
+    mid = mono - low - high
+    size = max(1, rate // per_second)
+    n = len(mono) // size
+
+    def rms(y: np.ndarray) -> np.ndarray:
+        return np.sqrt((y[:n * size].reshape(n, size) ** 2).mean(axis=1))
+
+    bands = {"bass": rms(low), "mid": rms(mid), "treble": rms(high)}
+    ceiling = max(float(np.percentile(np.maximum.reduce(list(bands.values())), 99.5)), 1e-9)
+    scaled = {name: np.clip(np.round(255 * (v / ceiling) ** 0.6), 0, 255).astype(int)
+              for name, v in bands.items()}
+    return {"per_second": rate / size, "seconds": len(mono) / rate,
+            **{name: values.tolist() for name, values in scaled.items()}}
 
 
 # ------------------------------------------------------------ loop sources
@@ -541,7 +697,8 @@ def _fade(n: int) -> tuple[np.ndarray, np.ndarray]:
 
 
 def render(a: Analysis, bars: int, source: Source,
-           loop_bars: int = DEFAULT_LOOP_BARS) -> tuple[np.ndarray, dict]:
+           loop_bars: int = DEFAULT_LOOP_BARS,
+           join_bar: int | None = None) -> tuple[np.ndarray, dict]:
     """The intro edit: (audio, info). `bars` of the instrumental loop, then
     the original from its pickup / downbeat on.
 
@@ -558,6 +715,12 @@ def render(a: Analysis, bars: int, source: Source,
     if bars % loop_bars:
         raise ValueError(f"{bars} bars is not a whole number of "
                          f"{loop_bars}-bar loops")
+    # Where the song arrives. Everything of the original before it is cut
+    # out and the intro takes its place: the song's own opening is not in
+    # the file. None means where the full groove lands (`suggest_join`).
+    if join_bar is None:
+        join_bar = a.suggested_join_bar
+    join, pickup = resolve_join(a, join_bar)
     rate, g = a.rate, a.grid
     bar = g.bar
     seam = max(8, int(SEAM_S * rate))
@@ -572,7 +735,7 @@ def render(a: Analysis, bars: int, source: Source,
     unit = source.length or int(round(loop_bars * bar))
     repeats = bars // loop_bars
     join_out = repeats * unit                    # grid coordinates; the file
-    shift = join_out - a.join                    # adds `lead` at the end
+    shift = join_out - join                      # adds `lead` at the end
     total = n + shift
     mono_in = a.instrumental
 
@@ -600,7 +763,7 @@ def render(a: Analysis, bars: int, source: Source,
     # downbeat), minus the guard. With room before it, it fades in over a
     # seam while the loop fades out; with none (a track that starts on the
     # kick) it simply begins and the loop has finished.
-    o_start = max(0, a.join - a.pickup - guard)
+    o_start = max(0, join - pickup - guard)
     fade_len = min(seam, o_start)
     o0 = o_start - fade_len
     out_o = o_start + shift + lead               # file coordinates
@@ -630,8 +793,11 @@ def render(a: Analysis, bars: int, source: Source,
         "loop_bars": loop_bars,
         "seconds_of_intro": round(join_out / rate, 3),
         "lead_seconds": round(lead / rate, 4),
-        "join_seconds": round(a.join / rate, 3),
-        "pickup_seconds": round(a.pickup / rate, 3),
+        "join_bar": join_bar,
+        "join_seconds": round(join / rate, 3),
+        "pickup_seconds": round(pickup / rate, 3),
+        "suggested_join_bar": a.suggested_join_bar,
+        "cut_seconds": round(max(0, join - pickup) / rate, 3),
         "source_bar": source.bar,
         "source_seconds": round(source.seconds, 3),
         "source_vocal_db": None if np.isnan(source.vocal_db) else round(source.vocal_db, 1),
@@ -663,6 +829,28 @@ PREFERRED_SEPARATORS = ("demucs-mlx", "demucs")
 SEPARATOR_OPTIONS = {"batch": 1, "shifts": 0, "overlap": 0.25}
 
 
+def release_memory() -> None:
+    """Hand back what separating leaves held.
+
+    MLX and PyTorch both keep the GPU buffers a separation used, in a cache,
+    in case the next one wants them. For a process that separates once and
+    sits waiting for a person that is not a cache, it is several gigabytes of
+    a 16 GB Mac held for as long as the session lives. Cleared after every
+    separation, and when a session lets its track go."""
+    gc.collect()
+    try:
+        import mlx.core as mx
+        mx.clear_cache()
+    except Exception:                              # noqa: BLE001 - not installed, or older
+        pass
+    torch = sys.modules.get("torch")
+    if torch is not None:
+        try:
+            torch.mps.empty_cache()
+        except Exception:                          # noqa: BLE001 - no MPS here
+            pass
+
+
 def separate(x: np.ndarray, rate: int, separator: str | None = None) -> dict:
     """The four stems, from MLX where it is there and PyTorch otherwise.
     A failure of the first falls through to the second."""
@@ -672,12 +860,15 @@ def separate(x: np.ndarray, rate: int, separator: str | None = None) -> dict:
         raise RuntimeError("no stem separator is installed (Demucs); run "
                            "setup.sh or `pip install demucs`")
     last: Exception | None = None
-    for backend in order:
-        try:
-            return stems.separate(x, rate, backend, options=SEPARATOR_OPTIONS)
-        except Exception as exc:                  # noqa: BLE001 - try the next
-            last = exc
-    raise RuntimeError(f"stem separation failed: {last}")
+    try:
+        for backend in order:
+            try:
+                return stems.separate(x, rate, backend, options=SEPARATOR_OPTIONS)
+            except Exception as exc:              # noqa: BLE001 - try the next
+                last = exc
+        raise RuntimeError(f"stem separation failed: {last}")
+    finally:
+        release_memory()
 
 
 def default_format(source: Path) -> str:
@@ -714,6 +905,13 @@ def write_intro(a: Analysis, source_file: Path, audio: np.ndarray, bars: int,
 
 
 # ------------------------------------------------------------------ a session
+
+class NoTrack(RuntimeError):
+    """Asked for something that needs a prepared track, and none is held:
+    never prepared, or let go after sitting idle. `code` is what a program
+    keys on, so it can prepare again and retry instead of reading prose."""
+    code = "no_track"
+
 
 class Session:
     """One separated track held in memory, answering requests.
@@ -752,32 +950,50 @@ class Session:
                 self._prepare(request, say)
             elif command == "sources":
                 self._sources(request, say)
+            elif command == "release":
+                self.release()
+                say("released", reason="asked")
+            elif command == "envelope":
+                say("envelope", **envelope(self._need(),
+                                           int(request.get("per_second", ENVELOPE_PER_SECOND))))
             elif command == "render":
                 self._render(request, say)
             else:
                 raise ValueError(f"unknown command {command!r}")
             say("done")
         except Exception as exc:                  # noqa: BLE001
-            say("error", message=str(exc))
+            say("error", message=str(exc), code=getattr(exc, "code", None))
         return True
+
+    def release(self) -> None:
+        """Let the held track go, with the memory it took. The process stays
+        and can prepare another."""
+        self.analysis, self.path = None, None
+        release_memory()
 
     def _need(self) -> Analysis:
         if self.analysis is None:
-            raise RuntimeError("no track is prepared: send `prepare` first")
+            raise NoTrack("no track is prepared: send `prepare` first")
         return self.analysis
 
     def _prepare(self, request: dict, say) -> None:
         path = Path(request["path"])
-        self.analysis, self.path = None, None     # let the last one go first
+        self.release()                             # let the last one go first
         say("stage", stage="separating", name=path.name)
         a = prepare(path, bpm=request.get("bpm"),
                     downbeat_s=request.get("downbeat"),
                     separator=request.get("separator"))
         self.analysis, self.path = a, path
+        join, pickup = resolve_join(a, a.suggested_join_bar)
         say("prepared", path=str(path), name=path.name,
             seconds=round(len(a.original) / a.rate, 3),
-            bpm=round(a.grid.bpm, 3), join_seconds=round(a.join / a.rate, 3),
-            pickup_seconds=round(a.pickup / a.rate, 3),
+            bpm=round(a.grid.bpm, 3),
+            first_bar_seconds=round(a.join / a.rate, 3),
+            suggested_join_bar=a.suggested_join_bar,
+            join_reason=a.join_reason,
+            join_seconds=round(join / a.rate, 3),
+            pickup_seconds=round(pickup / a.rate, 3),
+            bar_seconds=[round(float(t) / a.rate, 3) for t in a.bar_lines],
             downbeat_from=a.grid.how, grid_coherence=round(a.grid.coherence, 3),
             bars_after_join=len(a.bar_lines) - 1, warnings=list(a.warnings))
 
@@ -800,7 +1016,9 @@ class Session:
                 raise ValueError("the track is too short to take a loop from")
             source = found[0]
         say("stage", stage="rendering", name=self.path.name)
-        audio, info = render(a, bars, source, loop_bars)
+        join_bar = request.get("join_bar")
+        audio, info = render(a, bars, source, loop_bars,
+                             None if join_bar is None else int(join_bar))
         out_dir = Path(request["out"]) if request.get("out") else self.out_dir
         target = write_intro(a, self.path, audio, bars, out_dir,
                              request.get("format"))
@@ -818,3 +1036,95 @@ def source_fields(s: Source) -> dict:
         "repeat": round(float(s.repeat), 2),
         "snapped": bool(s.snapped),
     }
+
+
+# ----------------------------------------------------------------- serving
+
+EOF_LINE = object()
+TIMED_OUT = object()
+# A session that nobody has asked anything of for ten minutes lets its track
+# go (about 6 GB on the Mac this was measured on, between the stems, the
+# analysis and the GPU's buffers), and after half an hour exits. The app
+# starts another when it is next wanted and prepares the track again, which
+# is half a minute against a Mac that has been out of memory for the hour
+# between.
+IDLE_RELEASE_S = 600.0
+IDLE_EXIT_S = 1800.0
+
+
+class FdLines:
+    """Lines from a file descriptor, with a timeout on waiting for one.
+
+    `select` on the descriptor and our own buffer, not `for line in
+    sys.stdin`: Python's text buffer can hold a line the descriptor no longer
+    reports as readable, and a wait that misses it hangs a request."""
+
+    def __init__(self, fd: int):
+        self.fd, self.buffer, self.closed = fd, b"", False
+
+    def read(self, timeout: float | None):
+        while True:
+            if b"\n" in self.buffer:
+                line, self.buffer = self.buffer.split(b"\n", 1)
+                return line.decode("utf-8", errors="replace")
+            if self.closed:
+                rest, self.buffer = self.buffer, b""
+                return rest.decode("utf-8", errors="replace") if rest else EOF_LINE
+            ready, _, _ = select.select([self.fd], [], [], timeout)
+            if not ready:
+                return TIMED_OUT
+            chunk = os.read(self.fd, 65536)
+            if chunk:
+                self.buffer += chunk
+            else:
+                self.closed = True
+
+
+class IterLines:
+    """The same, over an iterable of lines (no timeout can occur)."""
+
+    def __init__(self, lines):
+        self.lines = iter(lines)
+
+    def read(self, timeout: float | None):
+        return next(self.lines, EOF_LINE)
+
+
+def serve(session: Session, source, emit, release_after: float | None = IDLE_RELEASE_S,
+          exit_after: float | None = IDLE_EXIT_S, clock=time.monotonic) -> None:
+    """Answer requests from `source` until it ends, `quit`, or sitting idle
+    for `exit_after`. After `release_after` idle the held track is let go
+    (an event says so); either may be None to turn it off."""
+    last = clock()
+    while True:
+        idle = clock() - last
+        waits = []
+        if release_after is not None and session.analysis is not None:
+            waits.append(release_after - idle)
+        if exit_after is not None:
+            waits.append(exit_after - idle)
+        line = source.read(max(0.0, min(waits)) if waits else None)
+        if line is EOF_LINE:
+            return
+        if line is TIMED_OUT:
+            idle = clock() - last
+            if exit_after is not None and idle >= exit_after:
+                emit({"event": "exit", "id": None, "reason": "idle"})
+                return
+            if (release_after is not None and session.analysis is not None
+                    and idle >= release_after):
+                session.release()
+                emit({"event": "released", "id": None, "reason": "idle"})
+            continue
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            request = json.loads(line)
+        except json.JSONDecodeError as exc:
+            emit({"event": "error", "id": None, "message": f"not JSON: {exc}"})
+            continue
+        keep_going = session.handle(request, emit)
+        last = clock()                      # idle is counted from the answer, not the ask
+        if not keep_going:
+            return

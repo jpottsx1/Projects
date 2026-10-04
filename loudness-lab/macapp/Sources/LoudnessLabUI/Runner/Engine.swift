@@ -85,6 +85,25 @@ final class Engine: ObservableObject {
     }
 
 
+    /// Tells any host embedding this view what a compare run wrote, and
+    /// remembers it for a window opened after a relaunch. Built from the
+    /// manifest's own "processed" variant rather than the first non-original
+    /// one -- a manifest can carry more than two variants once comparison
+    /// grows a third option, and "processed" is the one name that is
+    /// guaranteed to mean the finished render.
+    private func reportFinishedRun(_ manifest: Manifest) {
+        let outputs = manifest.tracks.compactMap { track -> LoudnessRun.Output? in
+            guard let processed = track.variants.first(where: { $0.kind == "processed" })
+            else { return nil }
+            return LoudnessRun.Output(source: URL(fileURLWithPath: track.source),
+                                       processed: processed.url, name: track.name)
+        }
+        guard !outputs.isEmpty else { return }
+        let run = LoudnessRun(date: Date(), outputs: outputs)
+        run.persist()
+        NotificationCenter.default.post(name: .loudnessLabRunFinished, object: run)
+    }
+
     func cancel() { flag.cancel() }
 
     func say(_ line: String) { log += line + "\n" }
@@ -420,6 +439,12 @@ final class Engine: ObservableObject {
             // sample-aligned, and that claim belongs to whoever wrote them.
             if let path = outcome.manifestPath {
                 manifest = try Manifest.read(URL(fileURLWithPath: path))
+                // Only for a run that left both sides on disk -- a
+                // `--replace-originals` run has already done that job
+                // itself and has no separate original left to hand back.
+                if !replaceOriginals, let manifest {
+                    reportFinishedRun(manifest)
+                }
             } else {
                 say("Nothing was written -- every track was already at the "
                     + "reference, or gated out.")

@@ -1,0 +1,278 @@
+import Foundation
+
+/// The Intro tab's state, and what drives it.
+///
+/// A track is PREPARED once (half a minute: it is separated into stems and
+/// its beat grid found) and the process holding it stays up, so choosing a
+/// loop, rendering a length and rendering another are seconds each. Batch
+/// runs over many tracks do not need that and go through the one-shot
+/// command instead, which separates, renders and moves on.
+@MainActor
+final class IntroEngine: ObservableObject {
+
+    /// A prepared track, as the tool reports it.
+    struct Track: Equatable {
+        let path: String
+        let name: String
+        let seconds: Double
+        let bpm: Double
+        let joinSeconds: Double
+        let pickupSeconds: Double
+        let downbeatFrom: String
+        let barsAfterJoin: Int
+        let warnings: [String]
+    }
+
+    /// One finished intro file.
+    struct Render: Identifiable, Equatable {
+        let url: URL
+        let bars: Int
+        let loopBars: Int
+        /// Where in the file the original begins, for playing the join.
+        let joinSeconds: Double
+        let introSeconds: Double
+        let sourceBar: Int
+        let sourceSeconds: Double
+        let vocalDB: Double?
+        let vocalFree: Bool
+        let repeatScore: Double
+        let warnings: [String]
+
+        var id: String { url.path }
+        var name: String { url.deletingPathExtension().lastPathComponent }
+    }
+
+    /// How a batch is going.
+    struct Batch: Equatable {
+        var index = 0
+        var total = 0
+        var name = ""
+        var finished: [Render] = []
+        var failures: [String] = []
+    }
+
+    @Published private(set) var track: Track?
+    @Published private(set) var sources: [IntroSource] = []
+    /// Nil means the best-ranked stretch, which is what a render uses when
+    /// nothing has been picked.
+    @Published var chosenBar: Int?
+    @Published var lengths: Set<Int> = [16]
+    @Published var loopBars = 4 {
+        didSet { if oldValue != loopBars, track != nil { Task { await loadSources() } } }
+    }
+    @Published private(set) var renders: [Render] = []
+    /// A sentence saying what is happening, nil when idle. Non-nil also
+    /// means the controls are disabled: one request at a time.
+    @Published private(set) var busy: String?
+    @Published private(set) var batch: Batch?
+    @Published private(set) var failure: String?
+    @Published private(set) var playing: Render.ID?
+    /// The track a host asked to have selected. The panel follows it when it
+    /// changes, and picks it up on appearing if it was set before.
+    @Published var focusPath: String?
+
+    let player = ABPlayer()
+    private var session: IntroSession?
+    private let flag = Engine.CancelFlag()
+
+    var isBusy: Bool { busy != nil }
+    var toolMissing: Bool { CLI.locate() == nil }
+
+    /// The few seconds either side of the join that are worth hearing.
+    static let auditionLead = 8.0
+
+    // MARK: - One track
+
+    /// Separate the track and find its grid. Replaces any track already held.
+    func prepare(_ path: String) async {
+        guard !isBusy else { return }
+        guard let tool = CLI.locate() else { failure = CLI.missing; return }
+        failure = nil
+        stopPlaying()
+        track = nil; sources = []; chosenBar = nil
+        if session == nil { session = IntroSession(tool: tool) }
+        busy = "Separating into stems… about half a minute."
+        defer { busy = nil }
+        do {
+            let events = try await session!.request(
+                "prepare", ["path": path], onEvent: { [weak self] event in
+                    guard event.event == "stage", let stage = event.stage else { return }
+                    Task { @MainActor in self?.stage(stage) }
+                })
+            guard let prepared = events.first(where: { $0.event == "prepared" }) else {
+                failure = "The intro tool did not report the track."
+                return
+            }
+            track = Track(path: prepared.path ?? path,
+                          name: prepared.name ?? URL(fileURLWithPath: path).lastPathComponent,
+                          seconds: prepared.seconds ?? 0,
+                          bpm: prepared.bpm ?? 0,
+                          joinSeconds: prepared.joinSeconds ?? 0,
+                          pickupSeconds: prepared.pickupSeconds ?? 0,
+                          downbeatFrom: prepared.downbeatFrom ?? "",
+                          barsAfterJoin: prepared.barsAfterJoin ?? 0,
+                          warnings: prepared.warnings ?? [])
+            await loadSources(whileBusy: true)
+        } catch {
+            failure = error.localizedDescription
+            session?.close(); session = nil
+        }
+    }
+
+    private func stage(_ name: String) {
+        switch name {
+        case "separating": busy = "Separating into stems… about half a minute."
+        case "rendering": busy = "Rendering…"
+        default: break
+        }
+    }
+
+    func loadSources(whileBusy: Bool = false) async {
+        guard let session, track != nil else { return }
+        if !whileBusy {
+            guard !isBusy else { return }
+            busy = "Finding loops…"
+        }
+        defer { if !whileBusy { busy = nil } }
+        do {
+            let events = try await session.request("sources", ["loop_bars": loopBars, "count": 5])
+            sources = events.first(where: { $0.event == "sources" })?.sources ?? []
+            if let chosenBar, !sources.contains(where: { $0.bar == chosenBar }) {
+                self.chosenBar = nil
+            }
+        } catch { failure = error.localizedDescription }
+    }
+
+    /// Render every chosen length from the held track.
+    func render(to outputDirectory: URL?) async {
+        guard let session, track != nil, !isBusy, !lengths.isEmpty else { return }
+        failure = nil
+        defer { busy = nil }
+        for bars in lengths.sorted() {
+            busy = "Rendering \(bars) bars…"
+            var fields: [String: Any] = ["bars": bars, "loop_bars": loopBars]
+            if let chosenBar { fields["source_bar"] = chosenBar }
+            if let outputDirectory { fields["out"] = outputDirectory.path }
+            do {
+                let events = try await session.request("render", fields)
+                if let made = events.first(where: { $0.event == "intro" }),
+                   let render = Self.render(from: made) {
+                    renders.removeAll { $0.id == render.id }
+                    renders.insert(render, at: 0)
+                }
+            } catch {
+                failure = error.localizedDescription
+                return
+            }
+        }
+    }
+
+    // MARK: - Listening
+
+    /// Plays a finished file from `offset`. Without one, from a few seconds
+    /// before the original arrives, because the join is the moment to judge.
+    func play(_ render: Render, from offset: Double? = nil) {
+        if playing != render.id {
+            player.loadOrReport([ABPlayer.Source(id: render.id, label: render.name,
+                                                 url: render.url, matchGainDB: 0)])
+            playing = render.id
+        }
+        let start = offset ?? max(0, render.joinSeconds - Self.auditionLead)
+        player.play(from: start)
+    }
+
+    func stopPlaying() {
+        player.stop()
+        playing = nil
+    }
+
+    // MARK: - Many tracks
+
+    /// Separate and render each of `paths` in turn with the best loop, through
+    /// the one-shot command. Skips the held session: that is for choosing, and
+    /// holding a track's stems while a crate goes through would double the
+    /// memory for nothing.
+    func renderBatch(_ paths: [String], to outputDirectory: URL?) async {
+        guard !isBusy, !paths.isEmpty, !lengths.isEmpty else { return }
+        guard let tool = CLI.locate() else { failure = CLI.missing; return }
+        failure = nil
+        stopPlaying()
+        session?.close(); session = nil; track = nil; sources = []
+        flag.reset()
+        batch = Batch(total: paths.count)
+        busy = "Working through \(paths.count) track\(paths.count == 1 ? "" : "s")…"
+        defer { busy = nil }
+
+        var arguments = ["intro"] + paths
+        arguments += ["--bars"] + lengths.sorted().map(String.init)
+        arguments += ["--loop-bars", String(loopBars), "--json"]
+        if let outputDirectory { arguments += ["--out", outputDirectory.path] }
+
+        do {
+            try await CLI.run(tool, arguments, isCancelled: { [flag] in flag.isCancelled }) { [weak self] line in
+                guard let event = IntroEvent(line) else { return }
+                Task { @MainActor in self?.apply(batchEvent: event) }
+            }
+        } catch {
+            // A non-zero exit is how the tool says "at least one track
+            // failed"; each failure arrived as its own event, so only
+            // something with no such event is worth saying again.
+            if batch?.failures.isEmpty ?? true { failure = error.localizedDescription }
+        }
+        if let finished = batch?.finished { renders = finished.reversed() + renders }
+    }
+
+    func cancelBatch() { flag.cancel() }
+
+    private func apply(batchEvent event: IntroEvent) {
+        switch event.event {
+        case "file":
+            batch?.index = event.index ?? batch?.index ?? 0
+            batch?.total = event.total ?? batch?.total ?? 0
+            batch?.name = event.name ?? ""
+        case "intro":
+            if let render = Self.render(from: event) { batch?.finished.append(render) }
+        case "error":
+            batch?.failures.append("\(event.name ?? "A track"): \(event.message ?? "failed")")
+        default: break
+        }
+    }
+
+    func reset() {
+        stopPlaying()
+        session?.close(); session = nil
+        track = nil; sources = []; chosenBar = nil; batch = nil; failure = nil
+    }
+
+    nonisolated static func render(from event: IntroEvent) -> Render? {
+        guard let output = event.output, let bars = event.bars else { return nil }
+        return Render(url: URL(fileURLWithPath: output), bars: bars,
+                      loopBars: event.loopBars ?? 4,
+                      joinSeconds: event.joinInOutput ?? 0,
+                      introSeconds: event.secondsOfIntro ?? 0,
+                      sourceBar: event.sourceBar ?? 0,
+                      sourceSeconds: event.sourceSeconds ?? 0,
+                      vocalDB: event.sourceVocalDB,
+                      vocalFree: event.vocalFree ?? false,
+                      repeatScore: event.loopRepeat ?? 0,
+                      warnings: event.warnings ?? [])
+    }
+}
+
+#if DEBUG
+extension IntroEngine {
+    /// Puts the engine in a state the UI can be looked at in, without
+    /// running anything: for the snapshot test, which exists because layout
+    /// cannot be judged from code.
+    func seedForSnapshot(track: Track?, sources: [IntroSource] = [],
+                         renders: [Render] = [], busy: String? = nil,
+                         batch: Batch? = nil, failure: String? = nil) {
+        self.track = track
+        self.sources = sources
+        self.renders = renders
+        self.busy = busy
+        self.batch = batch
+        self.failure = failure
+    }
+}
+#endif

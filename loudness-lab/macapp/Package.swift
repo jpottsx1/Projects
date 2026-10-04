@@ -46,6 +46,12 @@ let package = Package(
                           dependencies: ["LoudnessLabUI"],
                           path: "Sources/LoudnessLabApp"),
 
+        // The intro tab's plumbing: decoding what the Python says, and the
+        // session that talks to it, against a stand-in tool.
+        .testTarget(name: "LoudnessLabUITests",
+                    dependencies: ["LoudnessLabUI"],
+                    path: "Tests/LoudnessLabUITests"),
+
         .testTarget(name: "LoudnessKitTests",
                     dependencies: ["LoudnessKit"],
                     path: "Tests/LoudnessKitTests",

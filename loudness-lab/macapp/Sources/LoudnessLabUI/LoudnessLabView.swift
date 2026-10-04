@@ -19,6 +19,7 @@ public struct LoudnessLabView: View {
     private let folders: [URL]
     private let include: Set<String>?
     private let showsSplash: Bool
+    private let introFocus: URL?
 
     /// - Parameters:
     ///   - folders: folders to scan on appear. Empty leaves the view as the
@@ -27,21 +28,28 @@ public struct LoudnessLabView: View {
     ///     queue's own default, which is everything it found.
     ///   - showsSplash: the standalone app's splash. Off by default,
     ///     because a splash screen inside another app's tab is a mistake.
+    ///   - introFocus: open on the Intro tab with this track selected, for a
+    ///     host whose "make an intro edit" action is what created the view.
+    ///     (A view that already exists is told with `LoudnessLab.showIntro`;
+    ///     a notification posted before it exists is simply lost.)
     public init(
         folders: [URL] = [],
         include: Set<String>? = nil,
-        showsSplash: Bool = false
+        showsSplash: Bool = false,
+        introFocus: URL? = nil
     ) {
         self.folders = folders
         self.include = include
         self.showsSplash = showsSplash
+        self.introFocus = introFocus
     }
 
     @State private var splashVisible: Bool?
 
     public var body: some View {
         ZStack {
-            ContentView(initialFolders: folders, initialInclude: include)
+            ContentView(initialFolders: folders, initialInclude: include,
+                        initialIntroFocus: introFocus)
             if splashVisible ?? showsSplash {
                 SplashView { splashVisible = false }
                     .transition(.opacity)
@@ -68,4 +76,30 @@ public struct LoudnessLabHelpView: View {
 extension Notification.Name {
     public static let switchVersion = Notification.Name("loudnesslab.switchVersion")
     public static let showHelp = Notification.Name("loudnesslab.showHelp")
+    /// Posted by `LoudnessLab.addSources`, carrying `[URL]` as `object`.
+    public static let loudnessLabAddSources = Notification.Name("loudnesslab.addSources")
+    /// Posted by `LoudnessLab.showIntro`: switches the right pane to Intro.
+    public static let loudnessLabShowIntro = Notification.Name("loudnesslab.showIntro")
+}
+
+/// Commands a host can send into an already-embedded `LoudnessLabView`,
+/// once it is showing and its queue already holds something of its own.
+public enum LoudnessLab {
+    /// Ticks the given files in the live queue, on top of whatever is
+    /// already ticked. Unlike handing `include` to a fresh `LoudnessLabView`,
+    /// this leaves the queue, survey and A/B player exactly as they are --
+    /// for a host that already has the view open and wants to add more to
+    /// it without throwing away what's there.
+    public static func addSources(_ urls: [URL]) {
+        NotificationCenter.default.post(name: .loudnessLabAddSources, object: urls)
+    }
+
+    /// Shows the Intro tab, which makes intro edits from the ticked tracks.
+    /// A host pairs it with `addSources` to say "make intros for these".
+    /// `focus` is the track the tab should have selected, which is not
+    /// necessarily the first ticked one: someone who right-clicked one song
+    /// means that song.
+    public static func showIntro(focus: URL? = nil) {
+        NotificationCenter.default.post(name: .loudnessLabShowIntro, object: focus)
+    }
 }

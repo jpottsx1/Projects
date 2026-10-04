@@ -33,6 +33,30 @@ final class Queue: ObservableObject {
     /// a track the user had unticked.
     private var excluded: Set<String> = []
     private var token = 0
+    /// Files a host sent that no scanned folder contains (a track from a
+    /// crate, a single file). Kept apart from the scan so a refresh, which
+    /// rebuilds `items` from the folders, does not drop them.
+    private var added: [Item] = []
+
+    /// Adds files the host wants worked on and ticks them. A path the queue
+    /// already holds is just ticked; one it does not hold used to be ignored
+    /// silently, which looked like "Send to Loudness Lab does nothing".
+    func adopt(_ urls: [URL]) {
+        for url in urls {
+            let path = url.path
+            if items.contains(where: { $0.path == path }) {
+                setIncluded(true, for: path)
+                continue
+            }
+            let item = Item(path: path,
+                            name: url.deletingPathExtension().lastPathComponent,
+                            folder: "Sent from Disco Tags")
+            added.removeAll { $0.path == path }
+            added.append(item)
+            excluded.remove(path)
+            items.append(item)
+        }
+    }
 
     var includedPaths: Set<String> {
         Set(items.filter(\.included).map(\.path))
@@ -68,7 +92,7 @@ final class Queue: ObservableObject {
             // Cleared, so the remembered ticks go too. Keeping them would
             // mean a track unticked weeks ago silently staying out of a run
             // its folder was added back for.
-            items = []; note = nil; scanning = false; excluded = []
+            items = added; note = nil; scanning = false; excluded = []
             return
         }
         scanning = true
@@ -142,7 +166,8 @@ final class Queue: ObservableObject {
             }
         }
 
-        items = rows
+        let scanned = Set(rows.map(\.path))
+        items = rows + added.filter { !scanned.contains($0.path) }
         note = Queue.note(found: rows.count, skipped: skipped, errors: errors)
     }
 

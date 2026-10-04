@@ -101,6 +101,17 @@ enum JoinMath {
     }
 
     /// "1:25.6", for reading a time off the picker.
+    /// A position in a rendered file as a position in the original. Before the
+    /// song arrives the file is the new intro, so the playhead sweeps the part
+    /// of the original it replaces (0...cut) in proportion; after it, the file
+    /// and the original run together from the cut.
+    static func playhead(atFileTime t: Double, songArrivesAt arrival: Double,
+                         cutSeconds cut: Double) -> Double {
+        guard arrival > 0 else { return cut + max(0, t) }
+        if t < arrival { return cut * max(0, t) / arrival }
+        return cut + (t - arrival)
+    }
+
     static func clock(_ seconds: Double) -> String {
         let tenths = Int((max(0, seconds) * 10).rounded())
         return String(format: "%d:%02d.%d", tenths / 600, (tenths / 10) % 60, tenths % 10)

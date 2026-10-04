@@ -86,6 +86,10 @@ final class IntroEngine: ObservableObject {
     /// The track a host asked to have selected. The panel follows it when it
     /// changes, and picks it up on appearing if it was set before.
     @Published var focusPath: String?
+    /// Bumped on every request, so asking for the track already named
+    /// still moves the picker back to it.
+    @Published private(set) var focusTick = 0
+    func focus(_ path: String) { focusPath = path; focusTick += 1 }
 
     let player = ABPlayer()
     private var session: IntroSession?
@@ -254,6 +258,18 @@ final class IntroEngine: ObservableObject {
         }
         let join = JoinMath.seconds(ofBar: joinBar, in: track.barSeconds)
         player.play(from: offset ?? max(0, join - Self.auditionLead))
+    }
+
+    /// Where the playhead belongs on the ORIGINAL's timeline, for whatever is
+    /// playing now. The original plays as itself. A rendered intro plays the
+    /// new intro first, which has no place in the original, so it sweeps the
+    /// replaced stretch, and then follows the song from the join on.
+    func originalTime(atPlayerPosition position: Double) -> Double? {
+        guard let playing else { return nil }
+        if let track, playing == track.path { return position }
+        guard let render = renders.first(where: { $0.id == playing }) else { return nil }
+        return JoinMath.playhead(atFileTime: position, songArrivesAt: render.joinSeconds,
+                                 cutSeconds: render.cutSeconds)
     }
 
     func stopPlaying() {

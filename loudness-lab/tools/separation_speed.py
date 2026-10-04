@@ -34,7 +34,9 @@ import resource
 import subprocess
 import sys
 import tempfile
+import threading
 import time
+from collections import deque
 from pathlib import Path
 
 import numpy as np
@@ -51,12 +53,21 @@ RATE = decode.TARGET_RATE
 # is Demucs's own default, kept as the yardstick for how much a result
 # may move and still count as the same. "MLX" is the same htdemucs
 # rewritten for Apple's MLX (the demucs-mlx package), said to be 2.6x
-# faster on the graphics chip; 2 at once is its own recommendation.
+# faster on the graphics chip, run one piece at a time.
+#
+# MLX at 2 pieces at once (the package's own recommendation) was in this
+# list and is gone, for what it costs and what it can no longer tell us.
+# On Jeff's 16 GB Mac it runs out of memory and swaps: 729 s for three
+# songs (2026-09-29), then 801 s for ONE 3.7-minute song with 5.4 GB
+# swapped (2026-10-04), against 16 s at one piece -- ten minutes of the
+# test spent on a way that is never going to be recommended, with the
+# Mac thrashing meanwhile. Both reports agree, so there is nothing left
+# for it to settle. A machine with the memory for it is not this one;
+# put `("MLX, 2 at once", "demucs-mlx", {"batch": 2, ...})` back there.
 CONFIGS = [
     ("now", "demucs", {"batch": 1, "shifts": 0, "overlap": 0.25}),
     ("random shift", "demucs", {"batch": 1, "shifts": 1, "overlap": 0.25}),
-    ("MLX", "demucs-mlx", {"batch": 2, "shifts": 0, "overlap": 0.25}),
-    ("MLX, 1 at once", "demucs-mlx", {"batch": 1, "shifts": 0, "overlap": 0.25}),
+    ("MLX", "demucs-mlx", {"batch": 1, "shifts": 0, "overlap": 0.25}),
 ]
 REFERENCE = "now"              # deterministic, so the others compare to it
 YARDSTICK = "random shift"
@@ -158,7 +169,11 @@ def one_way(name: str, files: list[Path], save: Path) -> dict:
         pass
     swap_before = swap_used_mb()
     seconds, drums, devices = 0.0, [], set()
-    for x in tracks:
+    for number, x in enumerate(tracks, 1):
+        # To stderr, which the parent passes straight through: a way that
+        # takes minutes must not look like a crash (Jeff, 2026-09-29).
+        print(f"      {name}: song {number} of {len(tracks)}...",
+              file=sys.stderr, flush=True)
         started = time.monotonic()
         try:
             separated = stems.separate(x, RATE, backend, options=options)
@@ -179,6 +194,35 @@ def one_way(name: str, files: list[Path], save: Path) -> dict:
     return result
 
 
+def _run_child(command: list[str], keep: int = 3) -> tuple[str, list[str]]:
+    """Run one way's process; return (its stdout, the last `keep` lines of
+    its stderr).
+
+    stderr is shown AS IT ARRIVES -- a way that takes minutes must not look
+    like a crash (Jeff, 2026-09-29) -- and also kept. Passing it straight
+    through alone lost the second half: when a way dies, its traceback is on
+    stderr, and the report's "failed:" text used to quote it and then said
+    only "stopped". A thread drains stderr so a full pipe can never stall
+    the child while stdout is read."""
+    tail: deque[str] = deque(maxlen=keep)
+    child = subprocess.Popen(command, stdout=subprocess.PIPE,
+                             stderr=subprocess.PIPE, text=True)
+
+    def pump() -> None:
+        for line in child.stderr:
+            sys.stderr.write(line)
+            sys.stderr.flush()
+            if line.strip():
+                tail.append(line.rstrip())
+
+    reader = threading.Thread(target=pump, daemon=True)
+    reader.start()
+    stdout = child.stdout.read()
+    child.wait()
+    reader.join()
+    return stdout, list(tail)
+
+
 def run(folder: Path, songs: int = 3, out=print) -> str:
     files = decode.find_audio(folder)[:songs]
     if not files:
@@ -192,14 +236,17 @@ def run(folder: Path, songs: int = 3, out=print) -> str:
     with tempfile.TemporaryDirectory() as scratch:
         for name, _, _ in CONFIGS:
             save = Path(scratch) / f"{len(rows)}.npz"
-            done = subprocess.run(
+            out(f"  {name}: starting (a fresh process, loading the model)")
+            stdout, stderr_tail = _run_child(
                 [sys.executable, "-u", str(Path(__file__).resolve()), str(folder),
-                 "--songs", str(songs), "--one", name, "--save", str(save)],
-                capture_output=True, text=True)
+                 "--songs", str(songs), "--one", name, "--save", str(save)])
             try:
-                row = json.loads(done.stdout.strip().splitlines()[-1])
+                row = json.loads(stdout.strip().splitlines()[-1])
             except (IndexError, json.JSONDecodeError):
-                tail = (done.stderr or done.stdout).strip().splitlines()[-3:]
+                # What the child said as it died: its traceback is on
+                # stderr, which is why stderr is kept (as well as shown)
+                # and not only passed through.
+                tail = stderr_tail or (stdout or "").strip().splitlines()[-3:]
                 row = {"name": name, "seconds": None, "devices": [],
                        "failure": " / ".join(tail)[-200:] or "stopped",
                        "swap_mb": None, "peak_gb": None}

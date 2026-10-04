@@ -6,7 +6,7 @@
 # stay the same. It ends with a recommendation. Nothing is written next to
 # the music; the report is printed here and saved in scans/.
 #
-# About five minutes for three songs. See tools/separation_speed.py.
+# About four minutes for three songs. See tools/separation_speed.py.
 set -eu
 set -o pipefail
 cd "$(dirname "$0")"

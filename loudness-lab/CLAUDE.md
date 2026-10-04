@@ -199,6 +199,21 @@ every machine but the one that made it for a while.
   corpus silently averaged with another is a wrong number that looks
   exactly like a right one.
 
+- **Regenerating the golden vectors is not bit-reproducible across
+  machines.** On 2026-10-04, `make_golden.py` with no change to behaviour
+  rewrote `FilterBank.swift` (last-digit differences in the 17th place),
+  `library.db`, and ~120 lines of `golden.json` (measurements moving by
+  about 1e-6 dB): a different scipy/numpy than the one the committed files
+  came from. That is noise, not a finding about the Python or the Swift, and
+  committing it is churn. When you add a case, add only that case: load
+  `golden.json`, append, dump with `indent=1, sort_keys=True` (it
+  round-trips byte for byte) and leave the rest.
+- **`folderLabels` and a base of "/".** Python's `relpath` strips the common
+  base; the Swift port tested `hasPrefix(base + "/")`, which is `"//"` when
+  the base is the root, so `/m/a.mp3` labelled `/m` and not `m`. It was
+  failing in `GoldenTests` for a while. Cases with nothing in common but the
+  root are in the golden vectors now.
+
 ## Layout
 
 ```

@@ -53,12 +53,21 @@ RATE = decode.TARGET_RATE
 # is Demucs's own default, kept as the yardstick for how much a result
 # may move and still count as the same. "MLX" is the same htdemucs
 # rewritten for Apple's MLX (the demucs-mlx package), said to be 2.6x
-# faster on the graphics chip; 2 at once is its own recommendation.
+# faster on the graphics chip, run one piece at a time.
+#
+# MLX at 2 pieces at once (the package's own recommendation) was in this
+# list and is gone, for what it costs and what it can no longer tell us.
+# On Jeff's 16 GB Mac it runs out of memory and swaps: 729 s for three
+# songs (2026-09-29), then 801 s for ONE 3.7-minute song with 5.4 GB
+# swapped (2026-10-04), against 16 s at one piece -- ten minutes of the
+# test spent on a way that is never going to be recommended, with the
+# Mac thrashing meanwhile. Both reports agree, so there is nothing left
+# for it to settle. A machine with the memory for it is not this one;
+# put `("MLX, 2 at once", "demucs-mlx", {"batch": 2, ...})` back there.
 CONFIGS = [
     ("now", "demucs", {"batch": 1, "shifts": 0, "overlap": 0.25}),
     ("random shift", "demucs", {"batch": 1, "shifts": 1, "overlap": 0.25}),
-    ("MLX", "demucs-mlx", {"batch": 2, "shifts": 0, "overlap": 0.25}),
-    ("MLX, 1 at once", "demucs-mlx", {"batch": 1, "shifts": 0, "overlap": 0.25}),
+    ("MLX", "demucs-mlx", {"batch": 1, "shifts": 0, "overlap": 0.25}),
 ]
 REFERENCE = "now"              # deterministic, so the others compare to it
 YARDSTICK = "random shift"

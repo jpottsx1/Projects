@@ -1141,7 +1141,11 @@ Apple's MLX, claiming 2.6x PyTorch on the graphics chip with the same
 stems. `stems.separate(..., "demucs-mlx")` (`_demucs_mlx`) normalises as
 `_demucs` does -- its `separate_tensor` does not -- and the speed test
 now runs: now (PyTorch, no shift, the reference), random shift (the
-yardstick, never recommended), MLX at 2 pieces (its own default) and 1.
+yardstick, never recommended), and MLX. (It first ran MLX at 2 pieces
+as well, its own default, and 1; the 2 was dropped 2026-10-04 -- it
+swapped the Mac for 13 minutes on one song, as it had for 12 on three,
+and the one-piece way is already the answer. `MLX` now means one at a
+time, and a test keeps it from creeping back.)
 Processing stays on PyTorch until that report recommends MLX. Not run
 here: its spectrogram (mlx-spectro) needs Metal, and on Linux it imports
 and then fails on the first STFT; `TestSeparatingWithMLX` (MLX against

@@ -1664,6 +1664,22 @@ class TestTheSeparationSpeedTest(unittest.TestCase):
             result = self.tool.one_way("MLX", [], Path("unused.npz"))
         self.assertIn("not installed", result["failure"])
 
+    def test_no_way_asks_for_more_than_one_piece_at_a_time_of_mlx(self):
+        """MLX at 2 pieces ran a 16 GB Mac into swap for 13 minutes on one
+        song (twice measured, 2026-09-29 and 2026-10-04) and was dropped from
+        the test. This is what stops it creeping back in unannounced."""
+        mlx = [options for name, backend, options in self.tool.CONFIGS
+               if backend == "demucs-mlx"]
+        self.assertTrue(mlx, "MLX should still be tested, at one piece")
+        for options in mlx:
+            self.assertEqual(options["batch"], 1)
+
+    def test_the_ways_are_named_once_and_include_the_reference_and_yardstick(self):
+        names = [name for name, _, _ in self.tool.CONFIGS]
+        self.assertEqual(len(names), len(set(names)))
+        self.assertIn(self.tool.REFERENCE, names)
+        self.assertIn(self.tool.YARDSTICK, names)
+
     def test_a_child_stderr_is_shown_as_it_comes_and_kept(self):
         """Progress must reach the screen (a way taking minutes looked like
         a crash) AND be kept: passing stderr straight through alone made a
@@ -1717,7 +1733,7 @@ class TestTheSeparationSpeedTest(unittest.TestCase):
 
     def test_the_fastest_that_finds_the_same_kicks(self):
         rows = [self.row("now", 100, 1.0), self.row("random shift", 104, 0.985),
-                self.row("MLX", 40, 1.0), self.row("MLX, 1 at once", 30, 0.90)]
+                self.row("MLX", 40, 1.0), self.row("faster but wrong", 30, 0.90)]
         said = self.tool.recommend(rows)
         self.assertIn("Recommendation: MLX -- 60% faster", said)
 

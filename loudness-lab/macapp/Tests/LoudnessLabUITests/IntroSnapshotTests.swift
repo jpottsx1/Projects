@@ -53,11 +53,33 @@ final class IntroSnapshotTests: XCTestCase {
         working.seedForSnapshot(track: nil, busy: "Separating into stems… about half a minute.")
         try draw(IntroPanel(engine: working, ticked: items), named: "3-separating", in: dir)
 
+        // A song with a soft 25-second opening, then a groove with a kick on
+        // every beat: what the picker exists to show.
+        let bpm = 104.0, barLength = 4 * 60 / bpm, firstBar = 2.3
+        let barSeconds = (0...94).map { firstBar + Double($0) * barLength }
+        let perSecond = 50.0, seconds = 220.0
+        var bass = [UInt8](), mid = [UInt8](), treble = [UInt8]()
+        for i in 0..<Int(seconds * perSecond) {
+            let t = Double(i) / perSecond
+            if t < 25.6 {
+                bass.append(UInt8(18 + 10 * sin(t * 0.7) + 10)); mid.append(UInt8(60 + 25 * sin(t * 1.3)))
+                treble.append(UInt8(25 + 10 * sin(t * 2.1)))
+            } else {
+                let beat = (t - firstBar) / (60 / bpm), phase = beat - beat.rounded(.down)
+                let kick = exp(-phase * 7)
+                bass.append(UInt8(min(255, 70 + 185 * kick))); mid.append(UInt8(110 + 50 * sin(t * 9)))
+                treble.append(UInt8(70 + 60 * (phase < 0.5 ? exp(-phase * 14) : 0.25)))
+            }
+        }
+        let envelope = JoinEnvelope(perSecond: perSecond, seconds: seconds,
+                                    bass: bass, mid: mid, treble: treble)
         let track = IntroEngine.Track(
-            path: "/m/Rock With You.mp3", name: "Rock With You.mp3", seconds: 220,
-            bpm: 114.75, joinSeconds: 0.14, pickupSeconds: 0.0,
-            downbeatFrom: "the song's start (the accents are even)", barsAfterJoin: 100,
-            warnings: ["which beat is the bar's first was a guess from the song's start; check the join by ear"])
+            path: "/m/Ain't Nobody.mp3", name: "Ain't Nobody.mp3", seconds: seconds,
+            bpm: bpm, joinSeconds: barSeconds[10], pickupSeconds: 0.9,
+            downbeatFrom: "the song's start (the accents are even)", barsAfterJoin: 94,
+            warnings: ["which beat is the bar's first was a guess from the song's start; check the join by ear"],
+            barSeconds: barSeconds, suggestedJoinBar: 10,
+            joinReason: "the drums come in at bar 10 (25.6 s in); the opening before it is replaced")
         let sources = [
             IntroSource(bar: 4, seconds: 8.5, vocalDB: -120, vocalFree: true, repeatScore: 0.89, snapped: true),
             IntroSource(bar: 8, seconds: 16.9, vocalDB: -12.1, vocalFree: false, repeatScore: 0.76, snapped: true),
@@ -69,9 +91,17 @@ final class IntroSnapshotTests: XCTestCase {
             sourceSeconds: 8.5, vocalDB: nil, vocalFree: true, repeatScore: 0.89,
             warnings: ["these bars do not repeat in the record (match 0.55): a build or a fill, so the seams may not land on the beat"])
         let ready = IntroEngine()
-        ready.seedForSnapshot(track: track, sources: sources, renders: [render])
+        ready.seedForSnapshot(track: track, sources: sources, renders: [render],
+                              envelope: envelope, joinBar: 10)
         try draw(IntroPanel(engine: ready, ticked: items), named: "4-ready-and-made", in: dir,
-                 size: CGSize(width: 560, height: 1000))
+                 size: CGSize(width: 560, height: 1300))
+
+        // The same track with the join moved off the suggestion, to see the
+        // orange marker for where the tool thought it should go.
+        let moved = IntroEngine()
+        moved.seedForSnapshot(track: track, sources: sources, envelope: envelope, joinBar: 14)
+        try draw(IntroPanel(engine: moved, ticked: items), named: "6-join-moved", in: dir,
+                 size: CGSize(width: 560, height: 1050))
 
         let batch = IntroEngine()
         batch.seedForSnapshot(track: nil, busy: "Working through 3 tracks…",

@@ -105,7 +105,10 @@ struct IntroPanel: View {
                     Text(busy).font(.caption).foregroundStyle(.secondary)
                 }
             }
-            if let track = engine.track { trackSummary(track) }
+            if let track = engine.track {
+                trackSummary(track)
+                JoinPicker(engine: engine, track: track)
+            }
         }
     }
 
@@ -253,6 +256,12 @@ struct IntroPanel: View {
                         : String(format: "vocal %+.0f dB", render.vocalDB ?? 0),
                         render.repeatScore))
                 .font(.caption).foregroundStyle(.secondary)
+            if render.cutSeconds > 0.5 {
+                Text("The song arrives at bar \(render.joinBar); the first "
+                     + "\(JoinMath.clock(render.cutSeconds)) of the original is replaced.")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             ForEach(render.warnings, id: \.self) { warning in
                 Label(warning, systemImage: "exclamationmark.triangle")
                     .font(.caption).foregroundStyle(.orange)

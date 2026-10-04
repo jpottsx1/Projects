@@ -1535,6 +1535,55 @@ on tracks with even accents (it falls back to the song's start, and says so);
 tracks with a long kick-less opening (the grid is extrapolated); a live
 record that drifts.
 
+**Where the song joins (added 2026-10-04, Jeff asked).** The original's own
+opening is CUT OUT and the intro takes its place: the file is the loop, then
+the song from a chosen bar line on. Before this the join was the first bar,
+so an intro of full groove ended and dropped into 25 s of soft opening
+("Ain't Nobody": -20 dB into -45 dB). `suggest_join` picks the bar where the
+DRUMS come in: the first bar whose drum-stem level is within 6 dB of the
+body's and stays there four bars, then the biggest jump in the two bars
+before. Drums, not the whole mix: the first version read the mix and a vocal
+swelling into the drop made the bar before it look like the arrival (a test
+holds that). Whole mix only where there are no drums to find. On real records:
+"Ain't Nobody" bar 10 at 25.6 s (exactly where its first kick is; the drum
+level jumps ~23 dB), "Do You Love Me" bar 9 at 15.1 s, "Lost In Music" and
+"Rock With You" bar 0 (they start at full level). A vocal lead-in ahead of a
+join partway through the song is kept (`pickup_before`, up to 2 beats, where
+the vocal stem is at least a quarter of the first bar after). `render(join_bar=)`
+and `--join-bar` override it; `resolve_join` is the one place that turns a bar
+into (sample, lead-in). Bars are the unit because the song has to arrive on
+a downbeat.
+
+**The picker** (`JoinPicker`, `JoinMath` in `Model/JoinPicking.swift`): the
+track as three bands in a strip of the whole thing and a zoomable strip around
+the join, bar lines drawn and the marker snapping to them, a bar slider with
+nudge buttons, a Suggested button, and Hear it (plays the ORIGINAL from before
+the join). The picture comes from `intro.envelope` (50 columns a second, 0-255,
+shared scale), made in Python from the audio the bar lines were found in, NOT
+decoded again in Swift: another decoder can disagree about an MP3's priming
+samples by tens of milliseconds, which is visibly a different place at full
+zoom. `prepared` carries `suggested_join_bar`, `join_reason` and `bar_seconds`
+(every bar line). The detail strip's centre is frozen for the length of a drag,
+or it follows the join and drags the picture out from under the pointer.
+
+**Memory, measured the hard way.** A session left open in the user's Disco Tags
+held **6.1 GB** idle for 49 minutes on a 16 GB Mac that had 34.8 of 35.8 GB of
+swap in use. MLX keeps every GPU buffer a separation used in a cache: after
+separating a 40-second clip the cache held 4,753 MB with 168 MB in use, and
+`mx.clear_cache()` took it to zero. So `release_memory()` (MLX and PyTorch's
+MPS cache, then `gc`) runs after every separation, success or failure. A
+session also lets its track go after 10 idle minutes (`serve`, counted from the
+last ANSWER, not the ask: a 30 s separation must not count as idleness) and
+exits after 30; `--idle-release` and `--idle-exit` set them. Stdin is read with
+`select` on the descriptor and our own buffer (`FdLines`), not `for line in
+sys.stdin`, whose text buffer can hold a line the descriptor no longer reports
+as readable. A request after a release is answered with `code: "no_track"`
+(`NoTrack`), and `IntroEngine.ask` prepares the track again and retries ONCE,
+keeping the person's chosen join: an idle session costs a pause, not an error.
+Once, because a tool that still says it after a prepare is broken. A crash
+recovers the same way. The processing path's own MLX use (if ever switched on)
+has the same cache and no release.
+
 **In the app.** The right pane has a third tab, **Intro** (`IntroPanel`,
 `IntroEngine`, `IntroSession`). A host reaches it two ways, for the same
 reason the Loudness seed has two: a notification posted before the view
@@ -1562,9 +1611,10 @@ would pay it again. `IntroSession` is the Swift end: one request at a time,
 a dead process is reported with its stderr rather than hanging, and the
 next request starts a fresh one.
 
-Tests: `tests/test_intro.py` (Python, 41), `macapp/Tests/LoudnessLabUITests`
-(Swift: decoding against REAL event lines, the session against a stand-in
-tool, one end-to-end test). Two are off unless asked, because they need the
+Tests: `tests/test_intro.py` (Python), `macapp/Tests/LoudnessLabUITests`
+(Swift: decoding against REAL event lines, the session and the engine against
+a stand-in tool that can forget its track, the picker's maths, one end-to-end
+test). Two are off unless asked, because they need the
 real tool or a window server:
 
 ```sh

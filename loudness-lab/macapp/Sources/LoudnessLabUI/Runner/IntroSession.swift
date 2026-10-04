@@ -12,6 +12,9 @@ struct IntroEvent: Decodable, Equatable {
     var stage: String?
     var name: String?
     var message: String?
+    /// Set on an `error` a program can act on: "no_track" means the tool no
+    /// longer holds the track (let go after sitting idle, or restarted).
+    var code: String?
     var warnings: [String]?
 
     // prepared
@@ -23,6 +26,13 @@ struct IntroEvent: Decodable, Equatable {
     var downbeatFrom: String?
     var gridCoherence: Double?
     var barsAfterJoin: Int?
+    /// The track's first bar line, and where the song should arrive: the bar
+    /// line the full groove lands on, an index into `barSeconds`.
+    var firstBarSeconds: Double?
+    var suggestedJoinBar: Int?
+    var joinReason: String?
+    /// The time of every bar line from the first, for snapping to.
+    var barSeconds: [Double]?
 
     // sources
     var loopBars: Int?
@@ -40,6 +50,14 @@ struct IntroEvent: Decodable, Equatable {
     var vocalFree: Bool?
     var loopRepeat: Double?
     var loopSnapped: Bool?
+    var joinBar: Int?
+    var cutSeconds: Double?
+
+    // envelope: the track as three bands over time, for drawing the picker
+    var perSecond: Double?
+    var bass: [Int]?
+    var mid: [Int]?
+    var treble: [Int]?
 
     // batch (`intro <files> --json`): `file` announces one, `intro` and `error`
     // report it.
@@ -47,7 +65,15 @@ struct IntroEvent: Decodable, Equatable {
     var total: Int?
 
     enum CodingKeys: String, CodingKey {
-        case event, id, stage, name, message, warnings, path, seconds, bpm
+        case event, id, stage, name, message, code, warnings, path, seconds, bpm
+        case firstBarSeconds = "first_bar_seconds"
+        case suggestedJoinBar = "suggested_join_bar"
+        case joinReason = "join_reason"
+        case barSeconds = "bar_seconds"
+        case joinBar = "join_bar"
+        case cutSeconds = "cut_seconds"
+        case perSecond = "per_second"
+        case bass, mid, treble
         case joinSeconds = "join_seconds"
         case pickupSeconds = "pickup_seconds"
         case downbeatFrom = "downbeat_from"
@@ -119,7 +145,12 @@ final class IntroSession: @unchecked Sendable {
 
     struct Failure: LocalizedError {
         let errorDescription: String?
-        init(_ message: String) { errorDescription = message }
+        /// The tool's own code for the failure, where it gave one.
+        let code: String?
+        init(_ message: String, code: String? = nil) {
+            errorDescription = message
+            self.code = code
+        }
     }
 
     private let tool: URL
@@ -178,7 +209,8 @@ final class IntroSession: @unchecked Sendable {
             }
         }
         if let failure = events.last(where: { $0.event == "error" }) {
-            throw Failure(failure.message ?? "The intro tool reported an error.")
+            throw Failure(failure.message ?? "The intro tool reported an error.",
+                          code: failure.code)
         }
         return events
     }

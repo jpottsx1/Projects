@@ -58,7 +58,7 @@ struct IntroPanel: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .onAppear { if let path = engine.focusPath { picked = path } }
-        .onChange(of: engine.focusPath) { _, path in if let path { picked = path } }
+        .onChange(of: engine.focusTick) { _, _ in if let path = engine.focusPath { picked = path } }
     }
 
     // MARK: - Pieces

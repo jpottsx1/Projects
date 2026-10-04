@@ -81,6 +81,7 @@ struct JoinPicker: View {
                     in: bars))
             })
         }
+        .overlay(PlayheadLayer(engine: engine, window: 0...max(total, 0.001)))
         .frame(height: 44)
         .clipShape(RoundedRectangle(cornerRadius: 4))
         .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.secondary.opacity(0.3)))
@@ -107,6 +108,9 @@ struct JoinPicker: View {
                 }
                 .onEnded { _ in frozenCenter = nil })
         }
+        .overlay(PlayheadLayer(engine: engine,
+                               window: JoinMath.window(center: frozenCenter ?? joinSeconds,
+                                                       width: detailSeconds, total: total)))
         .frame(height: 120)
         .clipShape(RoundedRectangle(cornerRadius: 4))
         .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.secondary.opacity(0.3)))
@@ -221,9 +225,7 @@ struct JoinPicker: View {
                     .disabled(!moved)
                     .help("Back to where the groove lands.")
                 Spacer()
-                Button("Hear it") { engine.playOriginal() }
-                    .help("Plays the original from a few seconds before the join, which is "
-                          + "what the intro will lead into.")
+                HearButton(engine: engine)
             }
             .controlSize(.small)
             HStack(spacing: 8) {
@@ -243,5 +245,64 @@ struct JoinPicker: View {
     private func set(bar: Int) {
         let clamped = JoinMath.clamp(bar, in: bars)
         if clamped != engine.joinBar { engine.joinBar = clamped }
+    }
+}
+
+
+/// Hear it, which becomes Stop while something is playing, with the time.
+private struct HearButton: View {
+    @ObservedObject var engine: IntroEngine
+    @ObservedObject private var player: ABPlayer
+
+    init(engine: IntroEngine) {
+        self.engine = engine
+        self.player = engine.player
+    }
+
+    var body: some View {
+        HStack(spacing: 8) {
+            if player.isPlaying {
+                Text(JoinMath.clock(engine.originalTime(atPlayerPosition: player.position) ?? player.position))
+                    .font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary)
+                Button("Stop") { engine.stopPlaying() }
+                    .keyboardShortcut(.escape, modifiers: [])
+                    .help("Stop playing.")
+            } else {
+                Button("Hear it") { engine.playOriginal() }
+                    .help("Plays the original from a few seconds before the join, which is "
+                          + "what the intro will lead into.")
+            }
+        }
+    }
+}
+
+/// The playhead, drawn over a strip. It lives in its own view because the
+/// player moves twenty times a second and the picker should not be redrawn
+/// for that. For the original it is where the song is; for a rendered file it
+/// sweeps the replaced stretch while the new intro plays, then follows the
+/// song (see `IntroEngine.originalTime`).
+private struct PlayheadLayer: View {
+    let engine: IntroEngine
+    @ObservedObject private var player: ABPlayer
+    let window: ClosedRange<Double>
+
+    init(engine: IntroEngine, window: ClosedRange<Double>) {
+        self.engine = engine
+        self.player = engine.player
+        self.window = window
+    }
+
+    var body: some View {
+        Canvas { context, size in
+            guard player.isPlaying,
+                  let t = engine.originalTime(atPlayerPosition: player.position),
+                  t >= window.lowerBound, t <= window.upperBound else { return }
+            let x = JoinMath.x(for: t, in: window, width: size.width)
+            var line = Path()
+            line.move(to: CGPoint(x: x, y: 0)); line.addLine(to: CGPoint(x: x, y: size.height))
+            context.stroke(line, with: .color(.white), lineWidth: 2)
+            context.stroke(line, with: .color(.black.opacity(0.5)), lineWidth: 0.5)
+        }
+        .allowsHitTesting(false)
     }
 }

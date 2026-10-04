@@ -340,3 +340,45 @@ final class IntroEngineJoinTests: XCTestCase {
         engine.reset()
     }
 }
+
+final class PlayheadMathTests: XCTestCase {
+    // A render whose intro is 20 s long, replacing the first 30 s of the original.
+    func testTheIntroSweepsTheReplacedStretch() {
+        XCTAssertEqual(JoinMath.playhead(atFileTime: 0, songArrivesAt: 20, cutSeconds: 30), 0, accuracy: 1e-9)
+        XCTAssertEqual(JoinMath.playhead(atFileTime: 10, songArrivesAt: 20, cutSeconds: 30), 15, accuracy: 1e-9)
+    }
+
+    func testAfterTheJoinItFollowsTheSong() {
+        XCTAssertEqual(JoinMath.playhead(atFileTime: 20, songArrivesAt: 20, cutSeconds: 30), 30, accuracy: 1e-9)
+        XCTAssertEqual(JoinMath.playhead(atFileTime: 25, songArrivesAt: 20, cutSeconds: 30), 35, accuracy: 1e-9)
+    }
+
+    func testNoIntroIsJustTheSongFromTheCut() {
+        XCTAssertEqual(JoinMath.playhead(atFileTime: 4, songArrivesAt: 0, cutSeconds: 30), 34, accuracy: 1e-9)
+    }
+}
+
+@MainActor
+final class QueueAdoptTests: XCTestCase {
+    func testAFileOutsideEveryScannedFolderIsAddedAndTicked() {
+        let queue = Queue()
+        queue.adopt([URL(fileURLWithPath: "/Volumes/Crate/Song One.mp3")])
+        XCTAssertEqual(queue.items.map(\.path), ["/Volumes/Crate/Song One.mp3"])
+        XCTAssertEqual(queue.items.first?.name, "Song One")
+        XCTAssertTrue(queue.items.first?.included ?? false)
+    }
+
+    func testAskingTwiceDoesNotDuplicate() {
+        let queue = Queue()
+        let url = URL(fileURLWithPath: "/a/b.mp3")
+        queue.adopt([url]); queue.adopt([url])
+        XCTAssertEqual(queue.items.count, 1)
+    }
+
+    func testARefreshWithNoFoldersKeepsThem() async {
+        let queue = Queue()
+        queue.adopt([URL(fileURLWithPath: "/a/b.mp3")])
+        await queue.refresh(folders: [], databaseURL: URL(fileURLWithPath: "/nonexistent.db"))
+        XCTAssertEqual(queue.items.map(\.path), ["/a/b.mp3"])
+    }
+}

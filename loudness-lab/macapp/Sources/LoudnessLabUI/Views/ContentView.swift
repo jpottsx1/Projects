@@ -183,11 +183,11 @@ struct ContentView: View {
             if new == .intro { player.stop() }
         }
         .onReceive(NotificationCenter.default.publisher(for: .loudnessLabShowIntro)) { note in
-            if let url = note.object as? URL { intro.focusPath = url.path }
+            if let url = note.object as? URL { intro.focus(url.path) }
             rightTab = .intro
         }
         .onAppear {
-            if let initialIntroFocus { intro.focusPath = initialIntroFocus.path }
+            if let initialIntroFocus { intro.focus(initialIntroFocus.path) }
         }
         // The queue follows the folders, and refreshes after a run because
         // a run measures tracks that had no numbers before.
@@ -199,6 +199,7 @@ struct ContentView: View {
                 didSeedSelection = true
                 queue.setAll(false)
                 for path in initialInclude { queue.setIncluded(true, for: path) }
+                queue.adopt(initialInclude.map { URL(fileURLWithPath: $0) })
             }
         }
         // Reads the library the moment a folder is added, rather than
@@ -219,7 +220,7 @@ struct ContentView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .loudnessLabAddSources)) { note in
             guard let urls = note.object as? [URL] else { return }
-            for url in urls { queue.setIncluded(true, for: url.path) }
+            queue.adopt(urls)
         }
     }
 

@@ -11,6 +11,13 @@ import LoudnessKit
 struct QueuePanel: View {
     @ObservedObject var queue: Queue
     let limit: Int
+    /// The path being previewed, if any, and what to do on the space bar.
+    @ObservedObject var previewPlayer: ABPlayer
+    var previewing: String?
+    var onPreview: (String) -> Void = { _ in }
+
+    @State private var highlighted: String?
+    @FocusState private var listFocused: Bool
 
     private var willProcess: Set<String> { queue.willProcess(limit: limit) }
     private var includedCount: Int { queue.items.filter(\.included).count }
@@ -65,10 +72,31 @@ struct QueuePanel: View {
             LazyVStack(spacing: 0) {
                 ForEach(queue.items) { item in
                     row(item, inRange: willProcess.contains(item.path))
+                        .contentShape(Rectangle())
+                        .onTapGesture { highlighted = item.path; listFocused = true }
                     Divider()
                 }
             }
         }
+        // Space plays the highlighted track, arrows move the highlight.
+        .focusable()
+        .focused($listFocused)
+        .focusEffectDisabled()
+        .onKeyPress(.space) {
+            guard let path = highlighted ?? queue.items.first?.path else { return .ignored }
+            highlighted = path
+            onPreview(path)
+            return .handled
+        }
+        .onKeyPress(.downArrow) { move(1) }
+        .onKeyPress(.upArrow) { move(-1) }
+    }
+
+    private func move(_ step: Int) -> KeyPress.Result {
+        guard !queue.items.isEmpty else { return .ignored }
+        let at = queue.items.firstIndex { $0.path == highlighted } ?? (step > 0 ? -1 : queue.items.count)
+        highlighted = queue.items[min(max(at + step, 0), queue.items.count - 1)].path
+        return .handled
     }
 
     private func row(_ item: Queue.Item, inRange: Bool) -> some View {
@@ -97,6 +125,10 @@ struct QueuePanel: View {
 
             Spacer(minLength: 4)
 
+            if previewPlayer.isPlaying && previewing == item.path {
+                Image(systemName: "speaker.wave.2.fill").foregroundStyle(Color.accentColor)
+                    .help("Previewing. Space stops it.")
+            }
             if let lufs = item.lufsI {
                 Text(String(format: "%.1f", lufs))
                     .font(.system(.caption, design: .monospaced))
@@ -111,8 +143,8 @@ struct QueuePanel: View {
         // dimmed: the empty checkbox says it, and a greyed-out name after
         // "None" read as the tracks having gone somewhere (Jeff, 2026-09-28).
         .opacity(item.included && !inRange ? 0.45 : 1.0)
-        .background(inRange && item.included
-                    ? Color.accentColor.opacity(0.08) : Color.clear)
+        .background(highlighted == item.path ? Color.accentColor.opacity(0.22)
+                    : inRange && item.included ? Color.accentColor.opacity(0.08) : Color.clear)
     }
 
     private var footer: some View {

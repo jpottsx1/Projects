@@ -279,6 +279,23 @@ final class IntroEngine: ObservableObject {
                                  cutSeconds: render.cutSeconds)
     }
 
+    /// Space bar in the track list: the start of a track as it is, before it
+    /// is analysed or ticked, to hear whether it starts cold. Again stops it.
+    func togglePreview(_ path: String) {
+        if playing == path && player.isPlaying { stopPlaying(); return }
+        player.loadOrReport([ABPlayer.Source(
+            id: path, label: URL(fileURLWithPath: path).lastPathComponent,
+            url: URL(fileURLWithPath: path), matchGainDB: 0)])
+        playing = path
+        player.play(from: 0)
+    }
+
+    /// Drops the list of edits made so far, for when another song is chosen.
+    func forgetMade() {
+        if let playing, renders.contains(where: { $0.id == playing }) { stopPlaying() }
+        renders = []
+    }
+
     func stopPlaying() {
         player.stop()
         playing = nil

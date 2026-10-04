@@ -116,7 +116,12 @@ struct ContentView: View {
             // than being boxed into the results column alone.
             VStack(spacing: 0) {
                 HSplitView {
-                    QueuePanel(queue: queue, limit: limited ? limit : Int.max)
+                    QueuePanel(queue: queue, limit: limited ? limit : Int.max,
+                               previewPlayer: intro.player, previewing: intro.playing,
+                               onPreview: { path in
+                                   player.stop()
+                                   intro.togglePreview(path)
+                               })
                         .frame(minWidth: 260, idealWidth: 320, maxWidth: 480)
 
                     // What the folders are, and what came out of them.

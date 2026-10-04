@@ -382,3 +382,20 @@ final class QueueAdoptTests: XCTestCase {
         XCTAssertEqual(queue.items.map(\.path), ["/a/b.mp3"])
     }
 }
+
+@MainActor
+final class MadeListTests: XCTestCase {
+    private func render(_ name: String) -> IntroEngine.Render {
+        IntroEngine.Render(url: URL(fileURLWithPath: "/m/\(name).mp3"), bars: 16, loopBars: 4,
+                           joinSeconds: 30, introSeconds: 30, sourceBar: 4, sourceSeconds: 8,
+                           vocalDB: nil, vocalFree: true, repeatScore: 0.9, warnings: [])
+    }
+
+    func testForgettingTheMadeEditsEmptiesTheList() {
+        let engine = IntroEngine()
+        engine.seedForSnapshot(track: nil, renders: [render("a"), render("b")])
+        XCTAssertEqual(engine.renders.count, 2)
+        engine.forgetMade()
+        XCTAssertTrue(engine.renders.isEmpty)
+    }
+}

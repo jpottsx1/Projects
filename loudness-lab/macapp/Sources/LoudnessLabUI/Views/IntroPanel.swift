@@ -17,6 +17,9 @@ struct IntroPanel: View {
 
     @State private var picked: String?
     @AppStorage("introOutputDirectory") private var outputOverride = ""
+    /// On by default: the cards under "Made" belong to the song they were made
+    /// from, and left in place under the next song they read as its edits.
+    @AppStorage("introClearMade") private var clearMade = true
 
     private var outputDirectory: URL? {
         outputOverride.isEmpty ? nil : URL(fileURLWithPath: outputOverride, isDirectory: true)
@@ -56,6 +59,9 @@ struct IntroPanel: View {
             }
             .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .onChange(of: current?.path) { old, new in
+            if clearMade, old != nil, old != new, !engine.isBusy { engine.forgetMade() }
         }
         .onAppear { if let path = engine.focusPath { picked = path } }
         .onChange(of: engine.focusTick) { _, _ in if let path = engine.focusPath { picked = path } }
@@ -239,8 +245,15 @@ struct IntroPanel: View {
 
     private var results: some View {
         VStack(alignment: .leading, spacing: 8) {
-            if !engine.renders.isEmpty {
-                Text("Made").font(.subheadline.weight(.semibold))
+            HStack {
+                if !engine.renders.isEmpty {
+                    Text("Made").font(.subheadline.weight(.semibold))
+                }
+                Spacer()
+                Toggle("Clear when another song is chosen", isOn: $clearMade)
+                    .toggleStyle(.checkbox).controlSize(.small)
+                    .help("Remove the edits listed here when you pick a different track, "
+                          + "so they are not mistaken for the new song's. The files are kept.")
             }
             ForEach(engine.renders) { render in resultRow(render) }
             if engine.playing != nil { AuditionBar(player: engine.player) }

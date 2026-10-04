@@ -52,6 +52,10 @@ struct IntroEvent: Decodable, Equatable {
     var loopSnapped: Bool?
     var joinBar: Int?
     var cutSeconds: Double?
+    var leadInBar: Int?
+    var leadInSeconds: Double?
+    var leadInMatch: Double?
+    var leadInNote: String?
 
     // envelope: the track as three bands over time, for drawing the picker
     var perSecond: Double?
@@ -72,6 +76,10 @@ struct IntroEvent: Decodable, Equatable {
         case barSeconds = "bar_seconds"
         case joinBar = "join_bar"
         case cutSeconds = "cut_seconds"
+        case leadInBar = "lead_in_bar"
+        case leadInSeconds = "lead_in_seconds"
+        case leadInMatch = "lead_in_match"
+        case leadInNote = "lead_in_note"
         case perSecond = "per_second"
         case bass, mid, treble
         case joinSeconds = "join_seconds"

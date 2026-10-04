@@ -48,6 +48,11 @@ final class IntroEngine: ObservableObject {
         /// opening was cut out to make room for the intro.
         var joinBar: Int = 0
         var cutSeconds: Double = 0
+        /// The song's own bar the intro ends on, if one was used, and why not
+        /// if one was asked for and none fitted.
+        var leadInBar: Int?
+        var leadInSeconds: Double?
+        var leadInNote: String?
         /// The finished file drawn the way the original is; nil if the tool
         /// did not send it.
         var envelope: JoinEnvelope?
@@ -95,6 +100,8 @@ final class IntroEngine: ObservableObject {
     /// Beats the bar lines have been moved by hand from where the tool put
     /// them, 0-3. Kept here so a reloaded track can be put back the same way.
     @Published private(set) var beatShift = 0
+    /// End the intro on the song's own break or fill, when it has one.
+    @Published var endOnBreak = false
     func focus(_ path: String) { focusPath = path; focusTick += 1 }
 
     let player = ABPlayer()
@@ -258,6 +265,7 @@ final class IntroEngine: ObservableObject {
             var fields: [String: Any] = ["bars": bars, "loop_bars": loopBars,
                                          "join_bar": joinBar]
             if let chosenBar { fields["source_bar"] = chosenBar }
+            if endOnBreak { fields["lead_in"] = "auto" }
             if let outputDirectory { fields["out"] = outputDirectory.path }
             do {
                 let events = try await ask("render", fields)
@@ -360,6 +368,7 @@ final class IntroEngine: ObservableObject {
         var arguments = ["intro"] + paths
         arguments += ["--bars"] + lengths.sorted().map(String.init)
         arguments += ["--loop-bars", String(loopBars), "--json"]
+        if endOnBreak { arguments.append("--lead-in") }
         if let outputDirectory { arguments += ["--out", outputDirectory.path] }
 
         do {
@@ -412,7 +421,9 @@ final class IntroEngine: ObservableObject {
                       repeatScore: event.loopRepeat ?? 0,
                       warnings: event.warnings ?? [],
                       joinBar: event.joinBar ?? 0,
-                      cutSeconds: event.cutSeconds ?? 0)
+                      cutSeconds: event.cutSeconds ?? 0,
+                      leadInBar: event.leadInBar, leadInSeconds: event.leadInSeconds,
+                      leadInNote: event.leadInNote)
     }
 }
 

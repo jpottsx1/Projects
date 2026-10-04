@@ -220,6 +220,8 @@ final class IntroEngineJoinTests: XCTestCase {
             event = dict(canned[by[cmd]]); event["id"] = rid
             if cmd == "render":
                 event["join_bar"] = request.get("join_bar")      # echo what it was asked for
+                if request.get("lead_in") == "auto":
+                    event["lead_in_bar"] = 5; event["lead_in_seconds"] = 11.2
             print(json.dumps(event), flush=True)
             print(json.dumps({"event": "done", "id": rid}), flush=True)
         """
@@ -288,6 +290,18 @@ final class IntroEngineJoinTests: XCTestCase {
         XCTAssertEqual(engine.track?.barSeconds.count, 15)
         XCTAssertEqual(engine.track?.lastJoinBar, 13)         // 14 bars, so 0...13
         XCTAssertEqual(engine.envelope?.columns, 150)
+        engine.reset()
+    }
+
+    func testEndingOnTheSongsBreakIsAskedForOnlyWhenChosen() async throws {
+        let engine = IntroEngine(tool: try fakeTool())
+        await engine.prepare("/tmp/x/Song.flac")
+        await engine.render(to: nil)
+        XCTAssertNil(engine.renders.first?.leadInBar)            // off by default
+        engine.endOnBreak = true
+        await engine.render(to: nil)
+        XCTAssertEqual(engine.renders.first?.leadInBar, 5)
+        XCTAssertEqual(engine.renders.first?.leadInSeconds, 11.2)
         engine.reset()
     }
 

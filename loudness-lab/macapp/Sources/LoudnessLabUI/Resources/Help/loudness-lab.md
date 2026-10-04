@@ -229,7 +229,12 @@ starts cold before ticking it.
    right before the song arrives. The ranking already counts it against a
    loop, and the tab says when the best one left still has one.
 4. **Choose the lengths** (more than one is fine) and the loop size, and
-   press **Make intro**.
+   press **Make intro**. *End on the song's own break or fill* makes the
+   intro's last bar the song's own break, the bar before its drums come back,
+   with the vocal taken out, so the intro leads into the song the way the song
+   leads into a drop. It only applies when the song has one that sounds like
+   the bar the song arrives at, and says so when it does not. It is off by
+   default: listen to both with **Play the join**.
 5. **Press Play the join.** It starts eight seconds before the song arrives,
    which is where a bad seam or a late downbeat shows. This is the check
    that matters: the numbers can tell you a seam is timed well, but not

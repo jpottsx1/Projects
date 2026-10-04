@@ -163,6 +163,14 @@ struct IntroPanel: View {
                       + "Longer loops sound less repetitive but need a longer "
                       + "stretch with no vocal.")
             }
+            Toggle("End on the song's own break or fill", isOn: $engine.endOnBreak)
+                .toggleStyle(.checkbox).controlSize(.small)
+                .disabled(engine.isBusy)
+                .help("Make the intro's last bar the song's own break, the bar before its "
+                      + "drums come back, with the vocal taken out, so the intro leads "
+                      + "into the song the way the song leads into a drop. Only when the "
+                      + "song has one that fits; otherwise the intro ends on the loop. "
+                      + "Off by default: listen to both with Play the join.")
         }
     }
 
@@ -274,6 +282,14 @@ struct IntroPanel: View {
                         : String(format: "vocal %+.0f dB", render.vocalDB ?? 0),
                         render.repeatScore))
                 .font(.caption).foregroundStyle(.secondary)
+            if let bar = render.leadInBar, let at = render.leadInSeconds {
+                Text("Ends on the song's own bar \(bar) (\(JoinMath.clock(at)) in), vocal removed.")
+                    .font(.caption).foregroundStyle(.secondary)
+            } else if let note = render.leadInNote {
+                Text(note.prefix(1).uppercased() + note.dropFirst() + ".")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             if let envelope = render.envelope {
                 EditStrip(engine: engine, render: render, envelope: envelope)
             }

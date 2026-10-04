@@ -402,6 +402,69 @@ class TestAFillIsNotALoop(unittest.TestCase):
         self.assertGreater(intro.source_fields(source)["fill"], intro.FILL_NOTED)
 
 
+class TestEndingOnTheSongsOwnBreak(unittest.TestCase):
+    """The intro's last bar can be the song's own break, so the intro leads
+    into the downbeat the way the song leads into a drop."""
+
+    @classmethod
+    def setUpClass(cls):
+        x, parts, _ = song(bars=44, vocal_bars=(range(0, 2),), breakdown=range(33, 34))
+        cls.a = intro.analyse(x, parts, RATE, BPM)
+        cls.source = intro.candidates(cls.a, 4)[0]
+
+    def test_the_bar_before_the_drums_come_back_is_found(self):
+        found = intro.suggest_lead_in(self.a, 0)
+        self.assertIsNotNone(found)
+        self.assertEqual(found[0], 33)
+        self.assertGreaterEqual(found[1], intro.LEAD_IN_MATCH)
+
+    def test_a_song_with_no_break_has_none(self):
+        x, parts, _ = song(bars=44, vocal_bars=(range(0, 2),), breakdown=range(0, 0))
+        plain = intro.analyse(x, parts, RATE, BPM)
+        self.assertIsNone(intro.suggest_lead_in(plain, 0))
+
+    def test_the_last_bar_before_the_join_is_the_break_and_the_rest_is_untouched(self):
+        plain, _ = intro.render(self.a, 16, self.source, 4, join_bar=0)
+        ended, info = intro.render(self.a, 16, self.source, 4, join_bar=0, lead_in_bar=33)
+        self.assertEqual(info["lead_in_bar"], 33)
+        self.assertEqual(plain.shape, ended.shape)
+        bar = int(self.a.grid.bar)
+        join = int(round((info["seconds_of_intro"] + info["lead_seconds"]) * RATE))
+        low = lambda y: float(np.mean(sosfilt(butter(2, 150.0, btype="low", fs=RATE,
+                                                      output="sos"), y.mean(axis=1)) ** 2))
+        # before: the last bar is loop (kicks and bass); after: the break, which has neither
+        last = slice(join - bar + 2000, join - 2000)
+        self.assertLess(low(ended[last]), 0.05 * low(plain[last]))
+        # the bars before it, and the whole song after the join, are the same samples
+        early = slice(0, join - bar - 2000)
+        self.assertTrue(np.allclose(ended[early], plain[early], atol=1e-6))
+        self.assertTrue(np.array_equal(ended[join + 2000:], plain[join + 2000:]))
+
+    def test_a_bad_bar_is_refused(self):
+        with self.assertRaises(ValueError):
+            intro.render(self.a, 16, self.source, 4, join_bar=0, lead_in_bar=0)
+
+    def test_a_session_render_can_ask_for_it_automatically(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source = write.write(Path(tmp) / "Song", song(bars=44, vocal_bars=(range(0, 2),),
+                                                          breakdown=range(33, 34))[0], RATE, fmt="flac")
+            session = intro.Session(out_dir=Path(tmp) / "out")
+            parts = song(bars=44, vocal_bars=(range(0, 2),), breakdown=range(33, 34))[1]
+            events = []
+            with mock.patch.object(intro, "separate", return_value=parts):
+                session.handle({"id": 1, "cmd": "prepare", "path": str(source), "bpm": 120},
+                               events.append)
+            events = []
+            session.handle({"id": 2, "cmd": "render", "bars": 16, "loop_bars": 4,
+                            "lead_in": "auto"}, events.append)
+            made = [e for e in events if e["event"] == "intro"][0]
+            self.assertEqual(made["lead_in_bar"], 33)
+            self.assertGreaterEqual(made["lead_in_match"], intro.LEAD_IN_MATCH)
+            events = []
+            session.handle({"id": 3, "cmd": "render", "bars": 16, "loop_bars": 4}, events.append)
+            self.assertIsNone([e for e in events if e["event"] == "intro"][0]["lead_in_bar"])
+
+
 class TestBeatOne(unittest.TestCase):
     """Moving which beat is the first of the bar, without separating again."""
 

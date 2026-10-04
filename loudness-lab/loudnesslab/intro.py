@@ -127,6 +127,13 @@ FILL_OK = 0.3
 FILL_WEIGHT = 30.0
 FILL_NOTED = 0.5                # from here the loop is called out as having a fill
 DEVIATION_SLOTS = 16
+# The song's own break or fill to end the intro on: a bar after which the drums
+# come back at least this much louder, so the intro's last bar leads into the
+# downbeat the way the song itself leads into one. The bar after it has to
+# sound like the song's first bar (chroma, 1 = identical) or the join would
+# change key at the seam.
+LEAD_IN_JUMP_DB = 10.0
+LEAD_IN_MATCH = 0.8
 
 
 @dataclass
@@ -783,9 +790,69 @@ def _fade(n: int) -> tuple[np.ndarray, np.ndarray]:
     return np.sin(t), np.cos(t)
 
 
+def bar_chroma(a: Analysis) -> np.ndarray:
+    """Per bar: the instrumental's pitch-class energy (12 values, summing to
+    1), from a short STFT folded onto the octave. Coarse on purpose: it says
+    whether two bars are in the same key and chord region, not which chord."""
+    mono = a.instrumental.mean(axis=1).astype(np.float64)
+    size = 4096
+    freqs = np.fft.rfftfreq(size, 1.0 / a.rate)
+    usable = (freqs > 55) & (freqs < 2000)
+    classes = np.round(12 * np.log2(freqs[usable] / 440.0) + 69).astype(int) % 12
+    window = np.hanning(size)
+    lines = a.bar_lines
+    out = np.zeros((len(lines) - 1, 12))
+    for i in range(len(out)):
+        lo, hi = int(lines[i]), int(lines[i + 1])
+        frames = range(lo, max(lo + 1, hi - size), size)
+        for start in frames:
+            chunk = mono[start:start + size]
+            if len(chunk) < size:
+                break
+            mag = np.abs(np.fft.rfft(chunk * window))[usable]
+            out[i] += np.bincount(classes, weights=mag, minlength=12)
+    return out / (out.sum(axis=1, keepdims=True) + 1e-12)
+
+
+def suggest_lead_in(a: Analysis, join_bar: int) -> tuple[int, float] | None:
+    """(bar, match) for the song's own break or fill to end the intro on, or
+    None when the song has none that fits.
+
+    A bar `f` qualifies when the drums come back at least LEAD_IN_JUMP_DB
+    louder in the bar after it (a break, a drum roll, a stop before the
+    drop) and that bar has the song's body level. Of those, the one whose
+    NEXT bar sounds most like the join bar wins: the fill resolves into that
+    bar in the song, so it should be one that sounds like where the intro
+    is about to go. The bar just before the join counts too, and matches
+    itself exactly, so it wins whenever it qualifies: that is the song's own
+    way into the drop. Only the instrumental is used, so the vocal that was
+    over the break in the song is not in the intro."""
+    lines = a.bar_lines
+    bars = len(lines) - 1
+    if bars < 4 or not 0 <= join_bar < bars:
+        return None
+    mono = a.drums.mean(axis=1).astype(np.float64)
+    level = np.array([10.0 * np.log10(np.mean(mono[lines[i]:lines[i + 1]] ** 2) + 1e-12)
+                      for i in range(bars)])
+    body = float(np.median(level[bars // 4:max(bars // 4 + 1, 3 * bars // 4)]))
+    chroma = bar_chroma(a)
+    best = None
+    for f in range(1, bars - 1):
+        if level[f + 1] - level[f] < LEAD_IN_JUMP_DB or level[f + 1] < body - 6.0:
+            continue
+        if lines[f] - int(a.grid.bar) < 0:
+            continue
+        a_, b_ = chroma[f + 1], chroma[join_bar]
+        match = float(a_ @ b_ / (np.linalg.norm(a_) * np.linalg.norm(b_) + 1e-12))
+        if match >= LEAD_IN_MATCH and (best is None or match > best[1]):
+            best = (f, match)
+    return best
+
+
 def render(a: Analysis, bars: int, source: Source,
            loop_bars: int = DEFAULT_LOOP_BARS,
-           join_bar: int | None = None) -> tuple[np.ndarray, dict]:
+           join_bar: int | None = None,
+           lead_in_bar: int | None = None) -> tuple[np.ndarray, dict]:
     """The intro edit: (audio, info). `bars` of the instrumental loop, then
     the original from its pickup / downbeat on.
 
@@ -798,6 +865,10 @@ def render(a: Analysis, bars: int, source: Source,
     Every cut is made GUARD_S ahead of the attack it precedes, and
     crossfaded over the SEAM_S before that, so a kick's front is never
     inside a fade.
+
+    `lead_in_bar` is a bar of the song (see `suggest_lead_in`) laid in as the
+    intro's LAST bar in place of the loop's: the song's own break or fill,
+    instrumental only, so the intro ends the way the song leads into a drop.
     """
     if bars % loop_bars:
         raise ValueError(f"{bars} bars is not a whole number of "
@@ -846,6 +917,27 @@ def render(a: Analysis, bars: int, source: Source,
         if hi > at + lo:
             loop[at + lo:hi] += (seg * win[:, None])[lo:hi - at]
 
+    # --- the song's own bar to end on, in place of the loop's last bar.
+    if lead_in_bar is not None:
+        if not 1 <= lead_in_bar < len(a.bar_lines) - 1:
+            raise ValueError(f"lead-in bar {lead_in_bar} is outside the track")
+        fb0, fb1 = int(a.bar_lines[lead_in_bar]), int(a.bar_lines[lead_in_bar + 1])
+        flen = fb1 - fb0
+        if join_out < 2 * flen:
+            raise ValueError("the intro is too short to end on a bar of its own")
+        stop = join_out - flen - guard + lead     # where the loop gives way
+        if stop - seam >= 0 and fb0 - guard >= 0:
+            loop[stop - seam:stop] *= _fade(seam)[1][:, None]
+            loop[stop:] = 0.0
+            pre = min(seam, fb0 - guard)
+            seg = mono_in[fb0 - guard - pre:fb1].astype(np.float64)
+            win = np.ones(len(seg))
+            if pre:
+                win[:pre] = _fade(pre)[0]
+            at = stop - pre
+            hi = min(len(loop), at + len(seg))
+            loop[at:hi] += (seg * win[:, None])[:hi - at]
+
     # --- the hand-over: where the original begins (its pickup, or its
     # downbeat), minus the guard. With room before it, it fades in over a
     # seam while the loop fades out; with none (a track that starts on the
@@ -881,6 +973,9 @@ def render(a: Analysis, bars: int, source: Source,
         "seconds_of_intro": round(join_out / rate, 3),
         "lead_seconds": round(lead / rate, 4),
         "join_bar": join_bar,
+        "lead_in_bar": lead_in_bar,
+        "lead_in_seconds": None if lead_in_bar is None
+        else round(float(a.bar_lines[lead_in_bar]) / rate, 3),
         "join_seconds": round(join / rate, 3),
         "pickup_seconds": round(pickup / rate, 3),
         "suggested_join_bar": a.suggested_join_bar,
@@ -1114,8 +1209,21 @@ class Session:
             source = found[0]
         say("stage", stage="rendering", name=self.path.name)
         join_bar = request.get("join_bar")
-        audio, info = render(a, bars, source, loop_bars,
-                             None if join_bar is None else int(join_bar))
+        chosen_join = a.suggested_join_bar if join_bar is None else int(join_bar)
+        lead_in, match, note = None, None, None
+        want = request.get("lead_in")
+        if want == "auto":
+            found = suggest_lead_in(a, chosen_join)
+            if found is None:
+                note = ("no break or fill in this song fits as the intro's last bar, "
+                        "so it ends on the loop")
+            else:
+                lead_in, match = found
+        elif want is not None:
+            lead_in = int(want)
+        audio, info = render(a, bars, source, loop_bars, chosen_join, lead_in)
+        info["lead_in_match"] = None if match is None else round(match, 3)
+        info["lead_in_note"] = note
         out_dir = Path(request["out"]) if request.get("out") else self.out_dir
         target = write_intro(a, self.path, audio, bars, out_dir,
                              request.get("format"))

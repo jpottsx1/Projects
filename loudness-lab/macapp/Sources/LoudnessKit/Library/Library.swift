@@ -465,10 +465,14 @@ public final class Library {
             let group = groupFor[parent] ?? parent
             var relative = group
             if !base.isEmpty {
+                // `base` is "/" when the paths share nothing but the root,
+                // and "/" + "/" is "//": no group has that prefix, so every
+                // label kept its leading slash ("/m" for Python's "m").
+                let prefix = base.hasSuffix("/") ? base : base + "/"
                 if group == base {
                     relative = ""
-                } else if group.hasPrefix(base + "/") {
-                    relative = String(group.dropFirst(base.count + 1))
+                } else if group.hasPrefix(prefix) {
+                    relative = String(group.dropFirst(prefix.count))
                 }
             }
             if relative.isEmpty || relative == "." || relative == "/" {

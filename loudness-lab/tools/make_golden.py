@@ -489,6 +489,10 @@ def main() -> int:
          "/m/Now Yearbook 99 (2026)/CD2/b.mp3",
          "/m/Now Yearbook 99 (2026)/CD3/c.mp3",
          "/m/Now Yearbook 99 (2026)/CD4/d.mp3"],
+        # Nothing in common but the root: the base is "/", which is the
+        # case a prefix test on base + "/" gets wrong ("//").
+        ["/A/x.mp3", "/B/y.mp3"],
+        ["/Volumes/X/Disco/a.mp3", "/Users/j/Music/b.mp3"],
         # A bonus track sitting directly in the release folder blocks the
         # collapse -- the folder is not a pure disc container.
         ["/m/Now Yearbook 99 (2026)/CD1/a.mp3",

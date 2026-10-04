@@ -1470,6 +1470,26 @@
   },
   {
    "labels": {
+    "/A/x.mp3": "A",
+    "/B/y.mp3": "B"
+   },
+   "paths": [
+    "/A/x.mp3",
+    "/B/y.mp3"
+   ]
+  },
+  {
+   "labels": {
+    "/Users/j/Music/b.mp3": "Users/j/Music",
+    "/Volumes/X/Disco/a.mp3": "Volumes/X/Disco"
+   },
+   "paths": [
+    "/Volumes/X/Disco/a.mp3",
+    "/Users/j/Music/b.mp3"
+   ]
+  },
+  {
+   "labels": {
     "/m/Now Yearbook 99 (2026)/CD1/a.mp3": "CD1",
     "/m/Now Yearbook 99 (2026)/CD2/b.mp3": "CD2",
     "/m/Now Yearbook 99 (2026)/bonus.mp3": "Now Yearbook 99 (2026)"

@@ -9,6 +9,12 @@ needed — per track, not per era.
 **Originals are never written to.** Every stage writes a copy. The folders
 you point it at are opened for reading and nothing else.
 
+There is one exception, and you have to ask for it every time:
+**Replace originals when done**. It does not write to an original and it
+does not delete one. It moves each original aside, intact, and puts the
+finished track where it was. See *Putting the result in your library*
+below.
+
 **Serato's cue points and beatgrids survive.** Going MP3 to MP3 the
 original's whole ID3 tag is copied onto the new file, bytes unread, so the
 markers arrive intact and land on the right beat. Going to FLAC or M4A the
@@ -33,6 +39,8 @@ against a real Serato file.
    first, so a new batch is not mixed in with an old one.
 6. **Listen.** The Results tab plays the before and after, level-matched,
    and Shift-Space switches between them on the same sample.
+7. **Only then, if you want it, put the result in your library.** That is a
+   separate run with Replace originals ticked, covered below.
 
 ## Reading the Survey
 
@@ -82,6 +90,14 @@ gives the average back, so the drop comes out louder than it went in.
 only where the signal is rising, so it cannot turn a quiet passage down
 and cannot breathe.
 
+**Mud** takes the thickness out of 200–400 Hz. Early-seventies records sit
+thick in the lower midrange, enough to blur the bass line and the kick into
+each other. It is a dynamic cut: as deep as the band is built up at each
+moment relative to the rest of the track, and nothing where it is not, so a
+verse of voice and guitar is not thinned for something it never had. The
+amount you ask for is the amount the band as a whole drops by, and the log
+reports what it actually did. Off at zero.
+
 **Sub** adds what a 1979 cutting lathe could not hold, sized from each
 track's own shortfall against a reference folder and gated where there is
 no bassline to reinforce.
@@ -93,6 +109,18 @@ the way the sub is measured against its bottom, and the amount becomes a
 ceiling rather than a flat figure.
 
 **Level** is always last, because every stage before it moves loudness.
+
+**Stages that separate the track first.** Two settings, **Find kicks on the drum track** and **Air follows the vocals
+and instruments**, separate each song into drums, bass, vocals and the rest
+with Demucs before they work. Both use the separated parts only to decide
+*where* to act: the sub is still added to the untouched original, and the
+air's harmonics are still made from it, so nothing the separation got wrong
+can be heard.
+
+Separating is the slowest thing a run does, roughly half a minute a song,
+and only the first time: what it finds is kept, so the same folder run again
+with different settings separates nothing. Both need Demucs installed, which
+`Measure Kick Detection.command` does for you.
 
 ## Choosing a profile
 
@@ -109,13 +137,86 @@ modern.
 |---|---|---|
 | `level-only` | anything | Lossless. No decode, no re-encode, reversible. |
 | `restore` | unknown material | Levelling plus a sub sized per track. Needs a reference. |
-| `disco-70s` | 1970s disco | 6–9 dB short at 32–63 Hz. De-clipping on. |
+| `disco-70s` | 1970s disco | 6–9 dB short at 32–63 Hz. De-clipping on, and a 5 dB mud cut. |
 | `eighties` | 1980s pop, new wave | 6–11 dB short. De-clipping off — it measured clean. |
-| `nineties` | late 1990s pop | Low end nearly there; hard-limited instead. |
+| `nineties` | late 1990s pop | Low end nearly there; hard-limited instead, so range and attack do the work. |
+
+**Reference folders.** The reference is what every track is measured
+against, so it decides what each one is pushed towards. One modern folder is
+the wrong target for 1977 disco. A profile can carry several folders of the
+music it is for, and every track in them counts once, pooled into a single
+target. Save the settings as a profile and the folders go with it.
 
 **Save…** keeps whatever is on the sliders under a name of your own,
 listed below the built-in ones. It carries no measured claim — that is the
 difference, and it is why a personal preset cannot take a built-in's name.
+
+## Putting the result in your library
+
+Processing writes copies to the output folder, and that is all it does until
+you tick **Replace originals when done**. With it on, each finished track is
+moved into its original's place, same name and same folder, so Serato and
+anything else that knows the track by where it is now plays the processed
+one.
+
+**Nothing is deleted.** Each original is moved into Music › LoudnessLab ›
+Replaced originals › the date and time of the run, under its full folder
+path, with a log of every swap. Double-click **Restore Originals** and
+choose that run to put the whole batch back.
+
+Two conditions, both deliberate:
+
+- It only applies to a run that writes **finished tracks**, not A/B pairs.
+  A pair's second file is level-matched for listening, not levelled for a
+  set.
+- The format must match the original's. A FLAC written for an MP3 original
+  is left in the output folder, because a different file type would break
+  its path in your library. Set the format to MP3 for an MP3 library.
+
+You are asked to confirm every time, and the setting is never remembered.
+Going MP3 to MP3 carries the whole tag, cue points and beatgrid included,
+but a re-encoded MP3 may sit a few milliseconds off the original in Serato.
+**Check the cue points on one song before replacing a library.**
+
+## Making an intro for a track that starts cold
+
+A song that opens straight into the groove or the vocal leaves you nowhere
+to mix in. The **Intro** tab, beside Survey and Results, gives it an intro
+made from itself: 8, 16 or 32 bars of the song's own instrumental, then the
+song arriving exactly where it always did, on the beat. It writes copies to
+Music › LoudnessLab › Intro Edits, never over the original.
+
+1. **Tick the track** in the list, choose it in the Intro tab, and press
+   **Analyse**. It separates the song into drums, bass and the rest, which
+   takes about half a minute, and finds the beat. After that, choosing and
+   rendering takes seconds.
+2. **Choose the loop.** The tab ranks stretches of the song to repeat. Each
+   shows how much vocal is in it (*no vocal* is what you want) and how well
+   its drums *repeat* one loop later. A repeat score under 0.6 means a build
+   or a fill: the seam will not land on the beat, and the tab says so.
+   *Grid-timed* means the loop's ends could not be tied to a real kick.
+3. **Choose the lengths** (more than one is fine) and the loop size, and
+   press **Make intro**.
+4. **Press Play the join.** It starts eight seconds before the song arrives,
+   which is where a bad seam or a late downbeat shows. This is the check
+   that matters: the numbers can tell you a seam is timed well, but not
+   that it sounds right.
+
+The intro is built from the instrumental only, so the vocal is not in it,
+but a stretch where the separation leaked some vocal will carry a little of
+it, and the tab warns when no clean stretch exists. If the song starts with
+a vocal pickup just ahead of the first bar line, the pickup is kept.
+
+**Cue points and the beatgrid are not copied** to the new file. They
+describe the song without its intro and would all be an intro's length too
+early. Text tags and artwork do travel; set the cues again in Serato.
+
+It suits tracks that start cold on a steady groove. A song with a long
+opening and no kick drum, or a live record that drifts in tempo, fits less
+well, and the warnings under the track say when the beat was a guess. In
+Disco Tags, right-click a track and choose **Make Intro Edit…** to open this
+tab on it. **Make intros for all ticked** does the whole selection with the
+best loop for each, at about half a minute a song.
 
 ## Listening to the result
 
@@ -150,6 +251,14 @@ a PATH problem rather than a missing install — please report it.
 **A run that writes nothing.** Not a failure. Every stage declines when
 the measurement says there is nothing to do, and the log says which
 declined and why. Most of what a good policy does is decline.
+
+**Replaced the wrong thing, or the cue points are off.** Double-click
+**Restore Originals** and choose the run. Nothing was deleted; every
+original is where the log says.
+
+**An intro whose seam sounds wrong.** Pick a different loop in the list, or
+a longer one. If every option scores low on *repeats*, the song has no
+stretch that comes round cleanly, and an intro may not suit it.
 
 **MP3 refused.** Some ffmpeg builds ship without `libmp3lame`. Choose FLAC
 or AAC, or install a build that has it.

@@ -122,10 +122,14 @@ struct HelpDocument {
                     if let next = marker(lines[i]), next.ordered == first.ordered {
                         items.append(next.rest)
                         i += 1
-                    } else if lines[i].hasPrefix("   "),
+                    } else if lines[i].hasPrefix("  "),
                               !lines[i].trimmingCharacters(in: .whitespaces).isEmpty,
                               !items.isEmpty {
-                        // A wrapped continuation of the item above.
+                        // A wrapped continuation of the item above. Two
+                        // spaces is enough: a bullet's marker ("- ") is two
+                        // wide, so that is where anyone wrapping one indents
+                        // it, and requiring three made the wrapped half fall
+                        // out as a paragraph of its own.
                         items[items.count - 1] += " "
                             + lines[i].trimmingCharacters(in: .whitespaces)
                         i += 1

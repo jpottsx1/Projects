@@ -168,7 +168,7 @@ def markdown_to_html(text: str) -> str:
                 m = re.match(r"[-*]\s+(.*)" if bullet else r"\d+\.\s+(.*)",
                              lines[i].strip())
                 if not m:
-                    if lines[i].startswith("   ") and lines[i].strip() and items:
+                    if lines[i].startswith("  ") and lines[i].strip() and items:
                         items[-1] += " " + lines[i].strip()
                         i += 1
                         continue
@@ -307,7 +307,7 @@ def renderer_blocks(text: str) -> tuple[dict, bool]:
                 nxt = marker(lines[i])
                 if nxt and nxt[0] == first[0]:
                     i += 1
-                elif lines[i].startswith("   ") and lines[i].strip():
+                elif lines[i].startswith("  ") and lines[i].strip():
                     i += 1
                 else:
                     break

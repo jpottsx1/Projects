@@ -163,6 +163,18 @@ struct IntroPanel: View {
                       + "Longer loops sound less repetitive but need a longer "
                       + "stretch with no vocal.")
             }
+            HStack(spacing: 10) {
+                Text("Style").frame(width: 56, alignment: .leading)
+                Picker("", selection: $engine.style) {
+                    Text("Build up").tag("build")
+                    Text("Full loop").tag("full")
+                }
+                .pickerStyle(.segmented).labelsHidden().frame(width: 200)
+                .disabled(engine.isBusy)
+                .help("Build up brings the song's own drums in first, then the bass, then the "
+                      + "rest of the band, so the intro builds into the song. Full loop plays "
+                      + "the whole instrumental from the start.")
+            }
             Toggle("End on the song's own break or fill", isOn: $engine.endOnBreak)
                 .toggleStyle(.checkbox).controlSize(.small)
                 .disabled(engine.isBusy)
@@ -205,6 +217,17 @@ struct IntroPanel: View {
                             .foregroundStyle(source.vocalFree ? .green : .orange)
                         Text(String(format: "repeats %.2f", source.repeatScore))
                             .foregroundStyle(source.repeatScore >= 0.6 ? Color.secondary : Color.orange)
+                        if let feel = source.feel {
+                            Text(String(format: "feels like the song %.0f%%", max(0, 1 - feel) * 100))
+                                .foregroundStyle(feel <= 0.35 ? Color.secondary : Color.orange)
+                                .help("How closely the rhythm matches the bars the song arrives with.")
+                        }
+                        if let off = source.tempoOff, abs(off) >= 0.003 {
+                            Text(String(format: "tempo %+.1f%%", off * 100))
+                                .foregroundStyle(abs(off) <= 0.012 ? Color.secondary : Color.orange)
+                                .help("Against the song at the join. Up to 1.2% is matched by "
+                                      + "resampling the loop; more is left alone and will be heard.")
+                        }
                         if !source.snapped { Text("grid-timed").foregroundStyle(.orange) }
                         if (source.fill ?? 0) >= 0.5 {
                             Text("has a fill").foregroundStyle(.orange)
@@ -288,6 +311,16 @@ struct IntroPanel: View {
             } else if let note = render.leadInNote {
                 Text(note.prefix(1).uppercased() + note.dropFirst() + ".")
                     .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if let pct = render.retunedPct, abs(pct) > 0 {
+                Text(String(format: "The loop was resampled %+.2f%% to the song's tempo at the join.", pct))
+                    .font(.caption).foregroundStyle(.secondary)
+            } else if let off = render.tempoOffPct, abs(off) >= 0.5 {
+                Label(String(format: "The loop's tempo is %+.1f%% off the song at the join; "
+                             + "that is too far to match, so the intro will change speed there.", off),
+                      systemImage: "exclamationmark.triangle")
+                    .font(.caption).foregroundStyle(.orange)
                     .fixedSize(horizontal: false, vertical: true)
             }
             if let envelope = render.envelope {

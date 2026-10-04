@@ -56,6 +56,8 @@ struct IntroEvent: Decodable, Equatable {
     var leadInSeconds: Double?
     var leadInMatch: Double?
     var leadInNote: String?
+    var retunedPct: Double?
+    var tempoOffPct: Double?
 
     // envelope: the track as three bands over time, for drawing the picker
     var perSecond: Double?
@@ -80,6 +82,8 @@ struct IntroEvent: Decodable, Equatable {
         case leadInSeconds = "lead_in_seconds"
         case leadInMatch = "lead_in_match"
         case leadInNote = "lead_in_note"
+        case retunedPct = "retuned_pct"
+        case tempoOffPct = "tempo_off_pct"
         case perSecond = "per_second"
         case bass, mid, treble
         case joinSeconds = "join_seconds"
@@ -130,11 +134,19 @@ struct IntroSource: Decodable, Identifiable, Equatable {
     /// How far its most unusual bar is from the groove around it: 0 for the
     /// same pattern again, about 1 for a fill or a break. Heard on every repeat.
     var fill: Double? = nil
+    /// How the loop compares with the bars the song arrives with: rhythm
+    /// distance (0 = the same pattern), bar length over theirs minus 1, and
+    /// pitch-content match (1 = the same).
+    var feel: Double? = nil
+    var tempoOff: Double? = nil
+    var chromaMatch: Double? = nil
 
     var id: Int { bar }
 
     enum CodingKeys: String, CodingKey {
-        case bar, seconds, snapped, fill
+        case bar, seconds, snapped, fill, feel
+        case tempoOff = "tempo_off"
+        case chromaMatch = "chroma_match"
         case vocalDB = "vocal_db"
         case vocalFree = "vocal_free"
         case repeatScore = "repeat"

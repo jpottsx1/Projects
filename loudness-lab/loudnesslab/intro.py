@@ -44,11 +44,12 @@ import select
 import sys
 import time
 from dataclasses import dataclass, field
+from fractions import Fraction
 from pathlib import Path
 
 import numpy as np
 from scipy.ndimage import uniform_filter1d
-from scipy.signal import butter, fftconvolve, sosfilt, sosfiltfilt
+from scipy.signal import butter, fftconvolve, resample_poly, sosfilt, sosfiltfilt
 
 from . import decode, stems, subbass, write
 
@@ -127,6 +128,19 @@ FILL_OK = 0.3
 FILL_WEIGHT = 30.0
 FILL_NOTED = 0.5                # from here the loop is called out as having a fill
 DEVIATION_SLOTS = 16
+# A loop is chosen to sound like the bars the song arrives with, not like the
+# song's typical bar: how far its rhythm pattern is from theirs (0 = the same,
+# summed over the loop's bars), how far its bar length (tempo) is, how far its
+# pitch content is, and how far its level is. All traded in dB, like the rest.
+FEEL_WEIGHT = 25.0
+TEMPO_WEIGHT = 15.0             # per percent of bar length
+CHROMA_WEIGHT = 30.0
+JOIN_LEVEL_WEIGHT = 1.0
+# A loop whose tempo differs from the song's at the join by more than the
+# first number is resampled to it (a pitch change under a fifth of a semitone
+# at the second); more than that is left alone and called out.
+RETUNE_MIN = 0.0003
+RETUNE_MAX = 0.012
 # The song's own break or fill to end the intro on: a bar after which the drums
 # come back at least this much louder, so the intro's last bar leads into the
 # downbeat the way the song itself leads into one. The bar after it has to
@@ -168,6 +182,11 @@ class Source:
     snapped: bool = True            # both ends tied to a real kick
     repeat: float = 1.0             # how well the drums repeat one loop later, -1..1
     fill: float = 0.0               # most unusual bar's deviation from the groove, 0 = none
+    # How it compares with the bars the song arrives with (see `_reference`):
+    feel: float = 0.0               # rhythm pattern distance, 0 = the same
+    tempo_off: float = 0.0          # its bar length over theirs, minus 1
+    chroma_match: float = 1.0       # pitch content, 1 = the same
+    level_vs_join_db: float = 0.0   # its instrumental level minus theirs
 
 
 @dataclass
@@ -190,6 +209,12 @@ class Analysis:
     suggested_join_bar: int = 0
     join_reason: str = ""
     warnings: list[str] = field(default_factory=list)
+    # The two stems the instrumental is made of, kept apart so an intro can
+    # bring them in one at a time (`render` with style="build").
+    bass: np.ndarray = field(default_factory=lambda: np.zeros((0, 2), dtype=np.float32))
+    other: np.ndarray = field(default_factory=lambda: np.zeros((0, 2), dtype=np.float32))
+    # Per-track work worth doing once (bar patterns, pitch content).
+    cache: dict = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------- the grid
@@ -378,12 +403,13 @@ def analyse(x: np.ndarray, parts: dict[str, np.ndarray], rate: int,
                 confidence=confidence, how=how)
 
     return _layout(x, instrumental, parts["vocals"], parts["drums"], kicks, rate,
-                   grid, first_sound)
+                   grid, first_sound, bass=parts["bass"], other=parts["other"])
 
 
 def _layout(x: np.ndarray, instrumental: np.ndarray, vocals: np.ndarray,
             drums: np.ndarray, kicks: np.ndarray, rate: int, grid: Grid,
-            first_sound: int) -> Analysis:
+            first_sound: int, bass: np.ndarray | None = None,
+            other: np.ndarray | None = None) -> Analysis:
     """Bar lines, join and pickup for a grid whose downbeat phase is decided.
     Split from `analyse` so `rephase` can lay the same track out again with
     another beat as the first of the bar, without separating anything."""
@@ -430,7 +456,9 @@ def _layout(x: np.ndarray, instrumental: np.ndarray, vocals: np.ndarray,
         first_sound=first_sound, join=join, pickup=pickup,
         bar_lines=bar_lines, snapped=snapped, kicks=kicks,
         envelope=uniform_filter1d(drums_abs, max(1, int(0.003 * rate))),
-        warnings=warnings)
+        warnings=warnings,
+        **({} if bass is None else {"bass": bass}),
+        **({} if other is None else {"other": other}))
     analysis.suggested_join_bar, analysis.join_reason = suggest_join(analysis)
     return analysis
 
@@ -445,7 +473,7 @@ def rephase(a: Analysis, beats: int) -> Analysis:
                  downbeat_phase=(g.downbeat_phase + beats) % BEATS_PER_BAR,
                  confidence=1.0, how="set by hand")
     return _layout(a.original, a.instrumental, a.vocals, a.drums, a.kicks,
-                   a.rate, moved, a.first_sound)
+                   a.rate, moved, a.first_sound, bass=a.bass, other=a.other)
 
 
 # ------------------------------------------------------------ where it joins
@@ -629,6 +657,30 @@ def refine_length(a: Analysis, bar: int, loop_bars: int) -> tuple[int, float]:
     return direct + best - reach, r
 
 
+def bar_patterns(a: Analysis) -> np.ndarray:
+    """Per bar: its rhythm as DEVIATION_SLOTS slots (sixteenth notes, so half
+    beats and the offbeats are in it), each the loudest the instrumental gets
+    within a few milliseconds of the slot, scaled to the bar's own mean."""
+    if "patterns" in a.cache:
+        return a.cache["patterns"]
+    lines = a.bar_lines
+    bars = len(lines) - 1
+    pattern = np.zeros((max(bars, 0), DEVIATION_SLOTS))
+    if bars >= 1:
+        env = uniform_filter1d(np.abs(a.instrumental.mean(axis=1)).astype(np.float64),
+                               max(1, int(0.01 * a.rate)))
+        half = max(1, int(0.015 * a.rate))
+        for i in range(bars):
+            length = lines[i + 1] - lines[i]
+            for k in range(DEVIATION_SLOTS):
+                c = int(lines[i] + k * length / DEVIATION_SLOTS)
+                window = env[max(0, c - half):c + half]
+                pattern[i, k] = window.max() if window.size else 0.0
+        pattern /= pattern.mean(axis=1, keepdims=True) + 1e-12
+    a.cache["patterns"] = pattern
+    return pattern
+
+
 def bar_deviation(a: Analysis) -> np.ndarray:
     """Per bar: how far its rhythm is from the groove around it, 0 for the
     same pattern again, about 1 for a bar that is mostly something else.
@@ -642,21 +694,10 @@ def bar_deviation(a: Analysis) -> np.ndarray:
     (measured on Break My Soul, 2026-10-04). Counting hits did not separate
     them: a groove already full of eighth notes has as many in a fill bar.
     """
-    lines = a.bar_lines
-    bars = len(lines) - 1
+    pattern = bar_patterns(a)
+    bars = len(pattern)
     if bars < 1:
         return np.zeros(0)
-    env = uniform_filter1d(np.abs(a.instrumental.mean(axis=1)).astype(np.float64),
-                           max(1, int(0.01 * a.rate)))
-    half = max(1, int(0.015 * a.rate))
-    pattern = np.zeros((bars, DEVIATION_SLOTS))
-    for i in range(bars):
-        length = lines[i + 1] - lines[i]
-        for k in range(DEVIATION_SLOTS):
-            c = int(lines[i] + k * length / DEVIATION_SLOTS)
-            window = env[max(0, c - half):c + half]
-            pattern[i, k] = window.max() if window.size else 0.0
-    pattern /= pattern.mean(axis=1, keepdims=True) + 1e-12
     deviation = np.zeros(bars)
     for i in range(bars):
         near = [j for j in range(max(0, i - 4), min(bars, i + 5)) if j != i]
@@ -675,12 +716,19 @@ def fill_of(deviation: np.ndarray, i: int, loop_bars: int) -> float:
 
 
 def cost(s: Source) -> float:
-    """Lower is a better loop: how much vocal is in it (floored), how far
-    its level is from the track's typical bar, and how badly it fails to
-    repeat. Dimensions are all roughly dB so they can be traded."""
-    return (max(s.vocal_db, VOCAL_FLOOR_DB) + 0.5 * abs(s.level_db)
+    """Lower is a better loop: how much vocal is in it (floored), how badly
+    it fails to repeat or holds a fill, and above all how little it sounds
+    like the bars the song arrives with: rhythm, tempo, pitch content and
+    level (`_reference`). An intro that is louder or busier than the song it
+    leads into is a different song glued on. Dimensions are all roughly dB so
+    they can be traded."""
+    return (max(s.vocal_db, VOCAL_FLOOR_DB) + 0.25 * abs(s.level_db)
             + REPEAT_WEIGHT * (1.0 - max(s.repeat, 0.0))
-            + FILL_WEIGHT * max(0.0, s.fill - FILL_OK))
+            + FILL_WEIGHT * max(0.0, s.fill - FILL_OK)
+            + FEEL_WEIGHT * s.feel
+            + TEMPO_WEIGHT * 100.0 * abs(s.tempo_off)
+            + CHROMA_WEIGHT * (1.0 - s.chroma_match)
+            + JOIN_LEVEL_WEIGHT * abs(s.level_vs_join_db))
 
 
 def _bar_powers(a: Analysis) -> dict | None:
@@ -702,7 +750,43 @@ def _bar_powers(a: Analysis) -> dict | None:
             "typical_drm": np.median(drm[drm > 0]) if np.any(drm > 0) else 1.0}
 
 
-def _measure(a: Analysis, powers: dict, i: int, loop_bars: int) -> Source:
+def _reference(a: Analysis, join_bar: int, loop_bars: int) -> dict:
+    """What the song sounds like where it arrives: the `loop_bars` bars from
+    the join (fewer if the track ends sooner). A loop is judged against these
+    bars' rhythm, pitch content, level and bar length."""
+    lines = a.bar_lines
+    bars = len(lines) - 1
+    j = min(max(join_bar, 0), max(bars - 1, 0))
+    n = max(1, min(loop_bars, bars - j))
+    mono = a.instrumental.mean(axis=1).astype(np.float64)
+    return {
+        "bar": j, "n": n,
+        "pattern": bar_patterns(a)[j:j + n],
+        "chroma": bar_chroma(a)[j:j + n],
+        "power": float(np.mean(mono[lines[j]:lines[j + n]] ** 2)),
+        "bar_len": float(lines[j + n] - lines[j]) / n,
+    }
+
+
+def _compare(a: Analysis, ref: dict, i: int, loop_bars: int, length: int) -> dict:
+    """A loop's distance from the reference (see `_reference`)."""
+    patterns, chroma = bar_patterns(a), bar_chroma(a)
+    k = min(ref["n"], loop_bars, len(patterns) - i)
+    feel = float(np.mean([np.abs(patterns[i + t] - ref["pattern"][t]).sum()
+                          / (np.abs(ref["pattern"][t]).sum() + 1e-12) for t in range(k)])) if k else 0.0
+    match = float(np.mean([chroma[i + t] @ ref["chroma"][t]
+                           / (np.linalg.norm(chroma[i + t]) * np.linalg.norm(ref["chroma"][t]) + 1e-12)
+                           for t in range(k)])) if k else 1.0
+    lines = a.bar_lines
+    mono = a.instrumental.mean(axis=1).astype(np.float64)
+    power = float(np.mean(mono[lines[i]:lines[i + loop_bars]] ** 2))
+    return {"feel": feel, "chroma_match": match,
+            "tempo_off": length / loop_bars / ref["bar_len"] - 1.0,
+            "level_vs_join_db": float(_db(power / max(ref["power"], 1e-12)))}
+
+
+def _measure(a: Analysis, powers: dict, i: int, loop_bars: int,
+             ref: dict | None = None) -> Source:
     """The loop of `loop_bars` bars starting at bar `i`, measured. Its
     length is the attack-to-attack one until `refine_length` improves it."""
     w = slice(i, i + loop_bars)
@@ -715,11 +799,13 @@ def _measure(a: Analysis, powers: dict, i: int, loop_bars: int) -> Source:
         vocal_free=vocal_db <= VOCAL_FREE_DB, seconds=a.bar_lines[i] / a.rate,
         length=int(a.bar_lines[end] - a.bar_lines[i]),
         snapped=bool(a.snapped[i] and a.snapped[end]),
-        fill=fill_of(powers["dev"], i, loop_bars))
+        fill=fill_of(powers["dev"], i, loop_bars),
+        **({} if ref is None else _compare(a, ref, i, loop_bars,
+                                          int(a.bar_lines[end] - a.bar_lines[i]))))
 
 
 def candidates(a: Analysis, loop_bars: int = DEFAULT_LOOP_BARS,
-               count: int = 5) -> list[Source]:
+               count: int = 5, join_bar: int | None = None) -> list[Source]:
     """The best stretches of `loop_bars` bars to loop, best first.
 
     Measured per bar: the vocal stem's power against the instrumental's,
@@ -730,6 +816,10 @@ def candidates(a: Analysis, loop_bars: int = DEFAULT_LOOP_BARS,
     it comes first, then the one nearest the typical level, then the one
     that repeats best (see `cost`).
 
+    Judged against the bars the song arrives with at `join_bar` (default:
+    the suggested one): a loop that is busier, louder, faster or in another
+    key than the song it leads into is rank-ordered down however clean it is.
+
     Non-overlapping, so the list offers real alternatives to audition and
     not the same four bars shifted by one.
     """
@@ -739,7 +829,8 @@ def candidates(a: Analysis, loop_bars: int = DEFAULT_LOOP_BARS,
     bars = len(a.bar_lines) - 1
     if powers is None or bars < loop_bars + 1:
         return []
-    found = [_measure(a, powers, i, loop_bars)
+    ref = _reference(a, a.suggested_join_bar if join_bar is None else join_bar, loop_bars)
+    found = [_measure(a, powers, i, loop_bars, ref)
              for i in range(0, bars - loop_bars + 1)]
 
     def eligible(s: Source) -> bool:
@@ -763,11 +854,13 @@ def candidates(a: Analysis, loop_bars: int = DEFAULT_LOOP_BARS,
             break
     for s in shortlist:
         s.length, s.repeat = refine_length(a, s.bar, loop_bars)
+        s.tempo_off = s.length / loop_bars / ref["bar_len"] - 1.0
     shortlist.sort(key=cost)
     return shortlist[:count]
 
 
-def source_at(a: Analysis, bar: int, loop_bars: int) -> Source:
+def source_at(a: Analysis, bar: int, loop_bars: int,
+              join_bar: int | None = None) -> Source:
     """The stretch starting `bar` bars after the join, for a hand-picked
     loop: measured like any other, whether or not it would have ranked.
     Raises if it runs off the end."""
@@ -777,8 +870,10 @@ def source_at(a: Analysis, bar: int, loop_bars: int) -> Source:
         raise ValueError(f"bar {bar} with {loop_bars} bars runs past the end "
                          f"of the track ({len(a.bar_lines) - 1} bars after "
                          "the join)")
-    source = _measure(a, _bar_powers(a), bar, loop_bars)
+    ref = _reference(a, a.suggested_join_bar if join_bar is None else join_bar, loop_bars)
+    source = _measure(a, _bar_powers(a), bar, loop_bars, ref)
     source.length, source.repeat = refine_length(a, bar, loop_bars)
+    source.tempo_off = source.length / loop_bars / ref["bar_len"] - 1.0
     return source
 
 
@@ -794,6 +889,8 @@ def bar_chroma(a: Analysis) -> np.ndarray:
     """Per bar: the instrumental's pitch-class energy (12 values, summing to
     1), from a short STFT folded onto the octave. Coarse on purpose: it says
     whether two bars are in the same key and chord region, not which chord."""
+    if "chroma" in a.cache:
+        return a.cache["chroma"]
     mono = a.instrumental.mean(axis=1).astype(np.float64)
     size = 4096
     freqs = np.fft.rfftfreq(size, 1.0 / a.rate)
@@ -811,7 +908,8 @@ def bar_chroma(a: Analysis) -> np.ndarray:
                 break
             mag = np.abs(np.fft.rfft(chunk * window))[usable]
             out[i] += np.bincount(classes, weights=mag, minlength=12)
-    return out / (out.sum(axis=1, keepdims=True) + 1e-12)
+    a.cache["chroma"] = out / (out.sum(axis=1, keepdims=True) + 1e-12)
+    return a.cache["chroma"]
 
 
 def suggest_lead_in(a: Analysis, join_bar: int) -> tuple[int, float] | None:
@@ -852,7 +950,8 @@ def suggest_lead_in(a: Analysis, join_bar: int) -> tuple[int, float] | None:
 def render(a: Analysis, bars: int, source: Source,
            loop_bars: int = DEFAULT_LOOP_BARS,
            join_bar: int | None = None,
-           lead_in_bar: int | None = None) -> tuple[np.ndarray, dict]:
+           lead_in_bar: int | None = None,
+           style: str = "full") -> tuple[np.ndarray, dict]:
     """The intro edit: (audio, info). `bars` of the instrumental loop, then
     the original from its pickup / downbeat on.
 
@@ -865,6 +964,16 @@ def render(a: Analysis, bars: int, source: Source,
     Every cut is made GUARD_S ahead of the attack it precedes, and
     crossfaded over the SEAM_S before that, so a kick's front is never
     inside a fade.
+
+    `style` is "full" (the whole instrumental every repeat) or "build": the
+    drums alone first, the bass joining a quarter of the way in and the rest
+    of the band half way, the last repeat whole, so the intro arrives at the
+    song the way a DJ would bring the elements in. Each is a stem of the song,
+    so what comes in is what the song has.
+
+    The loop is resampled to the song's tempo at the join when it differs by
+    up to RETUNE_MAX (a live record's loop can be a percent off the bars it
+    leads into, which is a step in speed at the join).
 
     `lead_in_bar` is a bar of the song (see `suggest_lead_in`) laid in as the
     intro's LAST bar in place of the loop's: the song's own break or fill,
@@ -890,12 +999,33 @@ def render(a: Analysis, bars: int, source: Source,
     # measured length, not of a fitted tempo, so no tempo error can build
     # up across the seams. (It is `bars` bars of the SOURCE's tempo; the
     # song after the join keeps its own.)
-    unit = source.length or int(round(loop_bars * bar))
+    src_unit = source.length or int(round(loop_bars * bar))
+    ref = _reference(a, join_bar, loop_bars)
+    ratio = ref["bar_len"] * loop_bars / src_unit
+    retune = RETUNE_MIN < abs(ratio - 1.0) <= RETUNE_MAX
+    unit = int(round(src_unit * ratio)) if retune else src_unit
     repeats = bars // loop_bars
     join_out = repeats * unit                    # grid coordinates; the file
     shift = join_out - join                      # adds `lead` at the end
     total = n + shift
+    if style not in ("full", "build"):
+        raise ValueError(f"style must be 'full' or 'build', not {style!r}")
+    stems = style == "build" and len(a.bass) == len(a.instrumental) and len(a.other) == len(a.instrumental)
+    bass_in = round(repeats * 0.25)
+    other_in = min(round(repeats * 0.5), repeats - 1)
     mono_in = a.instrumental
+
+    def layer(m: int, lo: int, hi: int) -> np.ndarray:
+        """Repeat `m`'s audio from the source: the instrumental, or in the
+        build style only the stems that have come in by now."""
+        if not stems:
+            return mono_in[lo:hi].astype(np.float64)
+        mix = a.drums[lo:hi].astype(np.float64)
+        if m >= bass_in:
+            mix = mix + a.bass[lo:hi]
+        if m >= other_in:
+            mix = mix + a.other[lo:hi]
+        return mix
 
     # --- the loop: repeats laid back from the join, each crossfaded into
     # the next over the seam-length of pre-attack audio before its cut.
@@ -903,9 +1033,13 @@ def render(a: Analysis, bars: int, source: Source,
     loop = np.zeros((join_out + lead, 2), dtype=np.float64)
     cut = max(source.start - guard, 0)           # where each repeat's audio begins
     for m in range(repeats):
-        span = starts[m + 1] - starts[m]
-        pre = min(seam, cut)
-        seg = mono_in[cut - pre:min(cut + span, n)].astype(np.float64)
+        pre_src = min(seam, cut)
+        seg = layer(m, cut - pre_src, min(cut + src_unit, n))
+        pre = pre_src
+        if retune:
+            fraction = Fraction(ratio).limit_denominator(4000)
+            seg = resample_poly(seg, fraction.numerator, fraction.denominator, axis=0)
+            pre = int(round(pre_src * ratio))
         win = np.ones(len(seg))
         if pre:
             win[:pre] = _fade(pre)[0]
@@ -971,6 +1105,10 @@ def render(a: Analysis, bars: int, source: Source,
         "bars": bars,
         "loop_bars": loop_bars,
         "seconds_of_intro": round(join_out / rate, 3),
+        "intro_samples": int(join_out),
+        "style": style if (style == "full" or stems) else "full",
+        "retuned_pct": round((ratio - 1.0) * 100.0, 3) if retune else 0.0,
+        "tempo_off_pct": round((ratio - 1.0) * 100.0, 3) if not retune else 0.0,
         "lead_seconds": round(lead / rate, 4),
         "join_bar": join_bar,
         "lead_in_bar": lead_in_bar,
@@ -1192,7 +1330,9 @@ class Session:
     def _sources(self, request: dict, say) -> None:
         a = self._need()
         loop_bars = int(request.get("loop_bars", DEFAULT_LOOP_BARS))
-        found = candidates(a, loop_bars, count=int(request.get("count", 5)))
+        join_bar = request.get("join_bar")
+        found = candidates(a, loop_bars, count=int(request.get("count", 5)),
+                           join_bar=None if join_bar is None else int(join_bar))
         say("sources", loop_bars=loop_bars,
             sources=[source_fields(s) for s in found])
 
@@ -1200,16 +1340,16 @@ class Session:
         a = self._need()
         bars = int(request.get("bars", 16))
         loop_bars = int(request.get("loop_bars", DEFAULT_LOOP_BARS))
+        join_bar = request.get("join_bar")
+        chosen_join = a.suggested_join_bar if join_bar is None else int(join_bar)
         if request.get("source_bar") is not None:
-            source = source_at(a, int(request["source_bar"]), loop_bars)
+            source = source_at(a, int(request["source_bar"]), loop_bars, chosen_join)
         else:
-            found = candidates(a, loop_bars, count=1)
+            found = candidates(a, loop_bars, count=1, join_bar=chosen_join)
             if not found:
                 raise ValueError("the track is too short to take a loop from")
             source = found[0]
         say("stage", stage="rendering", name=self.path.name)
-        join_bar = request.get("join_bar")
-        chosen_join = a.suggested_join_bar if join_bar is None else int(join_bar)
         lead_in, match, note = None, None, None
         want = request.get("lead_in")
         if want == "auto":
@@ -1221,7 +1361,8 @@ class Session:
                 lead_in, match = found
         elif want is not None:
             lead_in = int(want)
-        audio, info = render(a, bars, source, loop_bars, chosen_join, lead_in)
+        audio, info = render(a, bars, source, loop_bars, chosen_join, lead_in,
+                             request.get("style", "build"))
         info["lead_in_match"] = None if match is None else round(match, 3)
         info["lead_in_note"] = note
         out_dir = Path(request["out"]) if request.get("out") else self.out_dir
@@ -1244,6 +1385,10 @@ def source_fields(s: Source) -> dict:
         "repeat": round(float(s.repeat), 2),
         "snapped": bool(s.snapped),
         "fill": round(float(s.fill), 2),
+        "feel": round(float(s.feel), 3),
+        "tempo_off": round(float(s.tempo_off), 5),
+        "chroma_match": round(float(s.chroma_match), 3),
+        "level_vs_join_db": round(float(s.level_vs_join_db), 1),
     }
 
 

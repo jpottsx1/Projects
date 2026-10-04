@@ -38,14 +38,16 @@ BAR = 4 * BEAT
 def song(bars: int = 36, pickup_beats: int = 0, vocal_bars=(range(0, 8), range(16, 24)),
          breakdown=range(28, 32), accent: bool = True, seed: int = 0,
          restless=range(0, 0), soft_bars=range(0, 0), lead_in_vocal_beats: int = 0,
-         fill_bars=()):
+         fill_bars=(), busy_bars=()):
     """`soft_bars`: an opening of the song's own, with no drums, no bass and
     no vocal, only the quiet pad: the part an intro edit cuts out.
     `lead_in_vocal_beats`: a sustained vocal over the last N beats of the
     soft opening, running into the drop.
     `fill_bars`: bars ending in the SAME roll of sixteenth snares every time,
     like a phrase-end fill: it repeats exactly, so only a measure of how a bar
-    differs from its neighbours can tell it from the groove."""
+    differs from its neighbours can tell it from the groove.
+    `busy_bars`: the same groove with sixteenth-note hats added, at about the
+    same level: a different feel, not a different loudness."""
     # (original, stems, join in seconds). Bar 0 starts at `pickup_beats`
     # beats in: before it, only a vocal pickup.
     rng = np.random.default_rng(seed)
@@ -68,6 +70,9 @@ def song(bars: int = 36, pickup_beats: int = 0, vocal_bars=(range(0, 8), range(1
                 fx._place(drums, t + BEAT / 2, fx._hat(int(0.08 * RATE), rng) * 0.25)
                 gain = 0.7 if (beat == 0 or not accent) else 0.3
                 fx._place(bass, t, gain * fx._pluck(int(BEAT * RATE), 55.0, 0.25))
+            if bar in busy_bars:
+                fx._place(drums, t + BEAT / 4, fx._hat(int(0.05 * RATE), rng) * 0.25)
+                fx._place(drums, t + 3 * BEAT / 4, fx._hat(int(0.05 * RATE), rng) * 0.25)
             if bar in fill_bars and beat >= 2:
                 for k in range(4):
                     fx._place(drums, t + k * BEAT / 4, fx._snare(int(0.1 * RATE), rng) * 0.6)
@@ -203,14 +208,18 @@ class TestWhereTheSongArrives(unittest.TestCase):
     def test_the_opening_is_cut_out_of_the_file(self):
         source = intro.candidates(self.a, 4)[0]
         cut, info = intro.render(self.a, 16, source)                  # suggested: bar 8
-        whole, _ = intro.render(self.a, 16, source, join_bar=0)       # keep the opening
+        whole, whole_info = intro.render(self.a, 16, source, join_bar=0)   # keep the opening
         join, pickup = intro.resolve_join(self.a, 8)
         # Same intro, so the files differ by exactly the bars between the
         # first bar and the join: the opening that was cut out. (The lead-in
         # kept ahead of the join changes where the original takes over, not
         # how long the file is.)
-        self.assertEqual(len(whole) - len(cut), join - self.a.join)
-        self.assertAlmostEqual((len(whole) - len(cut)) / RATE, 8 * BAR, delta=0.02)
+        # (Each intro is made to the tempo of the bars the song arrives with,
+        # which differ by a few samples between the two joins; that is in
+        # `intro_samples`.)
+        self.assertEqual(len(whole) - len(cut),
+                         join - self.a.join + whole_info["intro_samples"] - info["intro_samples"])
+        self.assertAlmostEqual((join - self.a.join) / RATE, 8 * BAR, delta=0.02)
         self.assertEqual(info["join_bar"], 8)
         self.assertEqual(info["suggested_join_bar"], 8)
         self.assertAlmostEqual(info["cut_seconds"], (join - pickup) / RATE, delta=0.001)
@@ -219,7 +228,7 @@ class TestWhereTheSongArrives(unittest.TestCase):
         source = intro.candidates(self.a, 4)[0]
         audio, info = intro.render(self.a, 16, source)
         join, _ = intro.resolve_join(self.a, 8)
-        join_out = (16 // 4) * source.length + round(info["lead_seconds"] * RATE)
+        join_out = info["intro_samples"] + round(info["lead_seconds"] * RATE)
         np.testing.assert_allclose(audio[join_out + 2000:], self.x[join + 2000:], atol=1e-6)
 
     def test_the_intro_has_the_groove_where_the_original_had_a_pad(self):
@@ -400,6 +409,98 @@ class TestAFillIsNotALoop(unittest.TestCase):
         source = intro.source_at(self.a, 2, 4)           # bars 2-5 hold fills at 3
         self.assertGreater(source.fill, intro.FILL_NOTED)
         self.assertGreater(intro.source_fields(source)["fill"], intro.FILL_NOTED)
+
+
+class TestSoundingLikeTheSong(unittest.TestCase):
+    """The intro is chosen to sound like the bars the song arrives with, not
+    like the song's typical bar, and built from the song's own stems."""
+
+    @classmethod
+    def setUpClass(cls):
+        busy = [b for b in range(8, 48) if not 24 <= b < 32]
+        x, parts, _ = song(bars=48, vocal_bars=(), breakdown=range(0, 0), busy_bars=busy)
+        cls.a = intro.analyse(x, parts, RATE, BPM)
+        cls.busy = set(busy)
+
+    def test_a_loop_is_taken_from_a_part_with_the_songs_own_feel(self):
+        # The song arrives at bar 0 on the plain groove; most of the record
+        # after it is busier, so its typical bar is the busy one.
+        best = intro.candidates(self.a, 4, join_bar=0)[0]
+        self.assertFalse(set(range(best.bar, best.bar + 4)) & self.busy, best)
+        self.assertLess(best.feel, 0.2)
+
+    def test_and_the_reference_moves_with_the_join(self):
+        best = intro.candidates(self.a, 4, join_bar=12)[0]
+        self.assertTrue(set(range(best.bar, best.bar + 4)) <= self.busy, best)
+
+    def test_feel_costs_a_loop_its_place(self):
+        near = intro.Source(bar=0, start=0, vocal_db=-20.0, level_db=0.0, drums_db=0.0,
+                            vocal_free=True, feel=0.05)
+        far = intro.Source(bar=0, start=0, vocal_db=-20.0, level_db=0.0, drums_db=0.0,
+                           vocal_free=True, feel=0.8)
+        self.assertGreater(intro.cost(far), intro.cost(near) + 10)
+
+    def test_a_tempo_step_at_the_join_costs_a_loop_its_place(self):
+        a = intro.Source(bar=0, start=0, vocal_db=-20.0, level_db=0.0, drums_db=0.0,
+                         vocal_free=True, tempo_off=0.0)
+        b = intro.Source(bar=0, start=0, vocal_db=-20.0, level_db=0.0, drums_db=0.0,
+                         vocal_free=True, tempo_off=0.01)
+        self.assertGreater(intro.cost(b), intro.cost(a) + 10)
+
+    def test_a_loop_a_little_off_the_songs_tempo_is_resampled_to_it(self):
+        source = intro.source_at(self.a, 24, 4, 0)
+        source.length = int(round(source.length * 1.008))         # 0.8% slow at the join
+        audio, info = intro.render(self.a, 16, source, 4, join_bar=0)
+        ref = intro._reference(self.a, 0, 4)
+        self.assertAlmostEqual(info["retuned_pct"], (ref["bar_len"] * 4 / source.length - 1) * 100,
+                               delta=0.01)
+        self.assertLess(info["retuned_pct"], -0.5)
+        self.assertEqual(info["tempo_off_pct"], 0.0)
+        # the intro is as long as four loops at the SONG's tempo, to a few samples
+        self.assertAlmostEqual(info["intro_samples"], 4 * ref["bar_len"] * 4, delta=8)
+
+    def test_a_loop_too_far_off_is_left_alone_and_said_so(self):
+        source = intro.source_at(self.a, 24, 4, 0)
+        source.length = int(round(source.length * 1.05))
+        _, info = intro.render(self.a, 16, source, 4, join_bar=0)
+        self.assertEqual(info["retuned_pct"], 0.0)
+        self.assertLess(info["tempo_off_pct"], -4.0)
+
+    def test_build_brings_the_stems_in_and_ends_whole(self):
+        source = intro.candidates(self.a, 4, join_bar=0)[0]
+        full, info = intro.render(self.a, 16, source, 4, join_bar=0, style="full")
+        built, binfo = intro.render(self.a, 16, source, 4, join_bar=0, style="build")
+        self.assertEqual(binfo["style"], "build")
+        self.assertEqual(full.shape, built.shape)
+        unit = info["intro_samples"] // 4
+        first = slice(2000, unit - 2000)
+        last = slice(3 * unit + 2000, 4 * unit - 2000)
+        self.assertTrue(np.allclose(full[last], built[last], atol=1e-6))
+        gap = np.sqrt(np.mean((full[first] - built[first]) ** 2))
+        self.assertGreater(gap, 0.05 * np.sqrt(np.mean(full[first] ** 2)))
+        # the first repeat is the drum stem and nothing else: silencing the
+        # bass and the rest changes nothing in it, and changes the last
+        # repeat's bass and the second repeat's bass
+        import dataclasses
+        drums_only = dataclasses.replace(self.a, bass=np.zeros_like(self.a.bass),
+                                         other=np.zeros_like(self.a.other))
+        bare, _ = intro.render(drums_only, 16, source, 4, join_bar=0, style="build")
+        self.assertTrue(np.allclose(built[first], bare[first], atol=1e-6))
+        second = slice(unit + 2000, 2 * unit - 2000)
+        self.assertFalse(np.allclose(built[second], bare[second], atol=1e-4))
+        self.assertFalse(np.allclose(built[last], bare[last], atol=1e-4))
+
+    def test_without_the_separate_stems_build_falls_back_to_the_whole_instrumental(self):
+        import dataclasses
+        bare = dataclasses.replace(self.a, bass=np.zeros((0, 2), dtype=np.float32),
+                                   other=np.zeros((0, 2), dtype=np.float32))
+        source = intro.candidates(bare, 4, join_bar=0)[0]
+        _, info = intro.render(bare, 16, source, 4, join_bar=0, style="build")
+        self.assertEqual(info["style"], "full")
+
+    def test_an_unknown_style_is_refused(self):
+        with self.assertRaises(ValueError):
+            intro.render(self.a, 16, intro.candidates(self.a, 4, join_bar=0)[0], 4, style="smooth")
 
 
 class TestEndingOnTheSongsOwnBreak(unittest.TestCase):
@@ -588,7 +689,7 @@ class TestTheEdit(unittest.TestCase):
         a = intro.analyse(x, parts, RATE, BPM)
         source = intro.candidates(a, 4)[0]
         audio, info = intro.render(a, 8, source)
-        join_out = (8 // 4) * source.length + round(info["lead_seconds"] * RATE)
+        join_out = info["intro_samples"] + round(info["lead_seconds"] * RATE)
         # The vocal pickup sits just ahead of the join, as it did.
         pickup = audio[join_out - int(lead * RATE):join_out - int(lead * RATE) + RATE // 4]
         self.assertGreater(tone_power(pickup), 1e-6)

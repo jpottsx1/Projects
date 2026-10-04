@@ -248,7 +248,7 @@ enum CLI {
     /// object, and two can arrive together. Holding the remainder until a
     /// newline turns up is the difference between a reliable reader and one
     /// that works until the buffer boundary lands badly.
-    private final class LineReader: @unchecked Sendable {
+    final class LineReader: @unchecked Sendable {
         private let lock = NSLock()
         private var partial = ""
         private let onLine: @Sendable (String) -> Void
@@ -277,7 +277,7 @@ enum CLI {
         }
     }
 
-    private final class Collected: @unchecked Sendable {
+    final class Collected: @unchecked Sendable {
         private let lock = NSLock()
         private var data = Data()
         func append(_ more: Data) { lock.lock(); data += more; lock.unlock() }

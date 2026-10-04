@@ -206,12 +206,15 @@ loudnesslab/     the Python: bs1770, spectrum, subbass, declip, expand,
                  air, mp3gain, decode, db, report, render, write, cli,
                  stems (Demucs: a drum stem for kicks, a guide for air),
                  machine (drum machine? the kick's own sound; measured only),
-                 bassline (a sub tone under the bass notes)
+                 bassline (a sub tone under the bass notes),
+                 intro (intro edits: a cold-start track given an intro
+                 made from its own instrumental; Session = `intro --serve`)
 tests/           its tests
 tools/           make_golden.py, the five checkers, measure_stem_kicks.py
 macapp/
   Sources/LoudnessKit/    the port: DSP, Loudness, Process, IO, Library
-  Sources/LoudnessLabUI/   the interface, as a LIBRARY: Engine, ABPlayer, Views.
+  Sources/LoudnessLabUI/   the interface, as a LIBRARY: Engine, ABPlayer, Views,
+                          and the Intro tab (IntroPanel/IntroEngine/IntroSession).
                           DiscoTags embeds it as its Loudness tab, so this
                           is shared code, not this app's alone.
   Sources/LoudnessLabApp/  just the window and the menu bar
@@ -1402,6 +1405,113 @@ late-80s pop it is hi-hats, snare rattle, claps and vocal sibilance, and
 a gain moving that fast over them is heard as tick and grit. No built-in
 profile turns Punch on, and on this material it should stay off until
 the shaping is made slower or band-aware.
+
+## Intro edits: an intro made from the track itself
+
+`loudness-lab intro <file> --bars 8 16 32` (`loudnesslab/intro.py`,
+`tests/test_intro.py`). Jeff asked for it 2026-10-03, after introedits.com:
+a track that starts cold gets N bars in front of it, made by looping its own
+instrumental, and then arrives where it always did, on the grid. Writes
+copies into `~/Music/LoudnessLab/Intro Edits`; never the original.
+
+How: Demucs (MLX, ONE piece at a time -- batch 2 swapped a 16 GB Mac for
+10+ minutes on one track, see `scans/separation-speed-2026-09-29-*.txt`;
+29 s a 4:41 track against 33 s for PyTorch) gives drums/bass/other/vocals.
+The loop is drums+bass+other, so the vocal is out of it by construction;
+the loop is chosen for little vocal, a real groove, and **repeating** (see
+below). The join is the first bar line at or before the track's first sound,
+and a vocal pickup ahead of it is kept: the original takes over at the
+pickup. After the join the original's samples are copied untouched.
+
+Things that were learned the hard way, so not to be learned again:
+
+- **The tag is not a tempo.** A grid placed by the tagged BPM drifted half a
+  beat across a track. The period is read from the kicks' own spacing
+  (`fit_grid`), and bar lines are FOLLOWED bar by bar (`analyse`: each is
+  looked for one bar after the last one found), not computed from a global
+  tempo.
+- **No global tempo is accurate enough to tile with.** On three real records
+  the tempo read from kicks varied 0.3-0.5% between estimators, which is
+  5-12 ms of hiccup at every seam of a 4-bar loop. So the loop's length is
+  measured off the loop (`refine_length`): the drum envelope of its first
+  bar is cross-correlated with the audio one loop later. Against the
+  original's own bar-to-bar timing, the seam error went from 7-18 ms
+  (attack-to-attack) to 0-4 ms on two of three records. The third
+  (Lost In Music) picked a build that does not repeat; hence...
+- **Rank on whether it repeats** (`Source.repeat`, `cost`): Pearson r of the
+  first bar's drum envelope against the same place a loop on. A stretch
+  with a fill or a build has no length that makes its seam land. Below
+  `MIN_REPEAT` the result is warned about, not silently produced.
+- **The kick detector's onset is ~10 ms late** (it reads a 60 Hz envelope's
+  rise). A cut there lands inside the kick and the crossfade eats its front.
+  `attack()` looks back on the drum stem for the first sample over 8% of the
+  kick's peak, and cuts go `GUARD_S` ahead of that. The file also begins
+  `SEAM_S` early so the first kick is not faded in.
+- **A vocal stem exactly silent scored -120 dB**, which no other term could
+  outweigh. `VOCAL_FLOOR_DB` stops that.
+- **Serato cues and beatgrid are NOT carried** (`write(keep_markers=False)`):
+  they describe the track without its intro and would be a whole intro
+  early. Text tags and artwork travel.
+- **A test that fits its grid to the thing it tests is blind.** The first
+  "beat does not slip" test passed with the loop 40 samples long, because the
+  grid fit absorbed the drift. It now uses the true period; a loop 40 samples
+  long shows 3.7 ms against a 1.5 ms limit. When changing these tests,
+  mutate the code and watch them fail.
+
+Not measured / open: whether the result sounds right (only numbers have been
+checked: seams, grid, level continuity); whether the downbeat guess is right
+on tracks with even accents (it falls back to the song's start, and says so);
+tracks with a long kick-less opening (the grid is extrapolated); a live
+record that drifts.
+
+**In the app.** The right pane has a third tab, **Intro** (`IntroPanel`,
+`IntroEngine`, `IntroSession`). A host reaches it two ways, for the same
+reason the Loudness seed has two: a notification posted before the view
+exists is lost. On the FIRST open, `LoudnessLabView(introFocus: url)` starts
+on Intro with that track chosen; once the view is alive,
+`LoudnessLab.showIntro(focus: url)` switches it and `addSources` ticks the
+tracks. Disco Tags' right-click **Make Intro Edit...** does exactly this
+(`LibraryModel.requestMakeIntroEdit`, `LibraryView.sendToLoudnessLab(showIntro:)`);
+it needs a selection and never falls back to the whole library, because
+that is half a minute a track. It works on the
+ticked tracks: pick one, Analyse (separates it, about 30 s), choose a loop
+from the ranked list (each shows its vocal level and how well it repeats),
+tick 8/16/32 bars, Make intro, then "Play the join" -- which starts 8 s
+before the song arrives, because that is where a bad seam or a late
+downbeat shows. "Make intros for all ticked" runs the one-shot command over
+the lot with the best loop each.
+
+How it talks to the Python: `loudness-lab intro --serve` reads JSON requests
+on stdin (`prepare`, `sources`, `render`, `quit`; each with an `id`) and
+writes JSON events on stdout, the last of which is `done` or `error`
+carrying the `id` back (`intro.Session`). It keeps ONE separated track in
+memory (~600 MB), because separating is the half minute and everything
+after it is seconds -- run as a command per click, every change of loop
+would pay it again. `IntroSession` is the Swift end: one request at a time,
+a dead process is reported with its stderr rather than hanging, and the
+next request starts a fresh one.
+
+Tests: `tests/test_intro.py` (Python, 41), `macapp/Tests/LoudnessLabUITests`
+(Swift: decoding against REAL event lines, the session against a stand-in
+tool, one end-to-end test). Two are off unless asked, because they need the
+real tool or a window server:
+
+```sh
+LOUDNESSLAB_E2E_FILE=/path/to/track.mp3 swift test --package-path macapp --filter testRealToolEndToEnd
+LOUDNESSLAB_SNAPSHOT_DIR=/tmp/intro swift test --package-path macapp --filter IntroSnapshotTests
+```
+
+The snapshot test draws the tab in five states to PNGs, because layout
+cannot be judged from code (it found a hint that said "Analyse a track
+first" in the middle of a batch). It uses an `NSHostingView` in a window,
+not `ImageRenderer`, which does not draw native controls; and the window
+needs `isReleasedWhenClosed = false` or ARC double-frees it and the test
+segfaults after writing every picture.
+
+Things to remember when changing the event format: the Swift decoder is
+tested against lines copied from the Python's real output, and a `grep -v
+warn` over that output once hid every `prepared` and `intro` event, because
+they carry a `warnings` field.
 
 ## Open
 

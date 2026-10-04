@@ -9,6 +9,7 @@ struct ContentView: View {
     /// host's original selection there would silently undo whatever the
     /// person had ticked since.
     private let initialInclude: Set<String>?
+    private let initialIntroFocus: URL?
     @State private var didSeedSelection = false
 
     /// - Parameters:
@@ -16,9 +17,13 @@ struct ContentView: View {
     ///     already knows what it wants worked on.
     ///   - initialInclude: paths to tick once that scan lands. Nil keeps
     ///     the queue's own default of everything it found.
-    init(initialFolders: [URL] = [], initialInclude: Set<String>? = nil) {
+    ///   - initialIntroFocus: open on the Intro tab with this track selected.
+    init(initialFolders: [URL] = [], initialInclude: Set<String>? = nil,
+         initialIntroFocus: URL? = nil) {
         self.initialInclude = initialInclude
+        self.initialIntroFocus = initialIntroFocus
         _folders = State(initialValue: initialFolders)
+        if initialIntroFocus != nil { _rightTab = State(initialValue: .intro) }
     }
 
     @Environment(\.openWindow) private var openWindow
@@ -26,6 +31,7 @@ struct ContentView: View {
     @StateObject private var player = ABPlayer()
     @StateObject private var queue = Queue()
     @StateObject private var personal = PersonalProfiles()
+    @StateObject private var intro = IntroEngine()
 
     @State private var folders: [URL] = []
     @State private var profile = Profile()
@@ -57,7 +63,7 @@ struct ContentView: View {
     /// Survey first, deliberately. You cannot choose a policy for a folder
     /// you have not looked at, and looking at it used to mean a terminal.
     enum RightTab: String, CaseIterable, Identifiable {
-        case survey = "Survey", results = "Results"
+        case survey = "Survey", results = "Results", intro = "Intro"
         var id: String { rawValue }
     }
 
@@ -144,19 +150,25 @@ struct ContentView: View {
                                 })
                         case .results:
                             ResultsPanel(manifest: engine.manifest, chosen: $chosen)
+                        case .intro:
+                            IntroPanel(engine: intro,
+                                       ticked: queue.items.filter(\.included))
                         }
-                        if !wideWaveform {
+                        // The A/B player is for a processing run's versions;
+                        // the Intro tab has its own player for its own files.
+                        if !wideWaveform && rightTab != .intro {
                             Divider()
                             ComparePanel(player: player, track: chosen, blind: $blind,
                                          wide: $wideWaveform, estimator: profile.estimator)
                         }
                         Divider()
-                        LogPanel(text: engine.log, failure: engine.failure ?? player.problem,
-                                 collapsed: rightTab == .results)
+                        LogPanel(text: engine.log,
+                                 failure: engine.failure ?? player.problem ?? intro.player.problem,
+                                 collapsed: rightTab != .survey)
                     }
                     .frame(minWidth: 520)
                 }
-                if wideWaveform {
+                if wideWaveform && rightTab != .intro {
                     Divider()
                     ComparePanel(player: player, track: chosen, blind: $blind,
                                  wide: $wideWaveform, estimator: profile.estimator)
@@ -165,6 +177,18 @@ struct ContentView: View {
             }
         }
         .onChange(of: chosen) { _, track in loadIntoPlayer(track) }
+        // Two players, one pair of ears: whichever tab is left stops.
+        .onChange(of: rightTab) { old, new in
+            if old == .intro { intro.stopPlaying() }
+            if new == .intro { player.stop() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .loudnessLabShowIntro)) { note in
+            if let url = note.object as? URL { intro.focusPath = url.path }
+            rightTab = .intro
+        }
+        .onAppear {
+            if let initialIntroFocus { intro.focusPath = initialIntroFocus.path }
+        }
         // The queue follows the folders, and refreshes after a run because
         // a run measures tracks that had no numbers before.
         .task(id: folders) {
@@ -192,6 +216,10 @@ struct ContentView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .showHelp)) { _ in
             openWindow(id: "help")
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .loudnessLabAddSources)) { note in
+            guard let urls = note.object as? [URL] else { return }
+            for url in urls { queue.setIncluded(true, for: url.path) }
         }
     }
 

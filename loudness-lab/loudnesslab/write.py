@@ -71,7 +71,7 @@ def _encoder_arguments(fmt: str) -> list[str]:
 
 
 def write(path: Path, x: np.ndarray, rate: int, source: Path | None = None,
-          fmt: str = DEFAULT_FORMAT) -> Path:
+          fmt: str = DEFAULT_FORMAT, keep_markers: bool = True) -> Path:
     """Write `x` beside `path`, in `fmt`, carrying what tags can travel.
 
     `path` is named without an extension by the caller having one already;
@@ -86,6 +86,10 @@ def write(path: Path, x: np.ndarray, rate: int, source: Path | None = None,
     com.serato.dj atoms respectively), which is a different job and needs a
     real Serato file of each to check against. So text tags travel
     everywhere; markers travel MP3 to MP3.
+
+    `keep_markers=False` is for audio whose timeline is no longer the
+    original's (an intro edit): the cues and beatgrid would point at the
+    wrong place, so only text tags and artwork travel.
     """
     if fmt not in FORMATS:
         raise ValueError(f"unknown format {fmt!r}; one of {', '.join(FORMATS)}")
@@ -94,7 +98,7 @@ def write(path: Path, x: np.ndarray, rate: int, source: Path | None = None,
 
     # MP3 out of MP3 takes the original tag wholesale rather than letting
     # ffmpeg write a new one, so ffmpeg is told to write none.
-    carry_whole_tag = (fmt == "mp3" and source is not None
+    carry_whole_tag = (fmt == "mp3" and keep_markers and source is not None
                        and source.suffix.lower() == ".mp3")
 
     command = ["ffmpeg", "-nostdin", "-v", "error", "-y",

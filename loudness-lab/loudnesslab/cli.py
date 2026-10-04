@@ -16,8 +16,8 @@ import time
 from pathlib import Path
 
 from . import (__version__, analyze, apply_gain, bs1770, db, declip, decode,
-               air, expand, mp3gain, mud, profiles, render, replace, report,
-               stems, subbass, write)
+               air, expand, intro, mp3gain, mud, profiles, render, replace,
+               report, stems, subbass, write)
 
 
 def _progress_printer(start: float):
@@ -466,6 +466,118 @@ def _replace_originals(manifest: list, out, porcelain: bool):
         if porcelain:
             _emit({"event": "note", "message": line.strip()})
     return batch, swapped
+
+
+def cmd_intro(args: argparse.Namespace) -> int:
+    """Intro edits: a cold-start track given an intro made from itself.
+
+    Writes copies into --out (default ~/Music/LoudnessLab/Intro Edits);
+    the originals are never touched. Separating the song is the slow part,
+    about half a minute a track, and it is done once however many lengths
+    are asked for.
+    """
+    if args.serve:
+        return _serve_intro(args)
+    files: list[Path] = []
+    for path in args.path:
+        files += decode.find_audio(path) if path.is_dir() else [path]
+    if not files:
+        sys.stderr.write("error: no audio files found\n")
+        return 2
+    out_dir = args.out or intro.default_out_dir()
+    loop_bars = args.loop_bars
+    bad = [b for b in args.bars if b % loop_bars]
+    if bad:
+        sys.stderr.write(f"error: {', '.join(map(str, bad))} bars is not a whole "
+                         f"number of {loop_bars}-bar loops; change --loop-bars\n")
+        return 2
+
+    failed = 0
+    for index, source in enumerate(files, 1):
+        try:
+            if args.json:
+                print(json.dumps({"event": "file", "name": source.name,
+                                  "path": str(source), "index": index,
+                                  "total": len(files)}), flush=True)
+            else:
+                sys.stderr.write(f"{source.name}: separating...\n")
+            a = intro.prepare(source, bpm=args.bpm, downbeat_s=args.downbeat,
+                              separator=args.separator)
+            if args.source_bar is not None:
+                chosen = [intro.source_at(a, args.source_bar, loop_bars)]
+            else:
+                chosen = intro.candidates(a, loop_bars, count=5)
+            if not chosen:
+                raise ValueError("the track is too short to take a loop from")
+            if args.list_sources:
+                _print_sources(source, a, chosen, args.json)
+                continue
+            for bars in args.bars:
+                audio, info = intro.render(a, bars, chosen[0], loop_bars)
+                target = intro.write_intro(a, source, audio, bars, out_dir,
+                                           args.format)
+                info.update(source=str(source), output=str(target))
+                if args.json:
+                    print(json.dumps({"event": "intro", **info}), flush=True)
+                else:
+                    print(f"{target}")
+                    print(f"  {bars} bars at {info['bpm']:.2f} BPM "
+                          f"({info['seconds_of_intro']:.1f} s), looping bars "
+                          f"{info['source_bar']}-{info['source_bar'] + loop_bars - 1}"
+                          f" after the join ({info['source_seconds']:.1f} s in)")
+                    for note in info["warnings"]:
+                        print(f"  NOTE: {note}")
+        except Exception as exc:                   # noqa: BLE001 - one bad file
+            failed += 1                            # must not end a batch
+            sys.stderr.write(f"error: {source.name}: {exc}\n")
+            if args.json:
+                print(json.dumps({"event": "error", "path": str(source),
+                                  "name": source.name, "message": str(exc)}),
+                      flush=True)
+    return 1 if failed else 0
+
+
+def _serve_intro(args: argparse.Namespace) -> int:
+    """`intro --serve`: JSON requests on stdin, JSON events on stdout, one
+    track kept in memory between them (see `intro.Session`)."""
+    session = intro.Session(out_dir=args.out)
+
+    def emit(event: dict) -> None:
+        print(json.dumps(event), flush=True)
+
+    for line in sys.stdin:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            request = json.loads(line)
+        except json.JSONDecodeError as exc:
+            emit({"event": "error", "id": None, "message": f"not JSON: {exc}"})
+            continue
+        if not session.handle(request, emit):
+            break
+    return 0
+
+
+def _print_sources(source: Path, a, chosen, as_json: bool) -> None:
+    if as_json:
+        print(json.dumps({
+            "event": "sources", "source": str(source),
+            "bpm": round(a.grid.bpm, 3), "join_seconds": round(a.join / a.rate, 3),
+            "sources": [{"bar": s.bar, "seconds": round(s.seconds, 3),
+                         "vocal_db": round(s.vocal_db, 1),
+                         "vocal_free": s.vocal_free,
+                         "repeat": round(s.repeat, 2)} for s in chosen]}),
+            flush=True)
+        return
+    print(f"{source.name}: {a.grid.bpm:.2f} BPM, first bar at "
+          f"{a.join / a.rate:.2f} s (from {a.grid.how})")
+    for note in a.warnings:
+        print(f"  NOTE: {note}")
+    for i, s in enumerate(chosen, 1):
+        clean = "no vocal" if s.vocal_free else f"vocal {s.vocal_db:+.0f} dB"
+        print(f"  {i}. bar {s.bar:3d}  {s.seconds:6.1f} s in   {clean:<12s} "
+              f"repeats {s.repeat:.2f}")
 
 
 def cmd_restore(args: argparse.Namespace) -> int:
@@ -1789,6 +1901,39 @@ def build_parser() -> argparse.ArgumentParser:
                       help="reverse in-place changes recorded in the database")
     gain.add_argument("--limit", type=int, default=40)
     gain.set_defaults(func=cmd_gain)
+
+    made = subparsers.add_parser(
+        "intro", help="give a cold-start track an intro made from itself")
+    made.add_argument("path", type=Path, nargs="*",
+                      help="audio files, or folders of them")
+    made.add_argument("--serve", action="store_true",
+                      help="read JSON requests on stdin and answer on stdout, "
+                           "keeping one separated track in memory; for the app")
+    made.add_argument("--bars", type=int, nargs="+", default=[16],
+                      choices=intro.LENGTHS,
+                      help="intro length(s) in bars; several make several "
+                           "files from one separation (default: 16)")
+    made.add_argument("--loop-bars", type=int, default=intro.DEFAULT_LOOP_BARS,
+                      choices=intro.LOOP_BARS,
+                      help="length of the loop that is tiled (default: 4)")
+    made.add_argument("--source-bar", type=int, default=None,
+                      help="loop from this bar after the first one, instead "
+                           "of the best stretch; see --list-sources")
+    made.add_argument("--list-sources", action="store_true",
+                      help="print the best stretches to loop and stop")
+    made.add_argument("--bpm", type=float, default=None,
+                      help="the tempo, if the file has no BPM tag")
+    made.add_argument("--downbeat", type=float, default=None, metavar="SECONDS",
+                      help="where the first bar line is, if the guess is wrong")
+    made.add_argument("--format", choices=list(write.FORMATS), default=None,
+                      help="default: the original's (MP3, AAC or FLAC)")
+    made.add_argument("--separator", choices=list(stems.BACKENDS), default=None,
+                      help="default: MLX where installed, else PyTorch")
+    made.add_argument("--out", type=Path, default=None,
+                      help="default: ~/Music/LoudnessLab/Intro Edits")
+    made.add_argument("--json", action="store_true",
+                      help="one JSON object per line, for a program")
+    made.set_defaults(func=cmd_intro)
 
     show_profiles = subparsers.add_parser(
         "profiles", help="list the available settings bundles")

@@ -48,6 +48,14 @@ final class IntroEngine: ObservableObject {
         /// opening was cut out to make room for the intro.
         var joinBar: Int = 0
         var cutSeconds: Double = 0
+        /// The song's own bar the intro ends on, if one was used, and why not
+        /// if one was asked for and none fitted.
+        var leadInBar: Int?
+        var leadInSeconds: Double?
+        var leadInNote: String?
+        /// The finished file drawn the way the original is; nil if the tool
+        /// did not send it.
+        var envelope: JoinEnvelope?
 
         var id: String { url.path }
         var name: String { url.deletingPathExtension().lastPathComponent }
@@ -89,6 +97,11 @@ final class IntroEngine: ObservableObject {
     /// Bumped on every request, so asking for the track already named
     /// still moves the picker back to it.
     @Published private(set) var focusTick = 0
+    /// Beats the bar lines have been moved by hand from where the tool put
+    /// them, 0-3. Kept here so a reloaded track can be put back the same way.
+    @Published private(set) var beatShift = 0
+    /// End the intro on the song's own break or fill, when it has one.
+    @Published var endOnBreak = false
     func focus(_ path: String) { focusPath = path; focusTick += 1 }
 
     let player = ABPlayer()
@@ -115,6 +128,7 @@ final class IntroEngine: ObservableObject {
         failure = nil
         stopPlaying()
         track = nil; sources = []; chosenBar = nil; envelope = nil; joinBar = 0
+        beatShift = 0
         if session == nil { session = IntroSession(tool: tool) }
         busy = "Separating into stems… about half a minute."
         defer { busy = nil }
@@ -164,7 +178,42 @@ final class IntroEngine: ObservableObject {
         } catch let failure as IntroSession.Failure where failure.code == "no_track" {
             busy = "Loading the track again… about half a minute."
             _ = try await session.request("prepare", ["path": track.path])
+            if beatShift != 0 { _ = try await session.request("rephase", ["beats": beatShift]) }
             return try await session.request(command, fields)
+        }
+    }
+
+    /// Calls another beat the first of the bar, by `beats` (negative: earlier).
+    /// The tool picks the downbeat from the accents in the low end, which a
+    /// four-on-the-floor record does not have; this is how to correct it by
+    /// ear. Nothing is separated again, so it is quick.
+    func moveBeatOne(by beats: Int) async {
+        guard let old = track, !isBusy else { return }
+        failure = nil
+        stopPlaying()
+        busy = "Moving the bar lines…"
+        defer { busy = nil }
+        do {
+            let events = try await ask("rephase", ["beats": beats])
+            guard let grid = events.first(where: { $0.event == "grid" }) else {
+                failure = "The intro tool did not report the new bar lines."
+                return
+            }
+            beatShift = ((beatShift + beats) % 4 + 4) % 4
+            track = Track(path: old.path, name: old.name, seconds: old.seconds, bpm: old.bpm,
+                          joinSeconds: grid.joinSeconds ?? old.joinSeconds,
+                          pickupSeconds: grid.pickupSeconds ?? 0,
+                          downbeatFrom: grid.downbeatFrom ?? "",
+                          barsAfterJoin: grid.barsAfterJoin ?? 0,
+                          warnings: grid.warnings ?? [],
+                          barSeconds: grid.barSeconds ?? old.barSeconds,
+                          suggestedJoinBar: grid.suggestedJoinBar ?? 0,
+                          joinReason: grid.joinReason ?? "")
+            joinBar = track?.suggestedJoinBar ?? 0
+            chosenBar = nil
+            await loadSources(whileBusy: true)
+        } catch {
+            failure = error.localizedDescription
         }
     }
 
@@ -216,11 +265,16 @@ final class IntroEngine: ObservableObject {
             var fields: [String: Any] = ["bars": bars, "loop_bars": loopBars,
                                          "join_bar": joinBar]
             if let chosenBar { fields["source_bar"] = chosenBar }
+            if endOnBreak { fields["lead_in"] = "auto" }
             if let outputDirectory { fields["out"] = outputDirectory.path }
             do {
                 let events = try await ask("render", fields)
                 if let made = events.first(where: { $0.event == "intro" }),
-                   let render = Self.render(from: made) {
+                   var render = Self.render(from: made) {
+                    if let drawn = events.first(where: { $0.event == "render_envelope"
+                                                         && $0.output == made.output }) {
+                        render.envelope = JoinEnvelope(event: drawn)
+                    }
                     renders.removeAll { $0.id == render.id }
                     renders.insert(render, at: 0)
                 }
@@ -272,6 +326,23 @@ final class IntroEngine: ObservableObject {
                                  cutSeconds: render.cutSeconds)
     }
 
+    /// Space bar in the track list: the start of a track as it is, before it
+    /// is analysed or ticked, to hear whether it starts cold. Again stops it.
+    func togglePreview(_ path: String) {
+        if playing == path && player.isPlaying { stopPlaying(); return }
+        player.loadOrReport([ABPlayer.Source(
+            id: path, label: URL(fileURLWithPath: path).lastPathComponent,
+            url: URL(fileURLWithPath: path), matchGainDB: 0)])
+        playing = path
+        player.play(from: 0)
+    }
+
+    /// Drops the list of edits made so far, for when another song is chosen.
+    func forgetMade() {
+        if let playing, renders.contains(where: { $0.id == playing }) { stopPlaying() }
+        renders = []
+    }
+
     func stopPlaying() {
         player.stop()
         playing = nil
@@ -297,6 +368,7 @@ final class IntroEngine: ObservableObject {
         var arguments = ["intro"] + paths
         arguments += ["--bars"] + lengths.sorted().map(String.init)
         arguments += ["--loop-bars", String(loopBars), "--json"]
+        if endOnBreak { arguments.append("--lead-in") }
         if let outputDirectory { arguments += ["--out", outputDirectory.path] }
 
         do {
@@ -333,7 +405,7 @@ final class IntroEngine: ObservableObject {
         stopPlaying()
         session?.close(); session = nil
         track = nil; sources = []; chosenBar = nil; batch = nil; failure = nil
-        envelope = nil; joinBar = 0
+        envelope = nil; joinBar = 0; beatShift = 0
     }
 
     nonisolated static func render(from event: IntroEvent) -> Render? {
@@ -349,7 +421,9 @@ final class IntroEngine: ObservableObject {
                       repeatScore: event.loopRepeat ?? 0,
                       warnings: event.warnings ?? [],
                       joinBar: event.joinBar ?? 0,
-                      cutSeconds: event.cutSeconds ?? 0)
+                      cutSeconds: event.cutSeconds ?? 0,
+                      leadInBar: event.leadInBar, leadInSeconds: event.leadInSeconds,
+                      leadInNote: event.leadInNote)
     }
 }
 

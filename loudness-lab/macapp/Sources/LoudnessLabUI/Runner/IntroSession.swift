@@ -52,6 +52,10 @@ struct IntroEvent: Decodable, Equatable {
     var loopSnapped: Bool?
     var joinBar: Int?
     var cutSeconds: Double?
+    var leadInBar: Int?
+    var leadInSeconds: Double?
+    var leadInMatch: Double?
+    var leadInNote: String?
 
     // envelope: the track as three bands over time, for drawing the picker
     var perSecond: Double?
@@ -72,6 +76,10 @@ struct IntroEvent: Decodable, Equatable {
         case barSeconds = "bar_seconds"
         case joinBar = "join_bar"
         case cutSeconds = "cut_seconds"
+        case leadInBar = "lead_in_bar"
+        case leadInSeconds = "lead_in_seconds"
+        case leadInMatch = "lead_in_match"
+        case leadInNote = "lead_in_note"
         case perSecond = "per_second"
         case bass, mid, treble
         case joinSeconds = "join_seconds"
@@ -119,11 +127,14 @@ struct IntroSource: Decodable, Identifiable, Equatable {
     /// stretch that does not (a build, a fill) makes a seam that misses.
     let repeatScore: Double
     let snapped: Bool
+    /// How far its most unusual bar is from the groove around it: 0 for the
+    /// same pattern again, about 1 for a fill or a break. Heard on every repeat.
+    var fill: Double? = nil
 
     var id: Int { bar }
 
     enum CodingKeys: String, CodingKey {
-        case bar, seconds, snapped
+        case bar, seconds, snapped, fill
         case vocalDB = "vocal_db"
         case vocalFree = "vocal_free"
         case repeatScore = "repeat"

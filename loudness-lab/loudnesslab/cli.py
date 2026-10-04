@@ -512,9 +512,14 @@ def cmd_intro(args: argparse.Namespace) -> int:
             if args.list_sources:
                 _print_sources(source, a, chosen, args.json)
                 continue
+            lead_in = None
+            if args.lead_in:
+                found = intro.suggest_lead_in(
+                    a, a.suggested_join_bar if args.join_bar is None else args.join_bar)
+                lead_in = found[0] if found else None
             for bars in args.bars:
                 audio, info = intro.render(a, bars, chosen[0], loop_bars,
-                                           args.join_bar)
+                                           args.join_bar, lead_in)
                 target = intro.write_intro(a, source, audio, bars, out_dir,
                                            args.format)
                 info.update(source=str(source), output=str(target))
@@ -1907,6 +1912,9 @@ def build_parser() -> argparse.ArgumentParser:
                       help="the bar line the song arrives at; everything before "
                            "it is replaced by the intro (default: where the "
                            "full groove lands; 0 keeps the whole opening)")
+    made.add_argument("--lead-in", action="store_true",
+                      help="end the intro on the song's own break or fill, when it "
+                           "has one that fits, instead of on the loop's last bar")
     made.add_argument("--list-sources", action="store_true",
                       help="print the best stretches to loop and stop")
     made.add_argument("--bpm", type=float, default=None,

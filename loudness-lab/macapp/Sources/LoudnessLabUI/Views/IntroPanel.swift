@@ -17,6 +17,9 @@ struct IntroPanel: View {
 
     @State private var picked: String?
     @AppStorage("introOutputDirectory") private var outputOverride = ""
+    /// On by default: the cards under "Made" belong to the song they were made
+    /// from, and left in place under the next song they read as its edits.
+    @AppStorage("introClearMade") private var clearMade = true
 
     private var outputDirectory: URL? {
         outputOverride.isEmpty ? nil : URL(fileURLWithPath: outputOverride, isDirectory: true)
@@ -56,6 +59,9 @@ struct IntroPanel: View {
             }
             .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .onChange(of: current?.path) { old, new in
+            if clearMade, old != nil, old != new, !engine.isBusy { engine.forgetMade() }
         }
         .onAppear { if let path = engine.focusPath { picked = path } }
         .onChange(of: engine.focusTick) { _, _ in if let path = engine.focusPath { picked = path } }
@@ -157,6 +163,14 @@ struct IntroPanel: View {
                       + "Longer loops sound less repetitive but need a longer "
                       + "stretch with no vocal.")
             }
+            Toggle("End on the song's own break or fill", isOn: $engine.endOnBreak)
+                .toggleStyle(.checkbox).controlSize(.small)
+                .disabled(engine.isBusy)
+                .help("Make the intro's last bar the song's own break, the bar before its "
+                      + "drums come back, with the vocal taken out, so the intro leads "
+                      + "into the song the way the song leads into a drop. Only when the "
+                      + "song has one that fits; otherwise the intro ends on the loop. "
+                      + "Off by default: listen to both with Play the join.")
         }
     }
 
@@ -192,6 +206,11 @@ struct IntroPanel: View {
                         Text(String(format: "repeats %.2f", source.repeatScore))
                             .foregroundStyle(source.repeatScore >= 0.6 ? Color.secondary : Color.orange)
                         if !source.snapped { Text("grid-timed").foregroundStyle(.orange) }
+                        if (source.fill ?? 0) >= 0.5 {
+                            Text("has a fill").foregroundStyle(.orange)
+                                .help("A bar here differs from the groove around it, and a loop "
+                                      + "repeats it every time, the last one running into the song.")
+                        }
                     }
                     .font(.caption)
                 }
@@ -239,8 +258,15 @@ struct IntroPanel: View {
 
     private var results: some View {
         VStack(alignment: .leading, spacing: 8) {
-            if !engine.renders.isEmpty {
-                Text("Made").font(.subheadline.weight(.semibold))
+            HStack {
+                if !engine.renders.isEmpty {
+                    Text("Made").font(.subheadline.weight(.semibold))
+                }
+                Spacer()
+                Toggle("Clear when another song is chosen", isOn: $clearMade)
+                    .toggleStyle(.checkbox).controlSize(.small)
+                    .help("Remove the edits listed here when you pick a different track, "
+                          + "so they are not mistaken for the new song's. The files are kept.")
             }
             ForEach(engine.renders) { render in resultRow(render) }
             if engine.playing != nil { AuditionBar(player: engine.player) }
@@ -256,6 +282,17 @@ struct IntroPanel: View {
                         : String(format: "vocal %+.0f dB", render.vocalDB ?? 0),
                         render.repeatScore))
                 .font(.caption).foregroundStyle(.secondary)
+            if let bar = render.leadInBar, let at = render.leadInSeconds {
+                Text("Ends on the song's own bar \(bar) (\(JoinMath.clock(at)) in), vocal removed.")
+                    .font(.caption).foregroundStyle(.secondary)
+            } else if let note = render.leadInNote {
+                Text(note.prefix(1).uppercased() + note.dropFirst() + ".")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if let envelope = render.envelope {
+                EditStrip(engine: engine, render: render, envelope: envelope)
+            }
             if render.cutSeconds > 0.5 {
                 Text("The song arrives at bar \(render.joinBar); the first "
                      + "\(JoinMath.clock(render.cutSeconds)) of the original is replaced.")

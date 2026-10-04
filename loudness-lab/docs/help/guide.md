@@ -189,6 +189,11 @@ place**, so the file goes from the intro straight into the first big
 downbeat. It writes copies to Music › LoudnessLab › Intro Edits, never over
 the original.
 
+**Preview a track first.** Click a song in the list and press the space
+bar to hear it from the start, and again to stop. Up and down arrows move
+the highlight. It plays the song as it is, so you can hear whether it
+starts cold before ticking it.
+
 1. **Tick the track** in the list, choose it in the Intro tab, and press
    **Analyse**. It separates the song into drums, bass and the rest, which
    takes about half a minute, and finds the beat. After that, choosing and
@@ -207,13 +212,29 @@ the original.
    orange dashed line marks the suggestion once you have moved off it. Press
    **Hear it** to play the original from a few seconds before the marker.
    If a vocal leads into the drop, the lead-in is kept.
+   **Beat one** moves which beat is called the first of the bar, a beat at a
+   time. The tool picks it from the accents in the low end, which a
+   four-on-the-floor record does not have; when the numbered bar lines in the
+   lower strip do not sit on the heaviest kick and bass hit, move them. The
+   small ticks in that strip are the beats, the fainter ones the half beats.
+   Moving it separates nothing again, so it takes a moment, and the loops are
+   found again on the new bar lines.
 3. **Choose the loop.** The tab ranks stretches of the song to repeat. Each
    shows how much vocal is in it (*no vocal* is what you want) and how well
    its drums *repeat* one loop later. A repeat score under 0.6 means a build
    or a fill: the seam will not land on the beat, and the tab says so.
    *Grid-timed* means the loop's ends could not be tied to a real kick.
+   *Has a fill* means a bar in it differs from the groove around it: a loop
+   is heard several times over, so a fill is heard every time, the last one
+   right before the song arrives. The ranking already counts it against a
+   loop, and the tab says when the best one left still has one.
 4. **Choose the lengths** (more than one is fine) and the loop size, and
-   press **Make intro**.
+   press **Make intro**. *End on the song's own break or fill* makes the
+   intro's last bar the song's own break, the bar before its drums come back,
+   with the vocal taken out, so the intro leads into the song the way the song
+   leads into a drop. It only applies when the song has one that sounds like
+   the bar the song arrives at, and says so when it does not. It is off by
+   default: listen to both with **Play the join**.
 5. **Press Play the join.** It starts eight seconds before the song arrives,
    which is where a bad seam or a late downbeat shows. This is the check
    that matters: the numbers can tell you a seam is timed well, but not

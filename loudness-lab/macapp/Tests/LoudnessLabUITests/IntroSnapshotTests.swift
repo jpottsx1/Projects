@@ -85,11 +85,12 @@ final class IntroSnapshotTests: XCTestCase {
             IntroSource(bar: 8, seconds: 16.9, vocalDB: -12.1, vocalFree: false, repeatScore: 0.76, snapped: true),
             IntroSource(bar: 28, seconds: 58.8, vocalDB: -13.0, vocalFree: false, repeatScore: 0.55, snapped: false),
         ]
-        let render = IntroEngine.Render(
+        var render = IntroEngine.Render(
             url: URL(fileURLWithPath: "/m/Intro Edits/Rock With You (Intro 16).mp3"),
             bars: 16, loopBars: 4, joinSeconds: 33.5, introSeconds: 33.49, sourceBar: 4,
             sourceSeconds: 8.5, vocalDB: nil, vocalFree: true, repeatScore: 0.89,
             warnings: ["these bars do not repeat in the record (match 0.55): a build or a fill, so the seams may not land on the beat"])
+        render.envelope = envelope
         let ready = IntroEngine()
         ready.seedForSnapshot(track: track, sources: sources, renders: [render],
                               envelope: envelope, joinBar: 10)

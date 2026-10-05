@@ -544,6 +544,43 @@ class TestSoundingLikeTheSong(unittest.TestCase):
         back = intro.rephase(intro.rephase(self.a, 0, 1), 0, -1)
         self.assertLess(abs(back.join - self.a.join), 0.15 * period)
 
+    def test_underlay_keeps_the_opening_and_puts_the_beat_under_it(self):
+        import dataclasses
+        a = self.a
+        join_bar = 4
+        source = intro.candidates(a, 4, join_bar=join_bar)[0]
+        out, info = intro.render(a, 8, source, 4, join_bar=join_bar, style="underlay")
+        self.assertEqual(out.shape, a.original.shape)       # nothing cut, nothing moved
+        self.assertEqual(info["style"], "underlay")
+        self.assertEqual(info["bars"], 4)                    # the opening is 4 bars
+        join = int(a.bar_lines[join_bar])
+        self.assertEqual(info["intro_samples"], join)
+        # after the hand-over the file is the song, untouched
+        late = slice(join + int(2 * a.grid.bar), len(out) - 1000)
+        self.assertTrue(np.allclose(out[late], a.original[late], atol=1e-4))
+        # under the opening it is not: the beat is there, and louder toward the join
+        early = slice(int(a.bar_lines[0]) + 4000, int(a.bar_lines[1]))
+        late_open = slice(int(a.bar_lines[join_bar - 1]), join - 2000)
+        added = lambda s_: np.sqrt(np.mean((out[s_] - a.original[s_]) ** 2))
+        self.assertGreater(added(late_open), added(early))
+        self.assertGreater(added(late_open), 0.01)
+        # a song that starts on its groove has no opening to underlay
+        with self.assertRaises(ValueError):
+            intro.render(a, 8, source, 4, join_bar=0, style="underlay")
+        # and it needs the stems
+        bare = dataclasses.replace(a, bass=np.zeros((0, 2), dtype=np.float32))
+        with self.assertRaises(ValueError):
+            intro.render(bare, 8, source, 4, join_bar=join_bar, style="underlay")
+
+    def test_a_drumless_opening_suggests_underlay(self):
+        import dataclasses
+        lines = self.a.bar_lines
+        drums = self.a.drums.copy()
+        drums[int(lines[0]):int(lines[4])] *= 0.05
+        style, why = intro.suggest_style(dataclasses.replace(self.a, drums=drums), 4)
+        self.assertEqual(style, "underlay")
+        self.assertIn("lay the beat under it", why)
+
     def test_the_style_follows_how_bare_the_arrival_bars_are(self):
         import dataclasses
         style, why = intro.suggest_style(self.a, 4)

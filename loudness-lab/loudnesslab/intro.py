@@ -57,6 +57,11 @@ from . import decode, stems, subbass, write
 # bars, fading out, in the stem styles: the intro hands over to the song as a
 # mix instead of a swap. 0 turns it off.
 HANDOVER_BARS = 1.0
+# The underlay style lays the loop's drums and bass under the song's own
+# opening, rising from this level to full by the bar the song's groove lands
+# on, so the beat builds under the opening instead of sitting on it.
+UNDERLAY_START_DB = -18.0
+UNDERLAY_FADE_IN_S = 0.25
 LENGTHS = (8, 16, 32)               # intro lengths offered, in bars
 LOOP_BARS = (1, 2, 4, 8)            # loop lengths a source may have
 DEFAULT_LOOP_BARS = 4
@@ -541,6 +546,8 @@ def suggest_join(a: Analysis) -> tuple[int, str]:
 # band for them to count as a vocal over nothing.
 BARE_DRUMS_DB = -9.0
 BARE_BARS = 4
+# An opening shorter than this is not worth putting a beat under.
+UNDERLAY_MIN_BARS = 2
 
 
 def suggest_style(a: Analysis, join_bar: int) -> tuple[str, str]:
@@ -566,6 +573,15 @@ def suggest_style(a: Analysis, join_bar: int) -> tuple[str, str]:
 
     arrival = slice(join_bar, min(bars, join_bar + BARE_BARS))
     body = slice(bars // 4, max(bars // 4 + 1, 3 * bars // 4))
+    # A song with an opening of its own, drumless, before its groove lands:
+    # keep the opening and put the beat under it.
+    if join_bar >= UNDERLAY_MIN_BARS and len(a.bass) == len(a.drums):
+        opening = slice(0, join_bar)
+        open_rel = db(float(np.median(p["drm"][opening]))) - db(float(np.median(p["drm"][body])))
+        if open_rel <= BARE_DRUMS_DB:
+            return "underlay", (f"the song opens with {join_bar} bars before its drums come in "
+                                f"(its drums are {abs(open_rel):.0f} dB below the body there): "
+                                "keep that opening and lay the beat under it")
     drums_rel = db(float(np.median(p["drm"][arrival]))) - db(float(np.median(p["drm"][body])))
     vocal_over = db(float(np.median(p["voc"][arrival]))) - db(float(np.median(p["inst"][arrival])))
     if drums_rel <= BARE_DRUMS_DB:
@@ -1017,7 +1033,9 @@ def render(a: Analysis, bars: int, source: Source,
     crossfaded over the SEAM_S before that, so a kick's front is never
     inside a fade.
 
-    `style` is "full" (the whole instrumental every repeat), "beat" (the
+    `style` is "underlay" (the song's own opening kept, with the loop's drums
+    and bass laid under it: see `render_underlay`), "full" (the whole
+    instrumental every repeat), "beat" (the
     song's own drums and bass under every repeat and nothing else: a groove to
     run the intro on, for a record with no vocal-free stretch of the band) or
     "build": the drums alone first, the bass joining a quarter of the way in and the rest
@@ -1040,6 +1058,8 @@ def render(a: Analysis, bars: int, source: Source,
     intro's LAST bar in place of the loop's: the song's own break or fill,
     instrumental only, so the intro ends the way the song leads into a drop.
     """
+    if style == "underlay":
+        return render_underlay(a, bars, source, loop_bars, join_bar, handover)
     if bars % loop_bars:
         raise ValueError(f"{bars} bars is not a whole number of "
                          f"{loop_bars}-bar loops")
@@ -1070,7 +1090,7 @@ def render(a: Analysis, bars: int, source: Source,
     shift = join_out - join                      # adds `lead` at the end
     total = n + shift
     if style not in ("full", "build", "beat"):
-        raise ValueError(f"style must be 'full', 'build' or 'beat', not {style!r}")
+        raise ValueError(f"style must be 'full', 'build', 'beat' or 'underlay', not {style!r}")
     stems = style in ("build", "beat") and len(a.bass) == len(a.instrumental) and len(a.other) == len(a.instrumental)
     bass_in = round(repeats * 0.25)
     other_in = min(round(repeats * 0.5), repeats - 1)
@@ -1227,6 +1247,137 @@ def render(a: Analysis, bars: int, source: Source,
         info["warnings"].append(
             "no vocal-free stretch to loop: the intro carries some vocal "
             "bleed from the source bars")
+    return out.astype(np.float32), info
+
+
+def render_underlay(a: Analysis, bars: int, source: Source,
+                    loop_bars: int = DEFAULT_LOOP_BARS,
+                    join_bar: int | None = None,
+                    handover: float = HANDOVER_BARS) -> tuple[np.ndarray, dict]:
+    """The song with its own opening kept and a beat laid underneath it.
+
+    Nothing is cut and nothing moves: the file is the original, the same
+    length, with the drums and bass of `source` (a groove from later in the
+    song) repeated under the `bars` bars before `join_bar`, the bar the
+    groove lands on. The layer rises from UNDERLAY_START_DB to full over
+    that stretch, so the beat builds under the opening, and once the song's
+    own drums arrive at the join it fades out over `handover` bars.
+
+    Only the drum and bass stems are used, so none of the source's vocal can
+    come with them. It needs an opening to put the beat under: a join at bar
+    0 means the song starts on its groove, and that is refused.
+    """
+    if join_bar is None:
+        join_bar = a.suggested_join_bar
+    if join_bar < 1:
+        raise ValueError("the song starts on its groove: there is no opening to "
+                         "put a beat under (move the join later)")
+    if not (len(a.bass) == len(a.drums) == len(a.original)):
+        raise ValueError("the beat comes from the song's own drum and bass stems, "
+                         "and this track does not have them separated")
+    join, _pickup = resolve_join(a, join_bar)
+    rate = a.rate
+    bar = a.grid.bar
+    seam = max(8, int(SEAM_S * rate))
+    guard = int(GUARD_S * rate)
+    n = len(a.original)
+
+    span_bars = min(bars, join_bar)
+    start = max(0, join - int(round(span_bars * bar)))
+    repeats = -(-span_bars // loop_bars)                    # ceil
+
+    src_unit = source.length or int(round(loop_bars * bar))
+    ref = _reference(a, join_bar, loop_bars)
+    ratio = ref["bar_len"] * loop_bars / src_unit
+    retune = RETUNE_MIN < abs(ratio - 1.0) <= RETUNE_MAX
+    unit = int(round(src_unit * ratio)) if retune else src_unit
+    cut = max(source.start - guard, 0)
+
+    # `repeats` repeats laid back from the join, and one more after it for
+    # the hand-over, each crossfaded into the next.
+    layer = np.zeros((n, 2), dtype=np.float64)
+    for m in range(repeats + 1):
+        pre_src = min(seam, cut)
+        lo_src, hi_src = cut - pre_src, min(cut + src_unit, n)
+        seg = a.drums[lo_src:hi_src].astype(np.float64) + a.bass[lo_src:hi_src]
+        pre = pre_src
+        if retune:
+            fraction = Fraction(ratio).limit_denominator(4000)
+            seg = resample_poly(seg, fraction.numerator, fraction.denominator, axis=0)
+            pre = int(round(pre_src * ratio))
+        win = np.ones(len(seg))
+        if pre:
+            win[:pre] = _fade(pre)[0]
+        if m < repeats and len(seg) > seam:
+            win[-seam:] = _fade(seam)[1]
+        at = join - (repeats - m) * unit - guard - pre
+        lo = max(0, -at)
+        hi = min(n, at + len(seg))
+        if hi > at + lo:
+            layer[at + lo:hi] += (seg * win[:, None])[lo:hi - at]
+
+    # The level: rising to the join, then out over the hand-over bars.
+    gain = np.zeros(n)
+    if join > start:
+        t = np.linspace(0.0, 1.0, join - start, endpoint=False)
+        gain[start:join] = 10.0 ** ((UNDERLAY_START_DB * (1.0 - t)) / 20.0)
+        fade_in = min(int(UNDERLAY_FADE_IN_S * rate), join - start)
+        gain[start:start + fade_in] *= _fade(fade_in)[0]
+    h = min(int(round(handover * bar)), n - join)
+    if h > 0:
+        gain[join:join + h] = np.cos(np.linspace(0.0, np.pi / 2, h, endpoint=False)) ** 2
+    original = a.original.astype(np.float64)
+    added = layer * gain[:, None]
+    # Headroom: if the beat would push the song past full scale, turn the
+    # BEAT down until it fits (the song itself is never touched).
+    k = 1.0
+    if np.abs(original + added).max() > 1.0:
+        lo_k, hi_k = 0.0, 1.0
+        for _ in range(14):
+            mid = (lo_k + hi_k) / 2
+            if np.abs(original + added * mid).max() > 1.0:
+                hi_k = mid
+            else:
+                lo_k = mid
+        k = lo_k
+    out = original + added * k
+
+    info = {
+        "bpm": round(60.0 * rate * BEATS_PER_BAR * loop_bars / unit, 3),
+        "grid_bpm": round(a.grid.bpm, 3),
+        "loop_snapped": source.snapped,
+        "loop_repeat": round(source.repeat, 2),
+        "bars": span_bars,
+        "loop_bars": loop_bars,
+        "seconds_of_intro": round(join / rate, 3),
+        "intro_samples": int(join),
+        "style": "underlay",
+        "handover_bars": handover,
+        "retuned_pct": round((ratio - 1.0) * 100.0, 3) if retune else 0.0,
+        "tempo_off_pct": round((ratio - 1.0) * 100.0, 3) if not retune else 0.0,
+        "lead_seconds": 0.0,
+        "join_bar": join_bar,
+        "lead_in_bar": None,
+        "join_seconds": round(join / rate, 3),
+        "pickup_seconds": round(_pickup / rate, 3),
+        "cut_seconds": 0.0,
+        "suggested_join_bar": a.suggested_join_bar,
+        "source_bar": source.bar,
+        "source_seconds": round(source.seconds, 3),
+        "source_vocal_db": None if np.isnan(source.vocal_db) else round(source.vocal_db, 1),
+        "vocal_free": source.vocal_free,
+        "grid_coherence": round(a.grid.coherence, 3),
+        "downbeat_from": a.grid.how,
+        "warnings": list(a.warnings),
+    }
+    if span_bars < bars:
+        info["warnings"].append(
+            f"the opening is {span_bars} bars long, so the beat runs under "
+            f"{span_bars}, not {bars}")
+    if k < 1.0:
+        info["warnings"].append(
+            f"the beat would have pushed the song over full scale, so it was "
+            f"turned down {-20.0 * np.log10(max(k, 1e-6)):.1f} dB to fit")
     return out.astype(np.float32), info
 
 

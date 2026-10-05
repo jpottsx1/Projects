@@ -169,16 +169,14 @@ struct IntroPanel: View {
                     Text("Build up").tag("build")
                     Text("Full loop").tag("full")
                     Text("Beat").tag("beat")
+                    Text("Underlay").tag("underlay")
                 }
-                .pickerStyle(.segmented).labelsHidden().frame(width: 260)
+                .pickerStyle(.segmented).labelsHidden().frame(width: 340)
                 .disabled(engine.isBusy)
-                .help("Build up brings the song's own drums in first, then the bass, then the "
-                      + "rest of the band, so the intro builds into the song. Full loop plays "
-                      + "the whole instrumental from the start. Beat runs only the song's own drums and "
-                      + "bass under the whole intro: a groove, with none of the other instruments.")
+                .help(Self.styleHelp)
             }
             if let reason = engine.styleReason, let suggested = engine.suggestedStyle {
-                Text("Suggested: \(suggested == "beat" ? "Beat" : "Build up") — \(reason).")
+                Text("Suggested: \(Self.styleName(suggested)) — \(reason).")
                     .font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -440,5 +438,27 @@ private struct AuditionBar: View {
     private func clock(_ seconds: Double) -> String {
         let whole = Int(seconds.rounded())
         return String(format: "%d:%02d", whole / 60, whole % 60)
+    }
+}
+
+
+private extension IntroPanel {
+    static let styleHelp = """
+        Build up brings the song's own drums in first, then the bass, then the rest of the \
+        band, so the intro builds into the song. Full loop plays the whole instrumental from \
+        the start. Beat runs only the song's own drums and bass under the whole intro: a \
+        groove, with none of the other instruments. Underlay keeps the song's own opening as \
+        it is and lays the drums and bass under it, building up to where the song's groove \
+        lands; it needs the join set after an opening.
+        """
+
+    /// The picker's label for a style the tool named.
+    static func styleName(_ style: String) -> String {
+        switch style {
+        case "beat": return "Beat"
+        case "underlay": return "Underlay"
+        case "full": return "Full loop"
+        default: return "Build up"
+        }
     }
 }

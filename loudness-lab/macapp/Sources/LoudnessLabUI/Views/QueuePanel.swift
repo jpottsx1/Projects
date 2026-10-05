@@ -35,6 +35,16 @@ struct QueuePanel: View {
             footer
         }
         .frame(minWidth: 260)
+        // A host that owns the keyboard (DiscoTags) drives the same actions.
+        .onReceive(NotificationCenter.default.publisher(for: .loudnessLabTogglePreview)) { _ in
+            togglePreview()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .loudnessLabSkipPreview)) { note in
+            skip(by: note.object as? Double ?? 30)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .loudnessLabMoveHighlight)) { note in
+            _ = move(note.object as? Int ?? 0)
+        }
     }
 
     private var header: some View {
@@ -82,14 +92,23 @@ struct QueuePanel: View {
         .focusable()
         .focused($listFocused)
         .focusEffectDisabled()
-        .onKeyPress(.space) {
-            guard let path = highlighted ?? queue.items.first?.path else { return .ignored }
-            highlighted = path
-            onPreview(path)
-            return .handled
-        }
+        .onKeyPress(.space) { togglePreview() ? .handled : .ignored }
         .onKeyPress(.downArrow) { move(1) }
         .onKeyPress(.upArrow) { move(-1) }
+    }
+
+    @discardableResult
+    private func togglePreview() -> Bool {
+        guard let path = highlighted ?? queue.items.first?.path else { return false }
+        highlighted = path
+        onPreview(path)
+        return true
+    }
+
+    /// fn key: jump the running preview ahead, clamped to the track's end.
+    private func skip(by seconds: Double) {
+        guard previewPlayer.isPlaying, previewPlayer.duration > 0 else { return }
+        previewPlayer.seek(to: min(previewPlayer.position + seconds, previewPlayer.duration))
     }
 
     private func move(_ step: Int) -> KeyPress.Result {

@@ -216,7 +216,7 @@ starts cold before ticking it.
    time. The tool picks it from the accents in the low end, which a
    four-on-the-floor record does not have; when the numbered bar lines in the
    lower strip do not sit on the heaviest kick and bass hit, move them. The
-   small ticks in that strip are the beats, the fainter ones the half beats.
+   small ticks in that strip are the beats, the fainter ones the half beats. **◀ ½** and **½ ▶** move the whole grid half a beat, for a song whose kicks sit between its beats: the tool can lock onto those and put every bar line on the offbeat, which moving a whole beat cannot fix.
    Moving it separates nothing again, so it takes a moment, and the loops are
    found again on the new bar lines.
 3. **Choose the loop.** The tab ranks stretches of the song to repeat, and

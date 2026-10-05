@@ -467,12 +467,17 @@ def _layout(x: np.ndarray, instrumental: np.ndarray, vocals: np.ndarray,
     return analysis
 
 
-def rephase(a: Analysis, beats: int) -> Analysis:
+def rephase(a: Analysis, beats: int, half_beats: int = 0) -> Analysis:
     """The same track with the bar lines moved `beats` beats later (negative:
     earlier): another beat is called the first of the bar. For when the
-    accents misled the downbeat search. Nothing is separated again."""
+    accents misled the downbeat search. Nothing is separated again.
+
+    `half_beats` moves the whole grid by that many half beats as well, for a
+    song whose kicks sit between its beats: the fit locks onto them and puts
+    every bar line half a beat out, which a whole-beat move cannot undo."""
     g = a.grid
-    moved = Grid(bpm=g.bpm, period=g.period, first_beat=g.first_beat,
+    moved = Grid(bpm=g.bpm, period=g.period,
+                 first_beat=g.first_beat + half_beats * g.period / 2.0,
                  coherence=g.coherence,
                  downbeat_phase=(g.downbeat_phase + beats) % BEATS_PER_BAR,
                  confidence=1.0, how="set by hand")
@@ -1358,7 +1363,8 @@ class Session:
                 self.release()
                 say("released", reason="asked")
             elif command == "rephase":
-                a = rephase(self._need(), int(request.get("beats", 1)))
+                a = rephase(self._need(), int(request.get("beats", 1)),
+                            int(request.get("half_beats", 0)))
                 self.analysis = a
                 say("grid", **self._grid_fields(a))
             elif command == "envelope":

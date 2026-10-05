@@ -528,6 +528,22 @@ class TestSoundingLikeTheSong(unittest.TestCase):
         _, finfo = intro.render(self.a, 16, source, 4, join_bar=0, style="full")
         self.assertEqual(finfo["handover_bars"], 0.0)
 
+    def test_a_half_beat_move_shifts_the_bar_lines_by_half_a_beat(self):
+        period = self.a.grid.period
+        later = intro.rephase(self.a, 0, 1)
+        earlier = intro.rephase(self.a, 0, -1)
+        for moved in (later, earlier):
+            off = (moved.join - self.a.join) % period
+            self.assertLess(abs(off - period / 2), 0.15 * period)
+            self.assertEqual(moved.grid.bpm, self.a.grid.bpm)
+        # two half beats make a whole one, the same as moving a beat
+        two = intro.rephase(intro.rephase(self.a, 0, 1), 0, 1)
+        whole = intro.rephase(self.a, 1)
+        self.assertLess(abs(two.join - whole.join), 0.15 * period)
+        # and half a beat there and back is where it began
+        back = intro.rephase(intro.rephase(self.a, 0, 1), 0, -1)
+        self.assertLess(abs(back.join - self.a.join), 0.15 * period)
+
     def test_the_style_follows_how_bare_the_arrival_bars_are(self):
         import dataclasses
         style, why = intro.suggest_style(self.a, 4)

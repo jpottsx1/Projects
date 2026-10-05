@@ -1439,8 +1439,10 @@ def default_out_dir() -> Path:
     return Path.home() / "Music" / "LoudnessLab" / "Intro Edits"
 
 
-def output_path(source: Path, out_dir: Path, bars: int) -> Path:
-    return out_dir / f"{source.stem} (Intro {bars})"
+def output_path(source: Path, out_dir: Path, bars: int, label: str = "") -> Path:
+    """`label` (a style, say) keeps two intros of the same length from
+    overwriting each other."""
+    return out_dir / f"{source.stem} (Intro {bars}{' ' + label if label else ''})"
 
 
 def prepare(path: Path, bpm: float | None = None, downbeat_s: float | None = None,
@@ -1454,13 +1456,13 @@ def prepare(path: Path, bpm: float | None = None, downbeat_s: float | None = Non
 
 
 def write_intro(a: Analysis, source_file: Path, audio: np.ndarray, bars: int,
-                out_dir: Path, fmt: str | None = None) -> Path:
+                out_dir: Path, fmt: str | None = None, label: str = "") -> Path:
     """Write the edit beside nothing: into `out_dir`, never over the
     original. The original's Serato cues and beatgrid are NOT carried --
     they describe the track without its intro, and every one of them would
     be `bars` bars early."""
     fmt = fmt or default_format(source_file)
-    return write.write(output_path(source_file, out_dir, bars), audio, a.rate,
+    return write.write(output_path(source_file, out_dir, bars, label), audio, a.rate,
                        source=source_file, fmt=fmt, keep_markers=False)
 
 
@@ -1611,7 +1613,7 @@ class Session:
         info["lead_in_note"] = note
         out_dir = Path(request["out"]) if request.get("out") else self.out_dir
         target = write_intro(a, self.path, audio, bars, out_dir,
-                             request.get("format"))
+                             request.get("format"), str(request.get("label") or ""))
         say("intro", **info, source=str(self.path), output=str(target))
         # The finished edit as it will be heard, drawn the way the original
         # is, so the join can be judged in the result and not only before it.

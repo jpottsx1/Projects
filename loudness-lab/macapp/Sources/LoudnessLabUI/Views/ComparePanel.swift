@@ -17,6 +17,10 @@ struct ComparePanel: View {
     /// whose waveform needs more than the results column's own width.
     @Binding var wide: Bool
     let estimator: String
+    /// Keep this track's finished version and delete its comparison files.
+    /// Nil hides the control. `saving` disables it while it works.
+    var onSaveFinished: ((Manifest.Track) -> Void)?
+    var saving = false
 
     @State private var shuffled: [String] = []
     @State private var revealed = false
@@ -35,6 +39,7 @@ struct ComparePanel: View {
                 waveform(track)
                 scrubber
                 versions(track)
+                saveRow(track)
                 footnote
             } else {
                 Text("Pick a track above to compare.")
@@ -166,6 +171,28 @@ struct ComparePanel: View {
                 .keyboardShortcut(shortcut(for: index), modifiers: [])
                 .help(Help.switching.summary)
             }
+        }
+    }
+
+    /// A track with a comparison pair on disk can be saved as finished; one
+    /// that already has been shows where it went.
+    @ViewBuilder
+    private func saveRow(_ track: Manifest.Track) -> some View {
+        if track.variants.count > 1, let onSaveFinished {
+            HStack {
+                Button("Save finished version") { onSaveFinished(track) }
+                    .disabled(saving)
+                    .help("Runs this track once more, on its own, at the profile's target "
+                          + "level, writes one finished file, then deletes the A and B "
+                          + "comparison files. The comparison is level-matched down, so "
+                          + "B itself is not the version to keep.")
+                if saving { ProgressView().controlSize(.small) }
+                Spacer()
+            }
+        } else if track.variants.count == 1, let only = track.variants.first {
+            Label("Saved: \(only.url.lastPathComponent)", systemImage: "checkmark.circle.fill")
+                .font(.caption).foregroundStyle(.green)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 

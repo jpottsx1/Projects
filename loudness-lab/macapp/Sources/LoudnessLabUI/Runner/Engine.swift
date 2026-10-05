@@ -104,6 +104,49 @@ final class Engine: ObservableObject {
         NotificationCenter.default.post(name: .loudnessLabRunFinished, object: run)
     }
 
+    /// Keeps one track's finished version and throws its comparison files away.
+    ///
+    /// The A/B pair is level-matched DOWN to the quieter of the two so the
+    /// comparison is fair, which makes B the thing that was listened to, not
+    /// the thing to keep: it is not at the profile's target. So the track is
+    /// run again on its own, without comparing, which writes one file at the
+    /// proper level under the song's own name. Only once that has worked are
+    /// the old A and B files deleted, and the manifest, which a one-track run
+    /// would otherwise have replaced whole, keeps every other track.
+    func saveFinished(_ track: Manifest.Track, folders: [URL], profile: Profile,
+                      outputDirectory: URL, databaseURL: URL,
+                      format: AudioWriter.Format) async {
+        guard !isRunning, let before = manifest,
+              track.variants.count > 1 else { return }
+        await run(folders: folders, profile: profile, limit: Int.max, compare: false,
+                  dryRun: false, outputDirectory: outputDirectory,
+                  databaseURL: databaseURL, format: format,
+                  only: [track.source], replaceOriginals: false, report: false)
+        guard let made = manifest?.tracks.first(where: { $0.source == track.source }),
+              let final = made.variants.first(where: { $0.kind == "processed" }),
+              FileManager.default.fileExists(atPath: final.path) else {
+            // Nothing finished: put the comparison back as it was.
+            manifest = before
+            if failure == nil { failure = "\(track.name) could not be saved as a finished file." }
+            return
+        }
+        for variant in track.variants where variant.path != final.path {
+            try? FileManager.default.removeItem(atPath: variant.path)
+        }
+        let merged = Manifest(version: before.version, rate: before.rate,
+                              aligned: before.aligned, profile: before.profile,
+                              settings: before.settings,
+                              tracks: before.tracks.map { $0.source == made.source ? made : $0 })
+        manifest = merged
+        // The one-track run overwrote manifest.json; write the whole one back.
+        let manifestURL = outputDirectory.appendingPathComponent("manifest.json")
+        if let data = try? JSONEncoder().encode(merged) {
+            try? data.write(to: manifestURL, options: .atomic)
+        }
+        reportFinishedRun(merged)
+        say("Saved \(final.url.lastPathComponent); deleted its comparison files.")
+    }
+
     func cancel() { flag.cancel() }
 
     func say(_ line: String) { log += line + "\n" }
@@ -335,7 +378,8 @@ final class Engine: ObservableObject {
              dryRun: Bool, outputDirectory: URL, databaseURL: URL,
              format: AudioWriter.Format = .flac,
              only: Set<String>? = nil,
-             replaceOriginals: Bool = false) async {
+             replaceOriginals: Bool = false,
+             report: Bool = true) async {
         guard !isRunning, !folders.isEmpty else { return }
         isRunning = true; flag.reset(); failure = nil; manifest = nil
         log = ""; progress = nil
@@ -442,7 +486,7 @@ final class Engine: ObservableObject {
                 // Only for a run that left both sides on disk -- a
                 // `--replace-originals` run has already done that job
                 // itself and has no separate original left to hand back.
-                if !replaceOriginals, let manifest {
+                if !replaceOriginals, report, let manifest {
                     reportFinishedRun(manifest)
                 }
             } else {

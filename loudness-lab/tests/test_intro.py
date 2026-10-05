@@ -507,6 +507,27 @@ class TestSoundingLikeTheSong(unittest.TestCase):
         last = slice(3 * unit + 2000, 4 * unit - 2000)
         self.assertFalse(np.allclose(beat[last], thin[last], atol=1e-4))
 
+    def test_the_stem_styles_hand_over_with_drums_and_bass_under_the_song(self):
+        source = intro.candidates(self.a, 4, join_bar=0)[0]
+        for style in ("build", "beat"):
+            cut, _ = intro.render(self.a, 16, source, 4, join_bar=0, style=style, handover=0)
+            mixed, info = intro.render(self.a, 16, source, 4, join_bar=0, style=style)
+            self.assertEqual(info["handover_bars"], 1.0)
+            unit = info["intro_samples"] // 4
+            lead = int(round(info["lead_seconds"] * self.a.rate))
+            end = info["intro_samples"] + lead
+            # nothing changes before the loop stops, or a bar after it
+            self.assertTrue(np.allclose(cut[:end - 200], mixed[:end - 200], atol=1e-6))
+            # under the song's first bar the mix carries the loop's band
+            gap = np.sqrt(np.mean((mixed[end:end + unit // 4] - cut[end:end + unit // 4]) ** 2))
+            self.assertGreater(gap, 0.01)
+            # ...and after one bar it is the song alone again
+            later = slice(end + unit // 4 + 200, end + unit // 4 + 4000)
+            self.assertTrue(np.allclose(cut[later], mixed[later], atol=1e-6))
+        # full loop has no hand-over
+        _, finfo = intro.render(self.a, 16, source, 4, join_bar=0, style="full")
+        self.assertEqual(finfo["handover_bars"], 0.0)
+
     def test_without_the_separate_stems_build_falls_back_to_the_whole_instrumental(self):
         import dataclasses
         bare = dataclasses.replace(self.a, bass=np.zeros((0, 2), dtype=np.float32),

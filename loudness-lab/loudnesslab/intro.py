@@ -53,6 +53,10 @@ from scipy.signal import butter, fftconvolve, resample_poly, sosfilt, sosfiltfil
 
 from . import decode, stems, subbass, write
 
+# Bars of the loop's own drums and bass kept running under the song's first
+# bars, fading out, in the stem styles: the intro hands over to the song as a
+# mix instead of a swap. 0 turns it off.
+HANDOVER_BARS = 1.0
 LENGTHS = (8, 16, 32)               # intro lengths offered, in bars
 LOOP_BARS = (1, 2, 4, 8)            # loop lengths a source may have
 DEFAULT_LOOP_BARS = 4
@@ -951,7 +955,8 @@ def render(a: Analysis, bars: int, source: Source,
            loop_bars: int = DEFAULT_LOOP_BARS,
            join_bar: int | None = None,
            lead_in_bar: int | None = None,
-           style: str = "full") -> tuple[np.ndarray, dict]:
+           style: str = "full",
+           handover: float = HANDOVER_BARS) -> tuple[np.ndarray, dict]:
     """The intro edit: (audio, info). `bars` of the instrumental loop, then
     the original from its pickup / downbeat on.
 
@@ -972,6 +977,13 @@ def render(a: Analysis, bars: int, source: Source,
     of the band half way, the last repeat whole, so the intro arrives at the
     song the way a DJ would bring the elements in. Each is a stem of the song,
     so what comes in is what the song has.
+
+    In the stem styles the loop does not stop where the song starts: its
+    drums and bass carry on for `handover` bars underneath the song's first
+    bars, fading out, so the song arrives on a groove that is already running
+    and the intro mixes into it rather than being cut to it. Not used with
+    `lead_in_bar`, whose last bar is the song's own break and has its own way
+    in.
 
     The loop is resampled to the song's tempo at the join when it differs by
     up to RETUNE_MAX (a live record's loop can be a percent off the bars it
@@ -1033,27 +1045,43 @@ def render(a: Analysis, bars: int, source: Source,
 
     # --- the loop: repeats laid back from the join, each crossfaded into
     # the next over the seam-length of pre-attack audio before its cut.
-    starts = [join_out - (repeats - m) * unit for m in range(repeats)] + [join_out]
-    loop = np.zeros((join_out + lead, 2), dtype=np.float64)
+    starts = [join_out - (repeats - m) * unit for m in range(repeats + 1)]
     cut = max(source.start - guard, 0)           # where each repeat's audio begins
-    for m in range(repeats):
-        pre_src = min(seam, cut)
-        seg = layer(m, cut - pre_src, min(cut + src_unit, n))
-        pre = pre_src
-        if retune:
-            fraction = Fraction(ratio).limit_denominator(4000)
-            seg = resample_poly(seg, fraction.numerator, fraction.denominator, axis=0)
-            pre = int(round(pre_src * ratio))
-        win = np.ones(len(seg))
-        if pre:
-            win[:pre] = _fade(pre)[0]
-        if m < repeats - 1 and len(seg) > seam:
-            win[-seam:] = _fade(seam)[1]
-        at = starts[m] - guard - pre + lead
-        lo = max(0, -at)
-        hi = min(len(loop), at + len(seg))
-        if hi > at + lo:
-            loop[at + lo:hi] += (seg * win[:, None])[lo:hi - at]
+
+    def lay(pick, first: int, count: int, size: int) -> np.ndarray:
+        """Repeats `first` .. `first + count - 1` of `pick(m, lo, hi)` placed
+        on the grid in a buffer of `size` samples."""
+        buf = np.zeros((size, 2), dtype=np.float64)
+        for m in range(first, first + count):
+            pre_src = min(seam, cut)
+            seg = pick(m, cut - pre_src, min(cut + src_unit, n))
+            pre = pre_src
+            if retune:
+                fraction = Fraction(ratio).limit_denominator(4000)
+                seg = resample_poly(seg, fraction.numerator, fraction.denominator, axis=0)
+                pre = int(round(pre_src * ratio))
+            win = np.ones(len(seg))
+            if pre:
+                win[:pre] = _fade(pre)[0]
+            if m < first + count - 1 and len(seg) > seam:
+                win[-seam:] = _fade(seam)[1]
+            at = starts[m] - guard - pre + lead
+            lo = max(0, -at)
+            hi = min(size, at + len(seg))
+            if hi > at + lo:
+                buf[at + lo:hi] += (seg * win[:, None])[lo:hi - at]
+        return buf
+
+    loop = lay(lambda m, lo, hi: layer(m, lo, hi), 0, repeats, join_out + lead)
+
+    # The same loop's drums and bass, one repeat past the join, for the
+    # hand-over below.
+    hand_bars = handover if (stems and lead_in_bar is None) else 0.0
+    hand = None
+    if hand_bars > 0:
+        def beat_only(m: int, lo: int, hi: int) -> np.ndarray:
+            return a.drums[lo:hi].astype(np.float64) + a.bass[lo:hi]
+        hand = lay(beat_only, repeats - 1, 2, join_out + lead + unit)
 
     # --- the song's own bar to end on, in place of the loop's last bar.
     if lead_in_bar is not None:
@@ -1091,6 +1119,15 @@ def render(a: Analysis, bars: int, source: Source,
     gain[out_o - loop_fade:out_o] = f_out
     gain[out_o:] = 0.0
     out[:len(loop)] += loop * gain[:, None]
+    if hand is not None:
+        # The loop's drums and bass take over from the loop at the moment it
+        # stops and fade out over `hand_bars` bars. Both are the same audio
+        # on the same grid, so the take-over itself is inaudible; what is
+        # heard is the band thinning out under the song's first bars.
+        h = min(int(round(hand_bars * unit / loop_bars)), len(hand) - out_o, len(out) - out_o)
+        if h > 0:
+            ramp_down = np.cos(np.linspace(0.0, np.pi / 2, h, endpoint=False)) ** 2
+            out[out_o:out_o + h] += hand[out_o:out_o + h] * ramp_down[:, None]
     tail = a.original[o0:].astype(np.float64)
     window = np.ones(len(tail))
     if fade_len:
@@ -1111,6 +1148,7 @@ def render(a: Analysis, bars: int, source: Source,
         "seconds_of_intro": round(join_out / rate, 3),
         "intro_samples": int(join_out),
         "style": style if (style == "full" or stems) else "full",
+        "handover_bars": hand_bars,
         "retuned_pct": round((ratio - 1.0) * 100.0, 3) if retune else 0.0,
         "tempo_off_pct": round((ratio - 1.0) * 100.0, 3) if not retune else 0.0,
         "lead_seconds": round(lead / rate, 4),

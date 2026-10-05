@@ -30,6 +30,16 @@ final class IntroEngine: ObservableObject {
         var lastJoinBar: Int { max(0, barSeconds.count - 2) }
     }
 
+    /// Where unsaved renders live. Cleared at launch and quit, so a draft
+    /// never outlives the session that made it.
+    nonisolated static var draftsDirectory: URL {
+        FileManager.default.temporaryDirectory.appendingPathComponent("LoudnessLabIntroDrafts")
+    }
+
+    nonisolated static func clearDrafts() {
+        try? FileManager.default.removeItem(at: draftsDirectory)
+    }
+
     /// One finished intro file.
     struct Render: Identifiable, Equatable {
         let url: URL
@@ -60,6 +70,14 @@ final class IntroEngine: ObservableObject {
         /// The finished file drawn the way the original is; nil if the tool
         /// did not send it.
         var envelope: JoinEnvelope?
+        /// A render sits in the drafts folder until it is saved: `url` is the
+        /// draft, `savedAs` the copy kept. A batch writes straight to the
+        /// output folder, so its renders are not drafts.
+        var isDraft = true
+        var savedAs: URL?
+        /// The file a person would want to see: the saved copy once there is one.
+        var keptURL: URL { savedAs ?? url }
+        var isKept: Bool { !isDraft || savedAs != nil }
 
         var id: String { url.path }
         var name: String { url.deletingPathExtension().lastPathComponent }
@@ -144,7 +162,16 @@ final class IntroEngine: ObservableObject {
     /// the real one, found as the rest of the app finds it.
     private let toolOverride: URL?
 
-    init(tool: URL? = nil) { toolOverride = tool }
+    init(tool: URL? = nil) {
+        toolOverride = tool
+        // Drafts do not outlive the session: clear any a crash left behind,
+        // and the ones made now when the app quits. (The notification is
+        // named by string: this file is Foundation only.)
+        Self.clearDrafts()
+        NotificationCenter.default.addObserver(
+            forName: Notification.Name("NSApplicationWillTerminateNotification"),
+            object: nil, queue: nil) { _ in Self.clearDrafts() }
+    }
     private let flag = Engine.CancelFlag()
 
     var isBusy: Bool { busy != nil }
@@ -298,8 +325,9 @@ final class IntroEngine: ObservableObject {
         } catch { failure = error.localizedDescription }
     }
 
-    /// Render every chosen length from the held track.
-    func render(to outputDirectory: URL?) async {
+    /// Render every chosen length from the held track, as drafts: playable,
+    /// and written nowhere permanent until `save` is pressed on one.
+    func render() async {
         guard track != nil, !isBusy, !lengths.isEmpty else { return }
         failure = nil
         defer { busy = nil }
@@ -310,7 +338,8 @@ final class IntroEngine: ObservableObject {
             if let chosenBar { fields["source_bar"] = chosenBar }
             if endOnBreak { fields["lead_in"] = "auto" }
             fields["style"] = style
-            if let outputDirectory { fields["out"] = outputDirectory.path }
+            fields["out"] = Self.draftsDirectory.path
+            fields["label"] = Self.styleLabel(style)
             do {
                 let events = try await ask("render", fields)
                 if let made = events.first(where: { $0.event == "intro" }),
@@ -327,6 +356,51 @@ final class IntroEngine: ObservableObject {
                 return
             }
         }
+    }
+
+    /// The name a style adds to a draft's file, so two styles at one length
+    /// can sit side by side.
+    nonisolated static func styleLabel(_ style: String) -> String {
+        switch style {
+        case "beat": return "Beat"
+        case "underlay": return "Underlay"
+        case "full": return "Full loop"
+        default: return "Build up"
+        }
+    }
+
+    // MARK: - Saving
+
+    /// Keeps a draft: copies it into `directory` under its own name (a
+    /// number added if that name is taken, never over a file already there).
+    /// The draft stays, so it can still be played.
+    func save(_ render: Render, to directory: URL) {
+        guard render.isDraft, render.savedAs == nil else { return }
+        let fm = FileManager.default
+        do {
+            try fm.createDirectory(at: directory, withIntermediateDirectories: true)
+            let ext = render.url.pathExtension
+            let base = render.url.deletingPathExtension().lastPathComponent
+            var target = directory.appendingPathComponent(base).appendingPathExtension(ext)
+            var n = 2
+            while fm.fileExists(atPath: target.path) {
+                target = directory.appendingPathComponent("\(base) \(n)").appendingPathExtension(ext)
+                n += 1
+            }
+            try fm.copyItem(at: render.url, to: target)
+            if let i = renders.firstIndex(where: { $0.id == render.id }) {
+                renders[i].savedAs = target
+            }
+        } catch {
+            failure = "Could not save \(render.name): \(error.localizedDescription)"
+        }
+    }
+
+    /// Throws a draft away: stops it, deletes the file, takes it off the list.
+    func discard(_ render: Render) {
+        if playing == render.id { stopPlaying() }
+        if render.isDraft { try? FileManager.default.removeItem(at: render.url) }
+        renders.removeAll { $0.id == render.id }
     }
 
     // MARK: - Listening
@@ -384,6 +458,9 @@ final class IntroEngine: ObservableObject {
     /// Drops the list of edits made so far, for when another song is chosen.
     func forgetMade() {
         if let playing, renders.contains(where: { $0.id == playing }) { stopPlaying() }
+        for render in renders where render.isDraft {
+            try? FileManager.default.removeItem(at: render.url)   // saved copies stay
+        }
         renders = []
     }
 
@@ -427,7 +504,12 @@ final class IntroEngine: ObservableObject {
             // something with no such event is worth saying again.
             if batch?.failures.isEmpty ?? true { failure = error.localizedDescription }
         }
-        if let finished = batch?.finished { renders = finished.reversed() + renders }
+        if let finished = batch?.finished {
+            // Written to the output folder by the tool: kept, not drafts.
+            var kept = finished
+            for i in kept.indices { kept[i].isDraft = false }
+            renders = kept.reversed() + renders
+        }
     }
 
     func cancelBatch() { flag.cancel() }

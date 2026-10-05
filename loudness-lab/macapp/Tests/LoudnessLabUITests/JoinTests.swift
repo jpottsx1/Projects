@@ -265,10 +265,10 @@ final class IntroEngineJoinTests: XCTestCase {
     func testTheStyleIsSentWithTheRender() async throws {
         let engine = IntroEngine(tool: try fakeTool())
         await engine.prepare("/tmp/x/Song.flac")
-        await engine.render(to: nil)
+        await engine.render()
         XCTAssertEqual(requests.last { $0["cmd"] as? String == "render" }?["style"] as? String, "build")
         engine.style = "full"
-        await engine.render(to: nil)
+        await engine.render()
         XCTAssertEqual(requests.last { $0["cmd"] as? String == "render" }?["style"] as? String, "full")
         engine.reset()
     }
@@ -329,10 +329,10 @@ final class IntroEngineJoinTests: XCTestCase {
     func testEndingOnTheSongsBreakIsAskedForOnlyWhenChosen() async throws {
         let engine = IntroEngine(tool: try fakeTool())
         await engine.prepare("/tmp/x/Song.flac")
-        await engine.render(to: nil)
+        await engine.render()
         XCTAssertNil(engine.renders.first?.leadInBar)            // off by default
         engine.endOnBreak = true
-        await engine.render(to: nil)
+        await engine.render()
         XCTAssertEqual(engine.renders.first?.leadInBar, 5)
         XCTAssertEqual(engine.renders.first?.leadInSeconds, 11.2)
         engine.reset()
@@ -342,7 +342,7 @@ final class IntroEngineJoinTests: XCTestCase {
         let engine = IntroEngine(tool: try fakeTool())
         await engine.prepare("/tmp/x/Song.flac")
         engine.joinBar = 7
-        await engine.render(to: nil)
+        await engine.render()
         XCTAssertNil(engine.failure)
         // The stand-in echoes the join it was sent, so this is what went out.
         XCTAssertEqual(engine.renders.first?.joinBar, 7)
@@ -384,7 +384,7 @@ final class IntroEngineJoinTests: XCTestCase {
         XCTAssertEqual(engine.track?.suggestedJoinBar, 4)
         XCTAssertEqual(engine.joinBar, 4)
         engine.joinBar = 6
-        await engine.render(to: nil)
+        await engine.render()
         XCTAssertEqual(engine.renders.first?.joinBar, 6)
         engine.reset()
     }
@@ -396,7 +396,7 @@ final class IntroEngineJoinTests: XCTestCase {
         engine.joinBar = 7                                   // the person's choice
         XCTAssertEqual(prepareCount, 1)
         touch("forget")                                      // an idle session lets go
-        await engine.render(to: nil)
+        await engine.render()
         XCTAssertNil(engine.failure, "an idle session must cost a pause, not an error")
         XCTAssertEqual(prepareCount, 2, "the track was prepared again")
         XCTAssertEqual(engine.renders.first?.joinBar, 7, "and the render used the join they chose")
@@ -408,8 +408,8 @@ final class IntroEngineJoinTests: XCTestCase {
         let engine = IntroEngine(tool: try fakeTool())
         await engine.prepare("/tmp/x/Song.flac")
         touch("forget")
-        await engine.render(to: nil)
-        await engine.render(to: nil)
+        await engine.render()
+        await engine.render()
         XCTAssertEqual(prepareCount, 2)
         engine.reset()
     }
@@ -430,7 +430,7 @@ final class IntroEngineJoinTests: XCTestCase {
         await engine.prepare("/tmp/x/Song.flac")
         touch("stuck")                                       // from now on, prepare does not stick
         touch("forget")
-        await engine.render(to: nil)
+        await engine.render()
         XCTAssertNotNil(engine.failure)
         XCTAssertEqual(prepareCount, 2, "one retry, then give up; never a loop")
         engine.reset()

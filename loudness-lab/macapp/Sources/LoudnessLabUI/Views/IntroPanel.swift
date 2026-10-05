@@ -258,7 +258,7 @@ struct IntroPanel: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Button(engine.isBusy ? "Working…" : "Make intro") {
-                    Task { await engine.render(to: outputDirectory) }
+                    Task { await engine.render() }
                 }
                 .disabled(engine.isBusy || engine.track == nil || engine.toolMissing)
                 .keyboardShortcut(.return, modifiers: .command)
@@ -294,7 +294,8 @@ struct IntroPanel: View {
                 Toggle("Clear when another song is chosen", isOn: $clearMade)
                     .toggleStyle(.checkbox).controlSize(.small)
                     .help("Remove the edits listed here when you pick a different track, "
-                          + "so they are not mistaken for the new song's. The files are kept.")
+                          + "so they are not mistaken for the new song's. Unsaved drafts are "
+                          + "deleted with them; saved files are kept.")
             }
             ForEach(engine.renders) { render in resultRow(render) }
             if engine.playing != nil { AuditionBar(player: engine.player) }
@@ -351,9 +352,25 @@ struct IntroPanel: View {
                     Button("Stop") { engine.stopPlaying() }
                 }
                 Spacer()
-                Button("Show in Finder") {
-                    NSWorkspace.shared.activateFileViewerSelecting([render.url])
-                }.buttonStyle(.link)
+                if render.isDraft && render.savedAs == nil {
+                    Text("Draft: not saved").font(.caption).foregroundStyle(.orange)
+                    Button("Discard") { engine.discard(render) }
+                        .help("Delete this draft.")
+                    Button("Save") { engine.save(render, to: shownDirectory) }
+                        .buttonStyle(.borderedProminent)
+                        .help("Keep this one: copy it to \(shownDirectory.path). "
+                              + "Drafts you do not save are deleted when you pick "
+                              + "another song or quit.")
+                } else {
+                    Label("Saved", systemImage: "checkmark.circle.fill")
+                        .font(.caption).foregroundStyle(.green)
+                    Button("Remove") { engine.discard(render) }
+                        .buttonStyle(.link)
+                        .help("Take it off this list. The saved file stays.")
+                    Button("Show in Finder") {
+                        NSWorkspace.shared.activateFileViewerSelecting([render.keptURL])
+                    }.buttonStyle(.link)
+                }
             }
             .controlSize(.small)
         }

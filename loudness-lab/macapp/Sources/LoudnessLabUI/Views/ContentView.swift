@@ -42,6 +42,7 @@ struct ContentView: View {
     /// rather than a convenience.
     @State private var limited = false
     @State private var compare = true
+    @State private var savingFinished = false
     @State private var dryRun = false
     /// Never remembered between launches: replacing originals is asked
     /// for each time, and confirmed each time.
@@ -164,7 +165,8 @@ struct ContentView: View {
                         if !wideWaveform && rightTab != .intro {
                             Divider()
                             ComparePanel(player: player, track: chosen, blind: $blind,
-                                         wide: $wideWaveform, estimator: profile.estimator)
+                                         wide: $wideWaveform, estimator: profile.estimator,
+                                         onSaveFinished: saveFinished, saving: savingFinished)
                         }
                         Divider()
                         LogPanel(text: engine.log,
@@ -176,7 +178,8 @@ struct ContentView: View {
                 if wideWaveform && rightTab != .intro {
                     Divider()
                     ComparePanel(player: player, track: chosen, blind: $blind,
-                                 wide: $wideWaveform, estimator: profile.estimator)
+                                 wide: $wideWaveform, estimator: profile.estimator,
+                                 onSaveFinished: saveFinished, saving: savingFinished)
                         .padding(.horizontal, 4)
                 }
             }
@@ -435,6 +438,19 @@ struct ContentView: View {
             // Measurements exist now that did not before, so the order and
             // the numbers in the list are no longer the best available.
             await queue.refresh(folders: folders, databaseURL: databaseURL)
+        }
+    }
+
+    /// Keeps the chosen track's finished version and deletes its A/B files.
+    private func saveFinished(_ track: Manifest.Track) {
+        player.stop()
+        savingFinished = true
+        Task {
+            await engine.saveFinished(track, folders: folders, profile: profile,
+                                      outputDirectory: outputDirectory,
+                                      databaseURL: databaseURL, format: format)
+            chosen = engine.manifest?.tracks.first { $0.source == track.source }
+            savingFinished = false
         }
     }
 

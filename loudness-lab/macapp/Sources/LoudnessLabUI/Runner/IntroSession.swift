@@ -37,6 +37,8 @@ struct IntroEvent: Decodable, Equatable {
     // sources
     var loopBars: Int?
     var sources: [IntroSource]?
+    var suggestedStyle: String?
+    var styleReason: String?
 
     // intro (one rendered file)
     var output: String?
@@ -93,6 +95,8 @@ struct IntroEvent: Decodable, Equatable {
         case barsAfterJoin = "bars_after_join"
         case loopBars = "loop_bars"
         case sources, output, source, bars
+        case suggestedStyle = "suggested_style"
+        case styleReason = "style_reason"
         case secondsOfIntro = "seconds_of_intro"
         case leadSeconds = "lead_seconds"
         case sourceBar = "source_bar"

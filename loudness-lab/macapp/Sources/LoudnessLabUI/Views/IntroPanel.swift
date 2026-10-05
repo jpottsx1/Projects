@@ -165,7 +165,7 @@ struct IntroPanel: View {
             }
             HStack(spacing: 10) {
                 Text("Style").frame(width: 56, alignment: .leading)
-                Picker("", selection: $engine.style) {
+                Picker("", selection: Binding(get: { engine.style }, set: { engine.chooseStyle($0) })) {
                     Text("Build up").tag("build")
                     Text("Full loop").tag("full")
                     Text("Beat").tag("beat")
@@ -176,6 +176,11 @@ struct IntroPanel: View {
                       + "rest of the band, so the intro builds into the song. Full loop plays "
                       + "the whole instrumental from the start. Beat runs only the song's own drums and "
                       + "bass under the whole intro: a groove, with none of the other instruments.")
+            }
+            if let reason = engine.styleReason, let suggested = engine.suggestedStyle {
+                Text("Suggested: \(suggested == "beat" ? "Beat" : "Build up") — \(reason).")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             Toggle("End on the song's own break or fill", isOn: $engine.endOnBreak)
                 .toggleStyle(.checkbox).controlSize(.small)

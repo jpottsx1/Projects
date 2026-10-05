@@ -120,6 +120,9 @@ final class IntroEngine: ObservableObject {
     /// Beats the bar lines have been moved by hand from where the tool put
     /// them, 0-3. Kept here so a reloaded track can be put back the same way.
     @Published private(set) var beatShift = 0
+    /// Half beats the grid has been moved by hand, mod 8 (eight half beats
+    /// is two bars, which lays the same grid out again).
+    @Published private(set) var halfShift = 0
     /// End the intro on the song's own break or fill, when it has one.
     @Published var endOnBreak = false
     /// "build" brings the drums, bass and the rest in one at a time; "full"
@@ -160,6 +163,7 @@ final class IntroEngine: ObservableObject {
         stopPlaying()
         track = nil; sources = []; chosenBar = nil; envelope = nil; joinBar = 0
         beatShift = 0
+        halfShift = 0
         if session == nil { session = IntroSession(tool: tool) }
         busy = "Separating into stems… about half a minute."
         defer { busy = nil }
@@ -209,7 +213,9 @@ final class IntroEngine: ObservableObject {
         } catch let failure as IntroSession.Failure where failure.code == "no_track" {
             busy = "Loading the track again… about half a minute."
             _ = try await session.request("prepare", ["path": track.path])
-            if beatShift != 0 { _ = try await session.request("rephase", ["beats": beatShift]) }
+            if beatShift != 0 || halfShift != 0 {
+                _ = try await session.request("rephase", ["beats": beatShift, "half_beats": halfShift])
+            }
             return try await session.request(command, fields)
         }
     }
@@ -218,19 +224,20 @@ final class IntroEngine: ObservableObject {
     /// The tool picks the downbeat from the accents in the low end, which a
     /// four-on-the-floor record does not have; this is how to correct it by
     /// ear. Nothing is separated again, so it is quick.
-    func moveBeatOne(by beats: Int) async {
+    func moveBeatOne(by beats: Int, halfBeats: Int = 0) async {
         guard let old = track, !isBusy else { return }
         failure = nil
         stopPlaying()
         busy = "Moving the bar lines…"
         defer { busy = nil }
         do {
-            let events = try await ask("rephase", ["beats": beats])
+            let events = try await ask("rephase", ["beats": beats, "half_beats": halfBeats])
             guard let grid = events.first(where: { $0.event == "grid" }) else {
                 failure = "The intro tool did not report the new bar lines."
                 return
             }
             beatShift = ((beatShift + beats) % 4 + 4) % 4
+            halfShift = ((halfShift + halfBeats) % 8 + 8) % 8
             track = Track(path: old.path, name: old.name, seconds: old.seconds, bpm: old.bpm,
                           joinSeconds: grid.joinSeconds ?? old.joinSeconds,
                           pickupSeconds: grid.pickupSeconds ?? 0,
@@ -443,7 +450,7 @@ final class IntroEngine: ObservableObject {
         stopPlaying()
         session?.close(); session = nil
         track = nil; sources = []; chosenBar = nil; batch = nil; failure = nil
-        envelope = nil; joinBar = 0; beatShift = 0
+        envelope = nil; joinBar = 0; beatShift = 0; halfShift = 0
     }
 
     nonisolated static func render(from event: IntroEvent) -> Render? {

@@ -236,15 +236,21 @@ struct JoinPicker: View {
                 Text("Beat one").frame(width: 56, alignment: .leading)
                 Button("◀ 1 beat") { Task { await engine.moveBeatOne(by: -1) } }
                 Button("1 beat ▶") { Task { await engine.moveBeatOne(by: 1) } }
-                Text(engine.beatShift == 0 ? track.downbeatFrom
-                     : "moved \(engine.beatShift) beat\(engine.beatShift == 1 ? "" : "s") by hand")
+                Button("◀ ½") { Task { await engine.moveBeatOne(by: 0, halfBeats: -1) } }
+                    .help("Move the whole grid half a beat earlier, for a song whose bar lines "
+                          + "sit on the offbeat.")
+                Button("½ ▶") { Task { await engine.moveBeatOne(by: 0, halfBeats: 1) } }
+                    .help("Move the whole grid half a beat later, for a song whose bar lines "
+                          + "sit on the offbeat.")
+                Text(engine.beatShift == 0 && engine.halfShift == 0 ? track.downbeatFrom
+                     : "moved \(Self.beats(engine.beatShift, engine.halfShift)) by hand")
                     .font(.caption).foregroundStyle(.secondary)
                     .lineLimit(1).truncationMode(.tail)
             }
             .controlSize(.small)
             .help("Which beat is the first of the bar. If the numbered bar lines in the zoomed "
                   + "strip do not sit on the heaviest kick and bass hit, move them a beat "
-                  + "either way. The small ticks are the beats, the fainter ones the half beats.")
+                  + "either way, or half a beat when they sit on the offbeat. The small ticks are the beats, the fainter ones the half beats.")
             HStack(spacing: 8) {
                 Text("Zoom").frame(width: 44, alignment: .leading)
                 Slider(value: Binding(get: { log(detailSeconds) },
@@ -257,6 +263,14 @@ struct JoinPicker: View {
                   + "against a single beat.")
         }
         .disabled(engine.isBusy)
+    }
+
+    /// "1½ beats" from whole beats and half beats, the way a person says it.
+    private static func beats(_ whole: Int, _ half: Int) -> String {
+        let halves = whole * 2 + half
+        let n = Double(halves) / 2
+        let text = n == n.rounded() ? "\(Int(n))" : String(format: "%.1f", n)
+        return "\(text) beat\(n == 1 ? "" : "s")"
     }
 
     private func set(bar: Int) {

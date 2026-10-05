@@ -14,6 +14,8 @@ import LoudnessKit
 /// them belongs in the list.
 struct SourcePanel: View {
     @Binding var folders: [URL]
+    /// Called by Clear, after the folders go, so the list can be emptied too.
+    var onClear: () -> Void = {}
 
     private var directories: [URL] { folders.filter(SourcePanel.isFolder) }
     private var files: [URL] { folders.filter { !SourcePanel.isFolder($0) } }
@@ -30,7 +32,7 @@ struct SourcePanel: View {
                 // be looked at on its own, and the list in the middle pane
                 // is sorted by low end -- so a folder added to an existing
                 // set arrives interleaved through it rather than together.
-                Button("Clear") { folders.removeAll() }
+                Button("Clear") { folders.removeAll(); onClear() }
                     .buttonStyle(.link)
                     .disabled(folders.isEmpty)
                     .help("Remove every folder, to start on something else. "

@@ -25,7 +25,47 @@ final class Queue: ObservableObject {
         var measured: Bool { lowEndDB != nil }
     }
 
+    /// What the list shows: the pool, limited to `scope` when a host has said
+    /// which tracks it means. Everything that changes a row changes the pool
+    /// and calls `publish()`.
     @Published private(set) var items: [Item] = []
+    /// Everything the scan found plus the files a host sent.
+    private var pool: [Item] = []
+    /// Nil shows everything. A host that says "these tracks" sets it, so the
+    /// list is those tracks and not the whole folder with some ticked.
+    private var scope: Set<String>?
+
+    private func publish() {
+        if let scope { items = pool.filter { scope.contains($0.path) } } else { items = pool }
+    }
+
+    /// Show only these tracks (the ones a host sent), ticked. Tracks the
+    /// queue does not hold yet are added first.
+    func show(only urls: [URL]) {
+        adopt(urls)
+        let paths = Set(urls.map(\.path))
+        scope = paths
+        for index in pool.indices where paths.contains(pool[index].path) {
+            pool[index].included = true
+        }
+        excluded.subtract(paths)
+        publish()
+    }
+
+    /// Back to showing everything the scan found.
+    func showEverything() {
+        scope = nil
+        publish()
+    }
+
+    /// Empties the list entirely: the scan, the files a host sent, the
+    /// remembered unticks and the scope. (A refresh with no folders keeps
+    /// the sent files on purpose, so this is the one that really clears.)
+    func clearAll() {
+        token += 1
+        pool = []; added = []; excluded = []; scope = nil
+        items = []; note = nil; scanning = false
+    }
     @Published private(set) var scanning = false
     @Published private(set) var note: String?
 
@@ -42,20 +82,24 @@ final class Queue: ObservableObject {
     /// already holds is just ticked; one it does not hold used to be ignored
     /// silently, which looked like "Send to Loudness Lab does nothing".
     func adopt(_ urls: [URL]) {
+        var known = Set(pool.map(\.path))
         for url in urls {
             let path = url.path
-            if items.contains(where: { $0.path == path }) {
-                setIncluded(true, for: path)
+            if known.contains(path) {
+                if let i = pool.firstIndex(where: { $0.path == path }) { pool[i].included = true }
+                excluded.remove(path)
                 continue
             }
+            known.insert(path)
             let item = Item(path: path,
                             name: url.deletingPathExtension().lastPathComponent,
                             folder: "Sent from Disco Tags")
             added.removeAll { $0.path == path }
             added.append(item)
             excluded.remove(path)
-            items.append(item)
+            pool.append(item)
         }
+        publish()
     }
 
     var includedPaths: Set<String> {
@@ -69,14 +113,21 @@ final class Queue: ObservableObject {
     }
 
     func setIncluded(_ included: Bool, for path: String) {
-        guard let index = items.firstIndex(where: { $0.path == path }) else { return }
-        items[index].included = included
+        guard let index = pool.firstIndex(where: { $0.path == path }) else { return }
+        pool[index].included = included
         if included { excluded.remove(path) } else { excluded.insert(path) }
+        publish()
     }
 
     func setAll(_ included: Bool) {
-        for index in items.indices { items[index].included = included }
-        excluded = included ? [] : Set(items.map(\.path))
+        // The rows on show: a tick or untick-all does not reach the ones a
+        // host has left out of the list.
+        let shown = Set(items.map(\.path))
+        for index in pool.indices where shown.contains(pool[index].path) {
+            pool[index].included = included
+        }
+        if included { excluded.subtract(shown) } else { excluded.formUnion(shown) }
+        publish()
     }
 
     /// Survey the folders, then fill in whatever the library already knows.
@@ -92,7 +143,8 @@ final class Queue: ObservableObject {
             // Cleared, so the remembered ticks go too. Keeping them would
             // mean a track unticked weeks ago silently staying out of a run
             // its folder was added back for.
-            items = added; note = nil; scanning = false; excluded = []
+            pool = added; note = nil; scanning = false; excluded = []
+            publish()
             return
         }
         scanning = true
@@ -167,7 +219,8 @@ final class Queue: ObservableObject {
         }
 
         let scanned = Set(rows.map(\.path))
-        items = rows + added.filter { !scanned.contains($0.path) }
+        pool = rows + added.filter { !scanned.contains($0.path) }
+        publish()
         note = Queue.note(found: rows.count, skipped: skipped, errors: errors)
     }
 

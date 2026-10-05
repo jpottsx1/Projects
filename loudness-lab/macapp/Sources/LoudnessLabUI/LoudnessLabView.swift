@@ -91,11 +91,11 @@ extension Notification.Name {
 /// Commands a host can send into an already-embedded `LoudnessLabView`,
 /// once it is showing and its queue already holds something of its own.
 public enum LoudnessLab {
-    /// Ticks the given files in the live queue, on top of whatever is
-    /// already ticked. Unlike handing `include` to a fresh `LoudnessLabView`,
-    /// this leaves the queue, survey and A/B player exactly as they are --
-    /// for a host that already has the view open and wants to add more to
-    /// it without throwing away what's there.
+    /// Makes the queue list exactly the given files, ticked: the tracks a
+    /// host means, not the whole folder with some of it ticked. Files the
+    /// queue does not hold yet are added. Unlike handing `include` to a fresh
+    /// `LoudnessLabView`, this leaves the survey and A/B player exactly as
+    /// they are -- for a host that already has the view open.
     public static func addSources(_ urls: [URL]) {
         NotificationCenter.default.post(name: .loudnessLabAddSources, object: urls)
     }

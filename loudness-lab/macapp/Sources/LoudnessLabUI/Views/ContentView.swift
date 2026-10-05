@@ -98,7 +98,7 @@ struct ContentView: View {
         HSplitView {
             // What to do.
             VStack(alignment: .leading, spacing: 14) {
-                SourcePanel(folders: $folders)
+                SourcePanel(folders: $folders, onClear: { queue.clearAll() })
                 Divider()
                 SettingsPanel(profile: $profile, profileName: $profileName,
                               limit: $limit, limited: $limited,
@@ -197,6 +197,9 @@ struct ContentView: View {
         .onAppear {
             if let initialIntroFocus { intro.focus(initialIntroFocus.path) }
         }
+        // Adding or removing a folder by hand ends a host's "only these
+        // tracks": the folder's tracks should show.
+        .onChange(of: folders) { _, _ in queue.showEverything() }
         // The queue follows the folders, and refreshes after a run because
         // a run measures tracks that had no numbers before.
         .task(id: folders) {
@@ -205,9 +208,9 @@ struct ContentView: View {
             // applied to items that exist, and refresh is what creates them.
             if !didSeedSelection, let initialInclude {
                 didSeedSelection = true
-                queue.setAll(false)
-                for path in initialInclude { queue.setIncluded(true, for: path) }
-                queue.adopt(initialInclude.map { URL(fileURLWithPath: $0) })
+                // Show exactly what the host meant, not the whole folder with
+                // some of it ticked.
+                queue.show(only: initialInclude.map { URL(fileURLWithPath: $0) })
             }
         }
         // Reads the library the moment a folder is added, rather than
@@ -228,7 +231,7 @@ struct ContentView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .loudnessLabAddSources)) { note in
             guard let urls = note.object as? [URL] else { return }
-            queue.adopt(urls)
+            queue.show(only: urls)
         }
     }
 

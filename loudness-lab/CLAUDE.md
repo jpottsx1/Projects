@@ -1654,3 +1654,22 @@ they carry a `warnings` field.
 4. **Nobody but Jeff has run this.** No licence file, no signing
    identity, and ffmpeg's licensing needs a real answer before anything
    is sold. `libmp3lame` is GPL.
+
+
+## Sounding like the song (2026-10-04)
+
+The loop used to be ranked on vocal, repeat and distance from the song's
+TYPICAL bar. Measured on four records, the top pick's rhythm pattern was
+0.77 away from the bars the song arrives with on Play That Funky Music (the
+nearest in the song was 0.41) and 0.28 on Break My Soul (nearest 0.04), and
+its bar length was 0.5-2.4% off the join's on three of them: a step in speed
+at the join. So loops are now judged against the bars at the join (`_reference`:
+rhythm pattern, bar length, pitch content, level), a loop up to RETUNE_MAX off is
+resampled to the song's tempo, and the intro can build from the song's own
+stems (drums, then bass, then the rest) instead of dropping the whole
+instrumental in at once.
+
+Not settled by ear: whether Build up sounds better than Full loop, and the
+weights in `cost`. The vocal-bleed warning now fires on all four test records
+because the sections that match the song's opening are often the ones with a
+vocal over them; that trade is real and was not measured.

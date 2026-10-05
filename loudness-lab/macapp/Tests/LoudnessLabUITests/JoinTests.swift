@@ -196,6 +196,7 @@ final class IntroEngineJoinTests: XCTestCase {
         for raw in sys.stdin:
             request = json.loads(raw)
             rid, cmd = request["id"], request["cmd"]
+            open(os.path.join(here, "requests.log"), "a").write(json.dumps(request) + "\\n")
             forget = os.path.join(here, "forget")
             if os.path.exists(forget):
                 os.remove(forget); held = False
@@ -238,6 +239,38 @@ final class IntroEngineJoinTests: XCTestCase {
     private var prepareCount: Int {
         (try? String(contentsOf: directory.appendingPathComponent("prepares.log"), encoding: .utf8))?
             .split(separator: "\n").count ?? 0
+    }
+
+    private var requests: [[String: Any]] {
+        let text = (try? String(contentsOf: directory.appendingPathComponent("requests.log"), encoding: .utf8)) ?? ""
+        return text.split(separator: "\n").compactMap {
+            try? JSONSerialization.jsonObject(with: Data($0.utf8)) as? [String: Any]
+        }
+    }
+
+    func testTheLoopsAreChosenForTheJoinAndFoundAgainWhenItMoves() async throws {
+        let engine = IntroEngine(tool: try fakeTool())
+        await engine.prepare("/tmp/x/Song.flac")
+        XCTAssertEqual(requests.last { $0["cmd"] as? String == "sources" }?["join_bar"] as? Int, 4)
+        let before = requests.filter { $0["cmd"] as? String == "sources" }.count
+        engine.joinBar = 7
+        engine.joinBar = 8                                   // a drag: only the last counts
+        try await Task.sleep(nanoseconds: 1_400_000_000)
+        let asked = requests.filter { $0["cmd"] as? String == "sources" }
+        XCTAssertEqual(asked.count, before + 1)
+        XCTAssertEqual(asked.last?["join_bar"] as? Int, 8)
+        engine.reset()
+    }
+
+    func testTheStyleIsSentWithTheRender() async throws {
+        let engine = IntroEngine(tool: try fakeTool())
+        await engine.prepare("/tmp/x/Song.flac")
+        await engine.render(to: nil)
+        XCTAssertEqual(requests.last { $0["cmd"] as? String == "render" }?["style"] as? String, "build")
+        engine.style = "full"
+        await engine.render(to: nil)
+        XCTAssertEqual(requests.last { $0["cmd"] as? String == "render" }?["style"] as? String, "full")
+        engine.reset()
     }
 
     private var rephases: [String] {

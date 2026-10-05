@@ -80,6 +80,12 @@ extension Notification.Name {
     public static let loudnessLabAddSources = Notification.Name("loudnesslab.addSources")
     /// Posted by `LoudnessLab.showIntro`: switches the right pane to Intro.
     public static let loudnessLabShowIntro = Notification.Name("loudnesslab.showIntro")
+    /// Posted by `LoudnessLab.togglePreview`: play or stop the queue's highlighted track.
+    public static let loudnessLabTogglePreview = Notification.Name("loudnesslab.togglePreview")
+    /// Posted by `LoudnessLab.skipPreview`, carrying seconds (`Double`) as `object`.
+    public static let loudnessLabSkipPreview = Notification.Name("loudnesslab.skipPreview")
+    /// Posted by `LoudnessLab.moveHighlight`, carrying `Int` (+1/-1) as `object`.
+    public static let loudnessLabMoveHighlight = Notification.Name("loudnesslab.moveHighlight")
 }
 
 /// Commands a host can send into an already-embedded `LoudnessLabView`,
@@ -100,6 +106,22 @@ public enum LoudnessLab {
     public static var helpPageURL: URL? {
         Bundle.module.url(forResource: "loudness-lab", withExtension: "html",
                           subdirectory: "Help")
+    }
+
+    /// Space bar for a host that owns the keyboard: previews the highlighted
+    /// track in the queue (the first one if none is), or stops it.
+    public static func togglePreview() {
+        NotificationCenter.default.post(name: .loudnessLabTogglePreview, object: nil)
+    }
+
+    /// Jumps the running preview ahead by `seconds`, clamped to the track's end.
+    public static func skipPreview(by seconds: Double = 30) {
+        NotificationCenter.default.post(name: .loudnessLabSkipPreview, object: seconds)
+    }
+
+    /// Moves the queue's highlight for a host that has claimed the arrow keys.
+    public static func moveHighlight(by step: Int) {
+        NotificationCenter.default.post(name: .loudnessLabMoveHighlight, object: step)
     }
 
     /// Shows the Intro tab, which makes intro edits from the ticked tracks.

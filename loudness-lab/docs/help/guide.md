@@ -219,17 +219,29 @@ starts cold before ticking it.
    small ticks in that strip are the beats, the fainter ones the half beats.
    Moving it separates nothing again, so it takes a moment, and the loops are
    found again on the new bar lines.
-3. **Choose the loop.** The tab ranks stretches of the song to repeat. Each
-   shows how much vocal is in it (*no vocal* is what you want) and how well
-   its drums *repeat* one loop later. A repeat score under 0.6 means a build
-   or a fill: the seam will not land on the beat, and the tab says so.
+3. **Choose the loop.** The tab ranks stretches of the song to repeat, and
+   ranks them first by how much they sound like the bars the song arrives
+   with: the same rhythm, the same bar length (tempo), the same key and the
+   same level. An intro that is busier, louder or faster than the song it
+   leads into is a different song glued on, however clean it is. Each loop
+   shows how much vocal is in it (*no vocal* is what you want), how well its
+   drums *repeat* one loop later, *feels like the song* (the rhythm match
+   against the bars the song arrives with) and its *tempo* against the song at
+   the join. A repeat score under 0.6 means a build or a fill: the seam will
+   not land on the beat, and the tab says so. A loop up to 1.2% off the song's
+   tempo is resampled to it when the intro is made, so the intro does not
+   change speed at the join; further off than that it is left alone and the
+   tab says so. Move the join and the loops are found again for it.
    *Grid-timed* means the loop's ends could not be tied to a real kick.
    *Has a fill* means a bar in it differs from the groove around it: a loop
    is heard several times over, so a fill is heard every time, the last one
    right before the song arrives. The ranking already counts it against a
    loop, and the tab says when the best one left still has one.
-4. **Choose the lengths** (more than one is fine) and the loop size, and
-   press **Make intro**. *End on the song's own break or fill* makes the
+4. **Choose the lengths** (more than one is fine), the loop size and the
+   style, and press **Make intro**. *Build up* brings the song's own stems in
+   one at a time: the drums first, the bass a quarter of the way in, the rest
+   of the band half way, and the last repeat whole, so the intro builds into
+   the song. *Full loop* plays the whole instrumental from the start. *Beat* runs only the song's own drums and bass under every repeat, a groove with none of the other instruments, for a record whose band is never free of vocal. In both of those, the loop's drums and bass do not stop where the song starts: they carry on under the song's first bar and fade out, so the song arrives on a groove already running instead of being cut to. *End on the song's own break or fill* makes the
    intro's last bar the song's own break, the bar before its drums come back,
    with the vocal taken out, so the intro leads into the song the way the song
    leads into a drop. It only applies when the song has one that sounds like

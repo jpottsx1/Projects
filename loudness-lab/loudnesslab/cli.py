@@ -504,9 +504,9 @@ def cmd_intro(args: argparse.Namespace) -> int:
             a = intro.prepare(source, bpm=args.bpm, downbeat_s=args.downbeat,
                               separator=args.separator)
             if args.source_bar is not None:
-                chosen = [intro.source_at(a, args.source_bar, loop_bars)]
+                chosen = [intro.source_at(a, args.source_bar, loop_bars, args.join_bar)]
             else:
-                chosen = intro.candidates(a, loop_bars, count=5)
+                chosen = intro.candidates(a, loop_bars, count=5, join_bar=args.join_bar)
             if not chosen:
                 raise ValueError("the track is too short to take a loop from")
             if args.list_sources:
@@ -519,7 +519,7 @@ def cmd_intro(args: argparse.Namespace) -> int:
                 lead_in = found[0] if found else None
             for bars in args.bars:
                 audio, info = intro.render(a, bars, chosen[0], loop_bars,
-                                           args.join_bar, lead_in)
+                                           args.join_bar, lead_in, args.style)
                 target = intro.write_intro(a, source, audio, bars, out_dir,
                                            args.format)
                 info.update(source=str(source), output=str(target))
@@ -1912,6 +1912,11 @@ def build_parser() -> argparse.ArgumentParser:
                       help="the bar line the song arrives at; everything before "
                            "it is replaced by the intro (default: where the "
                            "full groove lands; 0 keeps the whole opening)")
+    made.add_argument("--style", choices=("full", "build", "beat"), default="build",
+                      help="beat: only the song's own drums and bass, every repeat, "
+                           "a groove to run the intro on; build: the drums first, then the bass, then the rest "
+                           "of the band, so the intro builds into the song; "
+                           "full: the whole instrumental from the start")
     made.add_argument("--lead-in", action="store_true",
                       help="end the intro on the song's own break or fill, when it "
                            "has one that fits, instead of on the loop's last bar")

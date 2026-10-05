@@ -53,6 +53,10 @@ final class IntroEngine: ObservableObject {
         var leadInBar: Int?
         var leadInSeconds: Double?
         var leadInNote: String?
+        /// The loop was resampled by this much to the song's tempo at the join,
+        /// or is this far off it and was left alone.
+        var retunedPct: Double?
+        var tempoOffPct: Double?
         /// The finished file drawn the way the original is; nil if the tool
         /// did not send it.
         var envelope: JoinEnvelope?
@@ -75,7 +79,23 @@ final class IntroEngine: ObservableObject {
     /// The bar line the song arrives at; everything of the original before
     /// it is replaced by the intro. Starts at the tool's suggestion (where
     /// the groove lands) and is the person's to move.
-    @Published var joinBar = 0
+    @Published var joinBar = 0 {
+        didSet {
+            guard joinBar != oldValue, track != nil, !isBusy else { return }
+            refreshSourcesLater()
+        }
+    }
+    private var sourceRefresh: Task<Void, Never>?
+    /// The loops are chosen to sound like the bars the song arrives with, so
+    /// moving the join changes which are best. Waits for the slider to stop.
+    private func refreshSourcesLater() {
+        sourceRefresh?.cancel()
+        sourceRefresh = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 700_000_000)
+            guard !Task.isCancelled, let self, !self.isBusy else { return }
+            await self.loadSources()
+        }
+    }
     @Published private(set) var envelope: JoinEnvelope?
     /// Nil means the best-ranked stretch, which is what a render uses when
     /// nothing has been picked.
@@ -102,6 +122,9 @@ final class IntroEngine: ObservableObject {
     @Published private(set) var beatShift = 0
     /// End the intro on the song's own break or fill, when it has one.
     @Published var endOnBreak = false
+    /// "build" brings the drums, bass and the rest in one at a time; "full"
+    /// plays the whole instrumental from the start.
+    @Published var style = "build"
     func focus(_ path: String) { focusPath = path; focusTick += 1 }
 
     let player = ABPlayer()
@@ -247,7 +270,8 @@ final class IntroEngine: ObservableObject {
         }
         defer { if !whileBusy { busy = nil } }
         do {
-            let events = try await ask("sources", ["loop_bars": loopBars, "count": 5])
+            let events = try await ask("sources", ["loop_bars": loopBars, "count": 5,
+                                                   "join_bar": joinBar])
             sources = events.first(where: { $0.event == "sources" })?.sources ?? []
             if let chosenBar, !sources.contains(where: { $0.bar == chosenBar }) {
                 self.chosenBar = nil
@@ -266,6 +290,7 @@ final class IntroEngine: ObservableObject {
                                          "join_bar": joinBar]
             if let chosenBar { fields["source_bar"] = chosenBar }
             if endOnBreak { fields["lead_in"] = "auto" }
+            fields["style"] = style
             if let outputDirectory { fields["out"] = outputDirectory.path }
             do {
                 let events = try await ask("render", fields)
@@ -369,6 +394,7 @@ final class IntroEngine: ObservableObject {
         arguments += ["--bars"] + lengths.sorted().map(String.init)
         arguments += ["--loop-bars", String(loopBars), "--json"]
         if endOnBreak { arguments.append("--lead-in") }
+        arguments += ["--style", style]
         if let outputDirectory { arguments += ["--out", outputDirectory.path] }
 
         do {
@@ -423,7 +449,8 @@ final class IntroEngine: ObservableObject {
                       joinBar: event.joinBar ?? 0,
                       cutSeconds: event.cutSeconds ?? 0,
                       leadInBar: event.leadInBar, leadInSeconds: event.leadInSeconds,
-                      leadInNote: event.leadInNote)
+                      leadInNote: event.leadInNote,
+                      retunedPct: event.retunedPct, tempoOffPct: event.tempoOffPct)
     }
 }
 

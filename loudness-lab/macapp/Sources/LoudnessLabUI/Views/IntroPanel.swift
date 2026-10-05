@@ -168,12 +168,14 @@ struct IntroPanel: View {
                 Picker("", selection: $engine.style) {
                     Text("Build up").tag("build")
                     Text("Full loop").tag("full")
+                    Text("Beat").tag("beat")
                 }
-                .pickerStyle(.segmented).labelsHidden().frame(width: 200)
+                .pickerStyle(.segmented).labelsHidden().frame(width: 260)
                 .disabled(engine.isBusy)
                 .help("Build up brings the song's own drums in first, then the bass, then the "
                       + "rest of the band, so the intro builds into the song. Full loop plays "
-                      + "the whole instrumental from the start.")
+                      + "the whole instrumental from the start. Beat runs only the song's own drums and "
+                      + "bass under the whole intro: a groove, with none of the other instruments.")
             }
             Toggle("End on the song's own break or fill", isOn: $engine.endOnBreak)
                 .toggleStyle(.checkbox).controlSize(.small)

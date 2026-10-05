@@ -490,6 +490,23 @@ class TestSoundingLikeTheSong(unittest.TestCase):
         self.assertFalse(np.allclose(built[second], bare[second], atol=1e-4))
         self.assertFalse(np.allclose(built[last], bare[last], atol=1e-4))
 
+    def test_beat_runs_only_the_drums_and_bass_under_every_repeat(self):
+        import dataclasses
+        source = intro.candidates(self.a, 4, join_bar=0)[0]
+        beat, info = intro.render(self.a, 16, source, 4, join_bar=0, style="beat")
+        self.assertEqual(info["style"], "beat")
+        unit = info["intro_samples"] // 4
+        # silencing the rest of the band changes nothing, in any repeat
+        no_other = dataclasses.replace(self.a, other=np.zeros_like(self.a.other))
+        bare, _ = intro.render(no_other, 16, source, 4, join_bar=0, style="beat")
+        intro_part = slice(2000, info["intro_samples"] - 2000)
+        self.assertTrue(np.allclose(beat[intro_part], bare[intro_part], atol=1e-6))
+        # but silencing the bass does, in the last repeat as in the first
+        no_bass = dataclasses.replace(self.a, bass=np.zeros_like(self.a.bass))
+        thin, _ = intro.render(no_bass, 16, source, 4, join_bar=0, style="beat")
+        last = slice(3 * unit + 2000, 4 * unit - 2000)
+        self.assertFalse(np.allclose(beat[last], thin[last], atol=1e-4))
+
     def test_without_the_separate_stems_build_falls_back_to_the_whole_instrumental(self):
         import dataclasses
         bare = dataclasses.replace(self.a, bass=np.zeros((0, 2), dtype=np.float32),

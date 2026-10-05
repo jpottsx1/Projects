@@ -965,8 +965,10 @@ def render(a: Analysis, bars: int, source: Source,
     crossfaded over the SEAM_S before that, so a kick's front is never
     inside a fade.
 
-    `style` is "full" (the whole instrumental every repeat) or "build": the
-    drums alone first, the bass joining a quarter of the way in and the rest
+    `style` is "full" (the whole instrumental every repeat), "beat" (the
+    song's own drums and bass under every repeat and nothing else: a groove to
+    run the intro on, for a record with no vocal-free stretch of the band) or
+    "build": the drums alone first, the bass joining a quarter of the way in and the rest
     of the band half way, the last repeat whole, so the intro arrives at the
     song the way a DJ would bring the elements in. Each is a stem of the song,
     so what comes in is what the song has.
@@ -1008,9 +1010,9 @@ def render(a: Analysis, bars: int, source: Source,
     join_out = repeats * unit                    # grid coordinates; the file
     shift = join_out - join                      # adds `lead` at the end
     total = n + shift
-    if style not in ("full", "build"):
-        raise ValueError(f"style must be 'full' or 'build', not {style!r}")
-    stems = style == "build" and len(a.bass) == len(a.instrumental) and len(a.other) == len(a.instrumental)
+    if style not in ("full", "build", "beat"):
+        raise ValueError(f"style must be 'full', 'build' or 'beat', not {style!r}")
+    stems = style in ("build", "beat") and len(a.bass) == len(a.instrumental) and len(a.other) == len(a.instrumental)
     bass_in = round(repeats * 0.25)
     other_in = min(round(repeats * 0.5), repeats - 1)
     mono_in = a.instrumental
@@ -1021,6 +1023,8 @@ def render(a: Analysis, bars: int, source: Source,
         if not stems:
             return mono_in[lo:hi].astype(np.float64)
         mix = a.drums[lo:hi].astype(np.float64)
+        if style == "beat":
+            return mix + a.bass[lo:hi]
         if m >= bass_in:
             mix = mix + a.bass[lo:hi]
         if m >= other_in:

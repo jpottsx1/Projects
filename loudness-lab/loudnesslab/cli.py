@@ -1912,8 +1912,9 @@ def build_parser() -> argparse.ArgumentParser:
                       help="the bar line the song arrives at; everything before "
                            "it is replaced by the intro (default: where the "
                            "full groove lands; 0 keeps the whole opening)")
-    made.add_argument("--style", choices=("full", "build", "beat"), default="build",
-                      help="beat: only the song's own drums and bass, every repeat, "
+    made.add_argument("--style", choices=("full", "build", "beat", "underlay"), default="build",
+                      help="underlay: keep the song's own opening and lay the loop's "
+                           "drums and bass under it; beat: only the song's own drums and bass, every repeat, "
                            "a groove to run the intro on; build: the drums first, then the bass, then the rest "
                            "of the band, so the intro builds into the song; "
                            "full: the whole instrumental from the start")

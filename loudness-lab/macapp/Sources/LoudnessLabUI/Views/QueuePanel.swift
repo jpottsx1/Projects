@@ -16,8 +16,41 @@ struct QueuePanel: View {
     var previewing: String?
     var onPreview: (String) -> Void = { _ in }
 
+    /// How the list is shown. "Processing order" is the order the run works
+    /// through and the "will process" limit counts from; artist and song only
+    /// reorder what is on screen, so sorting never changes which tracks a
+    /// limited run picks.
+    enum SortOrder: String, CaseIterable, Identifiable {
+        case processing = "Processing order", artist = "Artist", song = "Song"
+        var id: String { rawValue }
+    }
+    @AppStorage("queueSortOrder") private var sortOrder = SortOrder.processing
+
     @State private var highlighted: String?
     @FocusState private var listFocused: Bool
+
+    /// Artist and song from an "Artist - Song" name; a name without the
+    /// separator is all song.
+    private static func split(_ name: String) -> (artist: String, song: String) {
+        guard let range = name.range(of: " - ") else { return ("", name) }
+        return (String(name[..<range.lowerBound]), String(name[range.upperBound...]))
+    }
+
+    /// What the list shows, and what space/arrows walk through.
+    private var shown: [Queue.Item] {
+        guard sortOrder != .processing else { return queue.items }
+        func order(_ a: String, _ b: String) -> ComparisonResult {
+            a.localizedCaseInsensitiveCompare(b)
+        }
+        return queue.items.sorted { l, r in
+            let (la, ls) = Self.split(l.name), (ra, rs) = Self.split(r.name)
+            let (first, second) = sortOrder == .artist
+                ? (order(la, ra), order(ls, rs)) : (order(ls, rs), order(la, ra))
+            if first != .orderedSame { return first == .orderedAscending }
+            if second != .orderedSame { return second == .orderedAscending }
+            return l.path < r.path
+        }
+    }
 
     private var willProcess: Set<String> { queue.willProcess(limit: limit) }
     private var includedCount: Int { queue.items.filter(\.included).count }
@@ -52,6 +85,13 @@ struct QueuePanel: View {
             Text("To process").font(.headline)
             if queue.scanning { ProgressView().controlSize(.small) }
             Spacer()
+            Picker("Sort", selection: $sortOrder) {
+                ForEach(SortOrder.allCases) { Text($0.rawValue).tag($0) }
+            }
+            .labelsHidden().pickerStyle(.menu).fixedSize()
+            .disabled(queue.items.isEmpty)
+            .help("Sort the list by artist or song. This changes only how it is shown: "
+                  + "which tracks a limited run picks still follows the processing order.")
             Button("All") { queue.setAll(true) }
                 .buttonStyle(.link)
                 .disabled(queue.items.isEmpty || includedCount == queue.items.count)
@@ -80,7 +120,7 @@ struct QueuePanel: View {
     private var list: some View {
         ScrollView {
             LazyVStack(spacing: 0) {
-                ForEach(queue.items) { item in
+                ForEach(shown) { item in
                     row(item, inRange: willProcess.contains(item.path))
                         .contentShape(Rectangle())
                         .onTapGesture { highlighted = item.path; listFocused = true }
@@ -99,7 +139,7 @@ struct QueuePanel: View {
 
     @discardableResult
     private func togglePreview() -> Bool {
-        guard let path = highlighted ?? queue.items.first?.path else { return false }
+        guard let path = highlighted ?? shown.first?.path else { return false }
         highlighted = path
         onPreview(path)
         return true
@@ -112,9 +152,10 @@ struct QueuePanel: View {
     }
 
     private func move(_ step: Int) -> KeyPress.Result {
-        guard !queue.items.isEmpty else { return .ignored }
-        let at = queue.items.firstIndex { $0.path == highlighted } ?? (step > 0 ? -1 : queue.items.count)
-        highlighted = queue.items[min(max(at + step, 0), queue.items.count - 1)].path
+        let rows = shown
+        guard !rows.isEmpty else { return .ignored }
+        let at = rows.firstIndex { $0.path == highlighted } ?? (step > 0 ? -1 : rows.count)
+        highlighted = rows[min(max(at + step, 0), rows.count - 1)].path
         return .handled
     }
 

@@ -528,6 +528,20 @@ class TestSoundingLikeTheSong(unittest.TestCase):
         _, finfo = intro.render(self.a, 16, source, 4, join_bar=0, style="full")
         self.assertEqual(finfo["handover_bars"], 0.0)
 
+    def test_the_style_follows_how_bare_the_arrival_bars_are(self):
+        import dataclasses
+        style, why = intro.suggest_style(self.a, 4)
+        self.assertEqual(style, "build")
+        self.assertIn("own groove", why)
+        # take the drums out of the bars the song arrives with: bare
+        lines = self.a.bar_lines
+        drums = self.a.drums.copy()
+        drums[int(lines[4]):int(lines[8])] *= 0.05
+        bare = dataclasses.replace(self.a, drums=drums)
+        style, why = intro.suggest_style(bare, 4)
+        self.assertEqual(style, "beat")
+        self.assertIn("below the song's body", why)
+
     def test_without_the_separate_stems_build_falls_back_to_the_whole_instrumental(self):
         import dataclasses
         bare = dataclasses.replace(self.a, bass=np.zeros((0, 2), dtype=np.float32),

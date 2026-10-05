@@ -125,6 +125,14 @@ final class IntroEngine: ObservableObject {
     /// "build" brings the drums, bass and the rest in one at a time; "full"
     /// plays the whole instrumental from the start.
     @Published var style = "build"
+    /// The style the tool recommends for the bars the song arrives with, and
+    /// why. Applied to `style` until the person picks one themselves.
+    @Published private(set) var suggestedStyle: String?
+    @Published private(set) var styleReason: String?
+    private var styleChosen = false
+    /// The style picker calls this: a pick by hand stops the suggestion
+    /// from overriding it.
+    func chooseStyle(_ new: String) { style = new; styleChosen = true }
     func focus(_ path: String) { focusPath = path; focusTick += 1 }
 
     let player = ABPlayer()
@@ -272,7 +280,11 @@ final class IntroEngine: ObservableObject {
         do {
             let events = try await ask("sources", ["loop_bars": loopBars, "count": 5,
                                                    "join_bar": joinBar])
-            sources = events.first(where: { $0.event == "sources" })?.sources ?? []
+            let found = events.first(where: { $0.event == "sources" })
+            sources = found?.sources ?? []
+            suggestedStyle = found?.suggestedStyle
+            styleReason = found?.styleReason
+            if let suggestedStyle, !styleChosen { style = suggestedStyle }
             if let chosenBar, !sources.contains(where: { $0.bar == chosenBar }) {
                 self.chosenBar = nil
             }

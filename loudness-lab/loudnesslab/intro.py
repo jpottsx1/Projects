@@ -531,6 +531,48 @@ def suggest_join(a: Analysis) -> tuple[int, str]:
                        "the opening before it is replaced")
 
 
+# How far below the song's body the drums can sit in the bars it arrives with
+# before those bars count as bare, and how much the vocal must outweigh the
+# band for them to count as a vocal over nothing.
+BARE_DRUMS_DB = -9.0
+BARE_BARS = 4
+
+
+def suggest_style(a: Analysis, join_bar: int) -> tuple[str, str]:
+    """(style, why): which of the intro styles suits the bars the song
+    arrives with.
+
+    A drums-and-bass groove under the song only helps where the song has
+    none of its own to follow: an acapella opening, or a vocal over a pad.
+    Run it under bars that already carry a full groove and the two grooves
+    fight. So the arrival bars (the `BARE_BARS` from the join) are measured
+    against the song's body: if the drum stem sits `BARE_DRUMS_DB` or more
+    below it, the bars are bare and the answer is "beat"; otherwise the song
+    brings its own groove and the intro builds up to it ("build").
+
+    A starting point, like `suggest_join`: it reads levels, not taste."""
+    p = _bar_powers(a)
+    bars = len(a.bar_lines) - 1
+    if p is None or bars < BARE_BARS * 2 or not 0 <= join_bar < bars:
+        return "build", "the track is too short to judge how bare its opening is"
+
+    def db(x: float) -> float:
+        return float(10.0 * np.log10(x + 1e-12))
+
+    arrival = slice(join_bar, min(bars, join_bar + BARE_BARS))
+    body = slice(bars // 4, max(bars // 4 + 1, 3 * bars // 4))
+    drums_rel = db(float(np.median(p["drm"][arrival]))) - db(float(np.median(p["drm"][body])))
+    vocal_over = db(float(np.median(p["voc"][arrival]))) - db(float(np.median(p["inst"][arrival])))
+    if drums_rel <= BARE_DRUMS_DB:
+        what = ("a vocal on its own" if vocal_over > 0.0 else "very little band")
+        return "beat", (f"the song arrives on {what}: its drums are {abs(drums_rel):.0f} dB "
+                        "below the song's body, so a drums-and-bass groove under the "
+                        "intro and the first bar gives it something to land on")
+    return "build", (f"the song arrives with its own groove (drums within "
+                     f"{abs(drums_rel):.0f} dB of the body), so the intro builds up to it "
+                     "rather than putting a second beat under it")
+
+
 def resolve_join(a: Analysis, join_bar: int) -> tuple[int, int]:
     """(sample of the join, samples of lead-in kept before it) for a bar.
 
@@ -1375,8 +1417,11 @@ class Session:
         join_bar = request.get("join_bar")
         found = candidates(a, loop_bars, count=int(request.get("count", 5)),
                            join_bar=None if join_bar is None else int(join_bar))
+        chosen = a.suggested_join_bar if join_bar is None else int(join_bar)
+        style, why = suggest_style(a, chosen)
         say("sources", loop_bars=loop_bars,
-            sources=[source_fields(s) for s in found])
+            sources=[source_fields(s) for s in found],
+            suggested_style=style, style_reason=why)
 
     def _render(self, request: dict, say) -> None:
         a = self._need()

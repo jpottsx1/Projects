@@ -26,3 +26,12 @@ final class IntroViewTests: XCTestCase {
         XCTAssertTrue(LoudnessLabIntroView.items(for: []).isEmpty)
     }
 }
+
+final class EditKindTests: XCTestCase {
+    func testTheHostsKindMapsToTheEnginesMode() {
+        XCTAssertEqual(LoudnessLabEditKind.intro.mode, .intro)
+        XCTAssertEqual(LoudnessLabEditKind.outro.mode, .outro)
+        XCTAssertEqual(LoudnessLabEditKind(.outro), .outro)
+        XCTAssertEqual(LoudnessLabEditKind(.intro), .intro)
+    }
+}

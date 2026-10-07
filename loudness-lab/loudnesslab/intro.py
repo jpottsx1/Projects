@@ -217,6 +217,10 @@ class Analysis:
     # 0 is the first bar of the track), and why. See `suggest_join`.
     suggested_join_bar: int = 0
     join_reason: str = ""
+    # The bar line an OUTRO should leave the song at, and why. See
+    # `outro.suggest_exit`; the same analysis serves an intro and an outro.
+    suggested_exit_bar: int = 0
+    exit_reason: str = ""
     warnings: list[str] = field(default_factory=list)
     # The two stems the instrumental is made of, kept apart so an intro can
     # bring them in one at a time (`render` with style="build").
@@ -507,6 +511,8 @@ def _layout(x: np.ndarray, instrumental: np.ndarray, vocals: np.ndarray,
         **({} if bass is None else {"bass": bass}),
         **({} if other is None else {"other": other}))
     analysis.suggested_join_bar, analysis.join_reason = suggest_join(analysis)
+    from . import outro        # outro imports this module, so not at the top
+    analysis.suggested_exit_bar, analysis.exit_reason = outro.suggest_exit(analysis)
     return analysis
 
 
@@ -1563,6 +1569,10 @@ class Session:
                                            int(request.get("per_second", ENVELOPE_PER_SECOND))))
             elif command == "render":
                 self._render(request, say)
+            elif command == "outro_sources":
+                self._outro_sources(request, say)
+            elif command == "outro_render":
+                self._outro_render(request, say)
             else:
                 raise ValueError(f"unknown command {command!r}")
             say("done")
@@ -1597,9 +1607,15 @@ class Session:
     @staticmethod
     def _grid_fields(a: Analysis) -> dict:
         """What the bar lines are, which `prepare` and `rephase` both report."""
+        from . import outro
         join, pickup = resolve_join(a, a.suggested_join_bar)
+        exit_, tail = outro.resolve_exit(a, a.suggested_exit_bar)
         return dict(
             first_bar_seconds=round(a.join / a.rate, 3),
+            suggested_exit_bar=a.suggested_exit_bar,
+            exit_reason=a.exit_reason,
+            exit_seconds=round(exit_ / a.rate, 3),
+            tail_seconds=round(tail / a.rate, 3),
             suggested_join_bar=a.suggested_join_bar,
             join_reason=a.join_reason,
             join_seconds=round(join / a.rate, 3),
@@ -1655,6 +1671,41 @@ class Session:
         say("intro", **info, source=str(self.path), output=str(target))
         # The finished edit as it will be heard, drawn the way the original
         # is, so the join can be judged in the result and not only before it.
+        say("render_envelope", output=str(target), **envelope_of(audio, a.rate))
+
+
+    def _outro_sources(self, request: dict, say) -> None:
+        from . import outro
+        a = self._need()
+        loop_bars = int(request.get("loop_bars", DEFAULT_LOOP_BARS))
+        exit_bar = request.get("exit_bar")
+        found = outro.candidates(a, loop_bars, count=int(request.get("count", 5)),
+                                 exit_bar=None if exit_bar is None else int(exit_bar))
+        say("outro_sources", loop_bars=loop_bars,
+            sources=[source_fields(s) for s in found])
+
+    def _outro_render(self, request: dict, say) -> None:
+        from . import outro
+        a = self._need()
+        bars = int(request.get("bars", 16))
+        loop_bars = int(request.get("loop_bars", DEFAULT_LOOP_BARS))
+        exit_bar = request.get("exit_bar")
+        chosen = a.suggested_exit_bar if exit_bar is None else int(exit_bar)
+        if request.get("source_bar") is not None:
+            source = outro.source_at(a, int(request["source_bar"]), loop_bars, chosen)
+        else:
+            found = outro.candidates(a, loop_bars, count=1, exit_bar=chosen)
+            if not found:
+                raise ValueError("the track is too short to take a loop from")
+            source = found[0]
+        say("stage", stage="rendering", name=self.path.name)
+        audio, info = outro.render(a, bars, source, loop_bars, chosen,
+                                   request.get("style", "full"),
+                                   fade_bars=float(request.get("fade_bars", 0.0)))
+        out_dir = Path(request["out"]) if request.get("out") else outro.default_out_dir()
+        target = outro.write_outro(a, self.path, audio, bars, out_dir,
+                                   request.get("format"), str(request.get("label") or ""))
+        say("outro", **info, source=str(self.path), output=str(target))
         say("render_envelope", output=str(target), **envelope_of(audio, a.rate))
 
 

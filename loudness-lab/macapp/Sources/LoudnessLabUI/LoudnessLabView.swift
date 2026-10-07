@@ -66,8 +66,18 @@ public struct LoudnessLabView: View {
     }
 }
 
-/// Intro edits as a view of their own: a track that starts cold, given an
-/// intro made from itself. The same panel the Loudness view's Intro tab
+/// Which end of a track an edit replaces: an intro for a track that starts
+/// cold, an outro for one that ends cold or fades out.
+public enum LoudnessLabEditKind: String, CaseIterable, Sendable {
+    case intro, outro
+
+    var mode: IntroEngine.Mode { self == .outro ? .outro : .intro }
+    init(_ mode: IntroEngine.Mode) { self = mode == .outro ? .outro : .intro }
+}
+
+/// Intro and outro edits as a view of their own: a track that starts cold,
+/// given an intro made from itself, or one that ends cold or fades out, given
+/// an outro. The same panel the Loudness view's Intro tab
 /// shows, for a host that wants it on a tab of its own rather than inside
 /// Loudness Lab.
 ///
@@ -79,16 +89,21 @@ public struct LoudnessLabView: View {
 public struct LoudnessLabIntroView: View {
     private let tracks: [URL]
     private let focus: URL?
+    private let kind: Binding<LoudnessLabEditKind>?
 
     /// - Parameters:
-    ///   - tracks: the files intro edits can be made from.
+    ///   - tracks: the files edits can be made from.
     ///   - focus: the track to have selected, when it is one of `tracks`.
     ///     It is applied when the view appears, when `focus` changes, and
     ///     when `tracks` changes, so a host that replaces the list and names
     ///     its first track gets that track chosen.
-    public init(tracks: [URL], focus: URL? = nil) {
+    ///   - kind: which edit is showing, in both directions: the host sets it
+    ///     ("Make Outro Edit" opens the view on Outro) and the view's own
+    ///     Intro | Outro switch writes it back. Nil leaves the view to itself.
+    public init(tracks: [URL], focus: URL? = nil, kind: Binding<LoudnessLabEditKind>? = nil) {
         self.tracks = tracks
         self.focus = focus
+        self.kind = kind
     }
 
     @StateObject private var engine = IntroEngine()
@@ -113,7 +128,16 @@ public struct LoudnessLabIntroView: View {
             // to show in this view.
             LogPanel(text: "", failure: engine.player.problem, collapsed: true)
         }
-        .onAppear { if let focus { engine.focus(focus.path) } }
+        .onAppear {
+            if let focus { engine.focus(focus.path) }
+            if let kind { engine.mode = kind.wrappedValue.mode }
+        }
+        .onChange(of: kind?.wrappedValue) { _, new in
+            if let new, engine.mode != new.mode { engine.mode = new.mode }
+        }
+        .onChange(of: engine.mode) { _, new in
+            if let kind, kind.wrappedValue.mode != new { kind.wrappedValue = LoudnessLabEditKind(new) }
+        }
         .onChange(of: focus) { _, new in if let new { engine.focus(new.path) } }
         .onChange(of: tracks) { _, _ in if let focus { engine.focus(focus.path) } }
     }

@@ -25,6 +25,11 @@ final class IntroEngine: ObservableObject {
         let barSeconds: [Double]
         let suggestedJoinBar: Int
         let joinReason: String
+        /// Where an outro would leave the song (see `Mode.outro`).
+        var suggestedExitBar = 0
+        var exitReason = ""
+        var exitSeconds = 0.0
+        var tailSeconds = 0.0
 
         /// The last bar the song can arrive at: it needs a bar of itself.
         var lastJoinBar: Int { max(0, barSeconds.count - 2) }
@@ -67,6 +72,14 @@ final class IntroEngine: ObservableObject {
         /// or is this far off it and was left alone.
         var retunedPct: Double?
         var tempoOffPct: Double?
+        /// What this file is. An outro keeps the original up to `exitSeconds`
+        /// (a few of them vocal tail, `tailSeconds`) and runs the loop after it.
+        var kind: Mode = .intro
+        var exitBar = 0
+        var exitSeconds = 0.0
+        var tailSeconds = 0.0
+        var style = ""
+        var fadeBars = 0.0
         /// The finished file drawn the way the original is; nil if the tool
         /// did not send it.
         var envelope: JoinEnvelope?
@@ -92,6 +105,37 @@ final class IntroEngine: ObservableObject {
         var failures: [String] = []
     }
 
+    /// What is being made. The two share everything that costs time (the
+    /// separation, the grid, the loops); they differ in which end of the song
+    /// is replaced.
+    enum Mode: String, CaseIterable, Identifiable, Sendable {
+        case intro = "Intro", outro = "Outro"
+        var id: String { rawValue }
+    }
+
+    @Published var mode: Mode = .intro {
+        didSet {
+            guard mode != oldValue, track != nil, !isBusy else { return }
+            chosenBar = nil
+            Task { await loadSources() }
+        }
+    }
+    /// The bar line the song leaves at (an outro): the original is kept up to
+    /// it and the loop runs from it. Starts at the tool's suggestion, where
+    /// the groove ends, and is the person's to move.
+    @Published var exitBar = 0 {
+        didSet {
+            guard exitBar != oldValue, track != nil, !isBusy, mode == .outro else { return }
+            refreshSourcesLater()
+        }
+    }
+    /// "strip" takes the band away a part at a time and ends on the drums;
+    /// "beat" is only the song's own drums and bass; "full" the whole
+    /// instrumental throughout.
+    @Published var outroStyle = "strip"
+    /// How many bars the outro fades away over at its end; 0 stops it on the bar line.
+    @Published var outroFadeBars = 0.0
+
     @Published private(set) var track: Track?
     @Published private(set) var sources: [IntroSource] = []
     /// The bar line the song arrives at; everything of the original before
@@ -99,7 +143,7 @@ final class IntroEngine: ObservableObject {
     /// the groove lands) and is the person's to move.
     @Published var joinBar = 0 {
         didSet {
-            guard joinBar != oldValue, track != nil, !isBusy else { return }
+            guard joinBar != oldValue, track != nil, !isBusy, mode == .intro else { return }
             refreshSourcesLater()
         }
     }
@@ -192,7 +236,7 @@ final class IntroEngine: ObservableObject {
         guard let tool = toolOverride ?? CLI.locate() else { failure = CLI.missing; return }
         failure = nil
         stopPlaying()
-        track = nil; sources = []; chosenBar = nil; envelope = nil; joinBar = 0
+        track = nil; sources = []; chosenBar = nil; envelope = nil; joinBar = 0; exitBar = 0
         beatShift = 0
         halfShift = 0
         if session == nil { session = IntroSession(tool: tool) }
@@ -219,8 +263,13 @@ final class IntroEngine: ObservableObject {
                           warnings: prepared.warnings ?? [],
                           barSeconds: prepared.barSeconds ?? [],
                           suggestedJoinBar: prepared.suggestedJoinBar ?? 0,
-                          joinReason: prepared.joinReason ?? "")
+                          joinReason: prepared.joinReason ?? "",
+                          suggestedExitBar: prepared.suggestedExitBar ?? 0,
+                          exitReason: prepared.exitReason ?? "",
+                          exitSeconds: prepared.exitSeconds ?? 0,
+                          tailSeconds: prepared.tailSeconds ?? 0)
             joinBar = track?.suggestedJoinBar ?? 0
+            exitBar = track?.suggestedExitBar ?? 0
             await loadSources(whileBusy: true)
             await loadEnvelope()
         } catch {
@@ -277,8 +326,13 @@ final class IntroEngine: ObservableObject {
                           warnings: grid.warnings ?? [],
                           barSeconds: grid.barSeconds ?? old.barSeconds,
                           suggestedJoinBar: grid.suggestedJoinBar ?? 0,
-                          joinReason: grid.joinReason ?? "")
+                          joinReason: grid.joinReason ?? "",
+                          suggestedExitBar: grid.suggestedExitBar ?? 0,
+                          exitReason: grid.exitReason ?? "",
+                          exitSeconds: grid.exitSeconds ?? 0,
+                          tailSeconds: grid.tailSeconds ?? 0)
             joinBar = track?.suggestedJoinBar ?? 0
+            exitBar = track?.suggestedExitBar ?? 0
             chosenBar = nil
             await loadSources(whileBusy: true)
         } catch {
@@ -316,6 +370,15 @@ final class IntroEngine: ObservableObject {
         }
         defer { if !whileBusy { busy = nil } }
         do {
+            if mode == .outro {
+                let events = try await ask("outro_sources", ["loop_bars": loopBars, "count": 5,
+                                                             "exit_bar": exitBar])
+                sources = events.first(where: { $0.event == "outro_sources" })?.sources ?? []
+                if let chosenBar, !sources.contains(where: { $0.bar == chosenBar }) {
+                    self.chosenBar = nil
+                }
+                return
+            }
             let events = try await ask("sources", ["loop_bars": loopBars, "count": 5,
                                                    "join_bar": joinBar])
             let found = events.first(where: { $0.event == "sources" })
@@ -335,6 +398,7 @@ final class IntroEngine: ObservableObject {
         guard track != nil, !isBusy, !lengths.isEmpty else { return }
         failure = nil
         defer { busy = nil }
+        if mode == .outro { await renderOutros(); return }
         for bars in lengths.sorted() {
             busy = "Rendering \(bars) bars…"
             var fields: [String: Any] = ["bars": bars, "loop_bars": loopBars,
@@ -359,6 +423,42 @@ final class IntroEngine: ObservableObject {
                 failure = error.localizedDescription
                 return
             }
+        }
+    }
+
+    /// The outro of each chosen length, as drafts (see `render`).
+    private func renderOutros() async {
+        for bars in lengths.sorted() {
+            busy = "Rendering \(bars) bars…"
+            var fields: [String: Any] = ["bars": bars, "loop_bars": loopBars,
+                                         "exit_bar": exitBar, "style": outroStyle,
+                                         "fade_bars": outroFadeBars]
+            if let chosenBar { fields["source_bar"] = chosenBar }
+            fields["out"] = Self.draftsDirectory.path
+            fields["label"] = Self.outroStyleLabel(outroStyle)
+            do {
+                let events = try await ask("outro_render", fields)
+                if let made = events.first(where: { $0.event == "outro" }),
+                   var render = Self.outroRender(from: made) {
+                    if let drawn = events.first(where: { $0.event == "render_envelope"
+                                                         && $0.output == made.output }) {
+                        render.envelope = JoinEnvelope(event: drawn)
+                    }
+                    renders.removeAll { $0.id == render.id }
+                    renders.insert(render, at: 0)
+                }
+            } catch {
+                failure = error.localizedDescription
+                return
+            }
+        }
+    }
+
+    nonisolated static func outroStyleLabel(_ style: String) -> String {
+        switch style {
+        case "beat": return "Beat"
+        case "full": return "Full loop"
+        default: return "Strip"
         }
     }
 
@@ -417,7 +517,9 @@ final class IntroEngine: ObservableObject {
                                                  url: render.url, matchGainDB: 0)])
             playing = render.id
         }
-        let start = offset ?? max(0, render.joinSeconds - Self.auditionLead)
+        // An intro is judged where the song arrives, an outro where it leaves.
+        let moment = render.kind == .outro ? render.exitSeconds : render.joinSeconds
+        let start = offset ?? max(0, moment - Self.auditionLead)
         player.play(from: start)
     }
 
@@ -432,8 +534,8 @@ final class IntroEngine: ObservableObject {
                 url: URL(fileURLWithPath: track.path), matchGainDB: 0)])
             playing = track.path
         }
-        let join = JoinMath.seconds(ofBar: joinBar, in: track.barSeconds)
-        player.play(from: offset ?? max(0, join - Self.auditionLead))
+        let marker = JoinMath.seconds(ofBar: mode == .outro ? exitBar : joinBar, in: track.barSeconds)
+        player.play(from: offset ?? max(0, marker - Self.auditionLead))
     }
 
     /// Where the playhead belongs on the ORIGINAL's timeline, for whatever is
@@ -444,6 +546,9 @@ final class IntroEngine: ObservableObject {
         guard let playing else { return nil }
         if let track, playing == track.path { return position }
         guard let render = renders.first(where: { $0.id == playing }) else { return nil }
+        // An outro is the original itself up to the exit; past it the file is
+        // new, and the playhead sweeps on across the stretch it replaces.
+        if render.kind == .outro { return position }
         return JoinMath.playhead(atFileTime: position, songArrivesAt: render.joinSeconds,
                                  cutSeconds: render.cutSeconds)
     }
@@ -490,11 +595,15 @@ final class IntroEngine: ObservableObject {
         busy = "Working through \(paths.count) track\(paths.count == 1 ? "" : "s")…"
         defer { busy = nil }
 
-        var arguments = ["intro"] + paths
+        var arguments = [mode == .outro ? "outro" : "intro"] + paths
         arguments += ["--bars"] + lengths.sorted().map(String.init)
         arguments += ["--loop-bars", String(loopBars), "--json"]
-        if endOnBreak { arguments.append("--lead-in") }
-        arguments += ["--style", style]
+        if mode == .outro {
+            arguments += ["--style", outroStyle, "--fade-bars", String(outroFadeBars)]
+        } else {
+            if endOnBreak { arguments.append("--lead-in") }
+            arguments += ["--style", style]
+        }
         if let outputDirectory { arguments += ["--out", outputDirectory.path] }
 
         do {
@@ -526,6 +635,8 @@ final class IntroEngine: ObservableObject {
             batch?.name = event.name ?? ""
         case "intro":
             if let render = Self.render(from: event) { batch?.finished.append(render) }
+        case "outro":
+            if let render = Self.outroRender(from: event) { batch?.finished.append(render) }
         case "error":
             batch?.failures.append("\(event.name ?? "A track"): \(event.message ?? "failed")")
         default: break
@@ -536,7 +647,30 @@ final class IntroEngine: ObservableObject {
         stopPlaying()
         session?.close(); session = nil
         track = nil; sources = []; chosenBar = nil; batch = nil; failure = nil
-        envelope = nil; joinBar = 0; beatShift = 0; halfShift = 0
+        envelope = nil; joinBar = 0; exitBar = 0; beatShift = 0; halfShift = 0
+    }
+
+    nonisolated static func outroRender(from event: IntroEvent) -> Render? {
+        guard let output = event.output, let bars = event.bars else { return nil }
+        var render = Render(url: URL(fileURLWithPath: output), bars: bars,
+                            loopBars: event.loopBars ?? 4,
+                            joinSeconds: 0,
+                            introSeconds: event.secondsOfOutro ?? 0,
+                            sourceBar: event.sourceBar ?? 0,
+                            sourceSeconds: event.sourceSeconds ?? 0,
+                            vocalDB: event.sourceVocalDB,
+                            vocalFree: event.vocalFree ?? false,
+                            repeatScore: event.loopRepeat ?? 0,
+                            warnings: event.warnings ?? [],
+                            cutSeconds: event.cutSeconds ?? 0,
+                            retunedPct: event.retunedPct, tempoOffPct: event.tempoOffPct)
+        render.kind = .outro
+        render.exitBar = event.exitBar ?? 0
+        render.exitSeconds = event.exitSeconds ?? 0
+        render.tailSeconds = event.tailSeconds ?? 0
+        render.style = event.style ?? ""
+        render.fadeBars = event.fadeBars ?? 0
+        return render
     }
 
     nonisolated static func render(from event: IntroEvent) -> Render? {
@@ -567,9 +701,12 @@ extension IntroEngine {
     func seedForSnapshot(track: Track?, sources: [IntroSource] = [],
                          renders: [Render] = [], busy: String? = nil,
                          batch: Batch? = nil, failure: String? = nil,
-                         envelope: JoinEnvelope? = nil, joinBar: Int = 0) {
+                         envelope: JoinEnvelope? = nil, joinBar: Int = 0,
+                         mode: Mode = .intro, exitBar: Int = 0) {
         self.envelope = envelope
         self.joinBar = joinBar
+        self.exitBar = exitBar
+        self.mode = mode
         self.track = track
         self.sources = sources
         self.renders = renders

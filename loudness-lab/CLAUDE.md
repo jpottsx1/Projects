@@ -1634,6 +1634,87 @@ tested against lines copied from the Python's real output, and a `grep -v
 warn` over that output once hid every `prepared` and `intro` event, because
 they carry a `warnings` field.
 
+## Outro edits: an outro made from the track itself
+
+`loudness-lab outro <file> --bars 8 16 32` (`loudnesslab/outro.py`,
+`tests/test_outro.py`), and `outro_sources` / `outro_render` requests to
+`intro --serve`. Jeff asked for it 2026-10-07 once the intro was judged good
+by ear: the mirror of an intro for a track that fades out or ends cold. The
+original is kept up to a bar line (the EXIT) and N bars of its own
+instrumental loop run from there. Writes copies into `~/Music/LoudnessLab/Outro
+Edits`; never the original. It is a module of its own that imports `intro`: the
+same separation, `Analysis`, `candidates`, seams and writer, so one 30 s
+analysis serves an intro and an outro of the same track (the Session holds
+one track). In the app it is the Intro tab's **Intro | Outro** switch
+(`IntroEngine.Mode`), not a second tab.
+
+Each step mirrors the intro's:
+
+- **Exit** (`suggest_exit`): the end of the last stretch of bars that hold the
+  body of the level (drum stem where there are drums), then the biggest drop in
+  the next two bars. A fade-out exits where it starts to fall; a record at full
+  level to its last bar exits at its last bar line and says so. A bar LINE, so
+  the range is `MIN_EXIT_BAR`..`len(bar_lines)-1` (the last line is allowed:
+  the whole song is kept).
+- **Tail** (`tail_after`): a vocal ringing past the exit is kept, up to
+  `PICKUP_STEPS` half beats; the loop is on the grid from the exit but is not
+  heard until exit + tail, crossfaded with the original over `SEAM_S`.
+- **Loop**: `intro.candidates(join_bar=exit_bar - loop_bars)`, i.e. the
+  reference ("what the song sounds like there") is the bars BEFORE the exit.
+- **Hand-in** (mirror of the intro's hand-over): in `beat` and `strip` the
+  loop's drums and bass fade in under the song's last bar.
+- **Styles**: `full`, `beat`, `strip` (the build run backwards: the rest of the
+  band goes, then the bass, the drums end it). **Ending**: stop on the bar line,
+  or `fade_bars`.
+- Cues and beatgrid are NOT carried (`keep_markers=False`), same as an intro:
+  a cue after the exit would point into the loop. The first version of the
+  design said they could stay; they cannot.
+
+Things learned the hard way, from the first real track (a 6:42 record, 199 bars)
+after the synthetic tests all passed. Synthetic fixtures have a perfect grid
+and stems that sum exactly to the mix, which hides both:
+
+- **The bar lines lose the kicks and drift.** `_layout` follows bar lines bar
+  by bar and only accepts a kick within 0.1 beat (`snap`); after a stretch
+  without kicks, or a tempo wander, the lock is lost for good and the grid runs
+  on at a fixed tempo. On that record 53 of 199 bars were `snapped`, 144 lines
+  were more than 40 ms from a kick, and the last were +200 ms (0.4 of a beat)
+  off. An outro leaves at the END, where it has built up: the loop's kicks sat
+  0.4 beat from the song's, an audible skipped beat. `aligned_exit` reads where
+  the kicks of the last `ALIGN_BARS` bars really fall (circular mean, needs
+  `ALIGN_MIN_COHERENCE`), moves the exit by that, and warns. The kick it
+  moves to is usually PAST the last real kick (the exit is where the music
+  ends), so it is extrapolated along the beat, not looked for with `attack`
+  (the first version looked for it and silently did nothing); the detector's
+  onset-to-attack lag is read from the last kicks. The intro has the same
+  lock loss and was NOT changed (it is judged good by ear): flagged as a
+  separate task. `test_the_test_track_really_has_lost_its_grid` and the live
+  mutation `test_without_the_alignment_the_beat_would_skip` keep that test honest.
+- **The loop can be louder than the mix.** Stems summed overshoot (measured
+  loop+hand-in peak 1.094 against a record peaking 0.941), and an encoder
+  adds a little. The new material alone is brought under `CEILING` (0.97): the
+  loop by one gain, the hand-in by the most that fits under the kept audio
+  (down to none on a loud master), the seam clipped last. The original's
+  samples are never changed. `loop_gain_db` in the report says when it acted.
+- **A kick-phase check on the full mix is useless on real music** (coherence
+  0.03 on a real record's last 40 s). Measure against the DRUM STEM's kicks
+  (`a.kicks`), and compare like with like: the detector's onset follows the
+  attack by ~30 ms, which also shows as +30 ms at bar lines that DID lock.
+
+Not measured / open: whether the results sound right on real music (only
+numbers have been checked: the seam, the level, the alignment, the peak; the
+engine has not been listened to); a track whose drift exceeds half a beat (the
+exit then lands on the nearest kick, which may be another beat of the bar:
+beat-matched but a beat out of phrase); `Strip` against `Beat` by ear.
+
+**In the app**: `IntroEngine.mode`/`exitBar`/`outroStyle`/`outroFadeBars`;
+`JoinPicker` is the same picker with the marker flipped (shades what comes
+AFTER the exit); `IntroPanel` has the switch, the outro options and "Make outro";
+`LoudnessLabIntroView(kind:)` lets a host open it on Outro (Disco Tags'
+**Make Outro Edit...**). Tests: `tests/test_outro.py` (42), `OutroTests.swift`
+(decoding against REAL event lines, the exit maths, the engine against a
+stand-in tool that logs what it was asked).
+
 ## Open
 
 1. **`Disco Music` is 51 files that want re-ripping, not processing.** A

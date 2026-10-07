@@ -162,12 +162,16 @@ final class IntroEngine: ObservableObject {
     /// the real one, found as the rest of the app finds it.
     private let toolOverride: URL?
 
-    init(tool: URL? = nil) {
+    /// - Parameter clearsDrafts: false for an engine that only plays the
+    ///   queue's previews. Clearing is what a new engine does to drafts a
+    ///   crash left behind, so a second engine starting up while another has
+    ///   unsaved edits on the list would delete them.
+    init(tool: URL? = nil, clearsDrafts: Bool = true) {
         toolOverride = tool
         // Drafts do not outlive the session: clear any a crash left behind,
         // and the ones made now when the app quits. (The notification is
         // named by string: this file is Foundation only.)
-        Self.clearDrafts()
+        if clearsDrafts { Self.clearDrafts() }
         NotificationCenter.default.addObserver(
             forName: Notification.Name("NSApplicationWillTerminateNotification"),
             object: nil, queue: nil) { _ in Self.clearDrafts() }

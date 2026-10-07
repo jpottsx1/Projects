@@ -10,6 +10,9 @@ struct ContentView: View {
     /// person had ticked since.
     private let initialInclude: Set<String>?
     private let initialIntroFocus: URL?
+    /// Whether this view has its own Intro tab. A host that shows intro edits
+    /// somewhere else turns it off; the standalone app leaves it on.
+    private let showsIntro: Bool
     @State private var didSeedSelection = false
 
     /// - Parameters:
@@ -18,12 +21,16 @@ struct ContentView: View {
     ///   - initialInclude: paths to tick once that scan lands. Nil keeps
     ///     the queue's own default of everything it found.
     ///   - initialIntroFocus: open on the Intro tab with this track selected.
+    ///   - showsIntro: keep the Intro tab. Off, the engine below only plays
+    ///     the queue's previews and leaves intro drafts alone.
     init(initialFolders: [URL] = [], initialInclude: Set<String>? = nil,
-         initialIntroFocus: URL? = nil) {
+         initialIntroFocus: URL? = nil, showsIntro: Bool = true) {
         self.initialInclude = initialInclude
-        self.initialIntroFocus = initialIntroFocus
+        self.initialIntroFocus = showsIntro ? initialIntroFocus : nil
+        self.showsIntro = showsIntro
         _folders = State(initialValue: initialFolders)
-        if initialIntroFocus != nil { _rightTab = State(initialValue: .intro) }
+        _intro = StateObject(wrappedValue: IntroEngine(clearsDrafts: showsIntro))
+        if showsIntro, initialIntroFocus != nil { _rightTab = State(initialValue: .intro) }
     }
 
     @Environment(\.openWindow) private var openWindow
@@ -31,7 +38,7 @@ struct ContentView: View {
     @StateObject private var player = ABPlayer()
     @StateObject private var queue = Queue()
     @StateObject private var personal = PersonalProfiles()
-    @StateObject private var intro = IntroEngine()
+    @StateObject private var intro: IntroEngine
 
     @State private var folders: [URL] = []
     @State private var profile = Profile()
@@ -66,6 +73,11 @@ struct ContentView: View {
     enum RightTab: String, CaseIterable, Identifiable {
         case survey = "Survey", results = "Results", intro = "Intro"
         var id: String { rawValue }
+    }
+
+    /// The tabs this view offers.
+    private var rightTabs: [RightTab] {
+        RightTab.allCases.filter { showsIntro || $0 != .intro }
     }
 
     /// Where processed files go. Changeable, because a DJ library does not
@@ -128,7 +140,7 @@ struct ContentView: View {
                     // What the folders are, and what came out of them.
                     VStack(spacing: 0) {
                         Picker("", selection: $rightTab) {
-                            ForEach(RightTab.allCases) { Text($0.rawValue).tag($0) }
+                            ForEach(rightTabs) { Text($0.rawValue).tag($0) }
                         }
                         .pickerStyle(.segmented)
                         .labelsHidden()
@@ -191,6 +203,7 @@ struct ContentView: View {
             if new == .intro { player.stop() }
         }
         .onReceive(NotificationCenter.default.publisher(for: .loudnessLabShowIntro)) { note in
+            guard showsIntro else { return }
             if let url = note.object as? URL { intro.focus(url.path) }
             rightTab = .intro
         }

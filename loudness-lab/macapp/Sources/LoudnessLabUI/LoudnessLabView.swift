@@ -20,6 +20,7 @@ public struct LoudnessLabView: View {
     private let include: Set<String>?
     private let showsSplash: Bool
     private let introFocus: URL?
+    private let showsIntro: Bool
 
     /// - Parameters:
     ///   - folders: folders to scan on appear. Empty leaves the view as the
@@ -32,16 +33,22 @@ public struct LoudnessLabView: View {
     ///     host whose "make an intro edit" action is what created the view.
     ///     (A view that already exists is told with `LoudnessLab.showIntro`;
     ///     a notification posted before it exists is simply lost.)
+    ///   - showsIntro: keep the Intro tab (the default, which is what the
+    ///     standalone app wants). A host that shows intro edits in a view of
+    ///     its own (`LoudnessLabIntroView`) turns it off, so the two don't
+    ///     offer the same thing.
     public init(
         folders: [URL] = [],
         include: Set<String>? = nil,
         showsSplash: Bool = false,
-        introFocus: URL? = nil
+        introFocus: URL? = nil,
+        showsIntro: Bool = true
     ) {
         self.folders = folders
         self.include = include
         self.showsSplash = showsSplash
         self.introFocus = introFocus
+        self.showsIntro = showsIntro
     }
 
     @State private var splashVisible: Bool?
@@ -49,13 +56,66 @@ public struct LoudnessLabView: View {
     public var body: some View {
         ZStack {
             ContentView(initialFolders: folders, initialInclude: include,
-                        initialIntroFocus: introFocus)
+                        initialIntroFocus: introFocus, showsIntro: showsIntro)
             if splashVisible ?? showsSplash {
                 SplashView { splashVisible = false }
                     .transition(.opacity)
             }
         }
         .animation(.easeOut(duration: 0.4), value: splashVisible ?? showsSplash)
+    }
+}
+
+/// Intro edits as a view of their own: a track that starts cold, given an
+/// intro made from itself. The same panel the Loudness view's Intro tab
+/// shows, for a host that wants it on a tab of its own rather than inside
+/// Loudness Lab.
+///
+/// The host says which tracks to work on and which one to have selected; it
+/// does not need the loudness queue, which is what the Intro tab otherwise
+/// reads them from. The view keeps the analysed track, the drafts and the
+/// held separation for as long as it is alive, so a host that keeps it
+/// mounted (hidden) while another tab shows loses nothing.
+public struct LoudnessLabIntroView: View {
+    private let tracks: [URL]
+    private let focus: URL?
+
+    /// - Parameters:
+    ///   - tracks: the files intro edits can be made from.
+    ///   - focus: the track to have selected, when it is one of `tracks`.
+    ///     It is applied when the view appears, when `focus` changes, and
+    ///     when `tracks` changes, so a host that replaces the list and names
+    ///     its first track gets that track chosen.
+    public init(tracks: [URL], focus: URL? = nil) {
+        self.tracks = tracks
+        self.focus = focus
+    }
+
+    @StateObject private var engine = IntroEngine()
+
+    /// The list the panel works from, in the shape it already takes.
+    static func items(for tracks: [URL]) -> [Queue.Item] {
+        var seen = Set<String>()
+        return tracks.compactMap { url in
+            guard seen.insert(url.path).inserted else { return nil }
+            return Queue.Item(path: url.path,
+                              name: url.deletingPathExtension().lastPathComponent,
+                              folder: url.deletingLastPathComponent().path)
+        }
+    }
+
+    public var body: some View {
+        VStack(spacing: 0) {
+            IntroPanel(engine: engine, ticked: Self.items(for: tracks),
+                       emptyText: "No tracks to make intros from.",
+                       batchNoun: "track")
+            // A player problem (a file that would not open) has nowhere else
+            // to show in this view.
+            LogPanel(text: "", failure: engine.player.problem, collapsed: true)
+        }
+        .onAppear { if let focus { engine.focus(focus.path) } }
+        .onChange(of: focus) { _, new in if let new { engine.focus(new.path) } }
+        .onChange(of: tracks) { _, _ in if let focus { engine.focus(focus.path) } }
     }
 }
 

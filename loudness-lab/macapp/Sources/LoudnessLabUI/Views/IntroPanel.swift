@@ -14,6 +14,12 @@ struct IntroPanel: View {
     /// The ticked tracks in the queue, which is where "what to work on" is
     /// already decided everywhere else in the app.
     let ticked: [Queue.Item]
+    /// What to say when there is nothing to work on, and what the batch
+    /// button calls the tracks. The Loudness view's tab says "ticked", because
+    /// that is what its queue does; a host that supplies the tracks itself
+    /// says something else.
+    var emptyText = "Tick tracks in the list to make intros from them."
+    var batchNoun = "ticked"
 
     @State private var picked: String?
     @AppStorage("introOutputDirectory") private var outputOverride = ""
@@ -40,7 +46,7 @@ struct IntroPanel: View {
                 intro
                 if engine.toolMissing { missing }
                 if ticked.isEmpty {
-                    Text("Tick tracks in the list to make intros from them.")
+                    Text(emptyText)
                         .foregroundStyle(.secondary)
                 } else {
                     trackSection
@@ -82,7 +88,7 @@ struct IntroPanel: View {
 
     private var missing: some View {
         Label("The loudness-lab tool was not found, so there is nothing to make "
-              + "intros with. Choose it from the Process panel.",
+              + "intros with. Choose it in Loudness Lab's Process panel.",
               systemImage: "exclamationmark.triangle")
             .font(.caption).foregroundStyle(.orange)
     }
@@ -383,7 +389,8 @@ struct IntroPanel: View {
         VStack(alignment: .leading, spacing: 6) {
             Divider()
             HStack {
-                Button("Make intros for all \(ticked.count) ticked") {
+                Button(batchNoun == "ticked" ? "Make intros for all \(ticked.count) ticked"
+                       : "Make intros for all \(ticked.count) \(batchNoun)\(ticked.count == 1 ? "" : "s")") {
                     Task { await engine.renderBatch(ticked.map(\.path), to: outputDirectory) }
                 }
                 .disabled(engine.isBusy || engine.toolMissing)

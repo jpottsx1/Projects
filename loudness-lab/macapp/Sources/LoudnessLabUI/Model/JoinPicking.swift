@@ -74,6 +74,28 @@ enum JoinMath {
         min(max(0, bar), max(0, bars.count - 2))
     }
 
+    /// The least of the original an outro keeps before the exit.
+    static let firstExitBar = 2
+
+    /// An exit is a bar line too, but the other end of the track: the last
+    /// bar line is a fine place to leave (the whole song is kept) and the
+    /// first few are not (there would be no song before the outro).
+    static func clampExit(_ bar: Int, in bars: [Double]) -> Int {
+        min(max(firstExitBar, bar), max(firstExitBar, bars.count - 1))
+    }
+
+    static func nearestExit(to seconds: Double, in bars: [Double]) -> Int {
+        guard bars.count > 1 else { return 0 }
+        var lo = 0, hi = bars.count - 1
+        while lo < hi {
+            let mid = (lo + hi) / 2
+            if bars[mid] < seconds { lo = mid + 1 } else { hi = mid }
+        }
+        let before = max(0, lo - 1)
+        let nearest = abs(bars[before] - seconds) <= abs(bars[lo] - seconds) ? before : lo
+        return clampExit(nearest, in: bars)
+    }
+
     static func seconds(ofBar bar: Int, in bars: [Double]) -> Double {
         guard !bars.isEmpty else { return 0 }
         return bars[min(max(0, bar), bars.count - 1)]

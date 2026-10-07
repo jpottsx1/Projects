@@ -22,14 +22,27 @@ struct JoinPicker: View {
     @State private var frozenCenter: Double?
 
     private var bars: [Double] { track.barSeconds }
-    private var joinSeconds: Double { JoinMath.seconds(ofBar: engine.joinBar, in: bars) }
+    /// An outro marks where the song LEAVES; an intro where it arrives. The
+    /// strips, the snapping and the controls are the same either way, so the
+    /// marker is whichever bar the mode is choosing.
+    private var outro: Bool { engine.mode == .outro }
+    private var markerBar: Int { outro ? engine.exitBar : engine.joinBar }
+    private var suggestedBar: Int { outro ? track.suggestedExitBar : track.suggestedJoinBar }
+    private var joinSeconds: Double { JoinMath.seconds(ofBar: markerBar, in: bars) }
     private var total: Double { engine.envelope?.seconds ?? track.seconds }
-    private var moved: Bool { engine.joinBar != track.suggestedJoinBar }
+    private var moved: Bool { markerBar != suggestedBar }
+    private var lowestBar: Int { outro ? JoinMath.firstExitBar : 0 }
+    private var highestBar: Int { outro ? max(JoinMath.firstExitBar, bars.count - 1) : track.lastJoinBar }
+
+    private func nearest(to seconds: Double) -> Int {
+        outro ? JoinMath.nearestExit(to: seconds, in: bars) : JoinMath.nearestBar(to: seconds, in: bars)
+    }
 
     var body: some View {
         if bars.count > 1 {
             VStack(alignment: .leading, spacing: 8) {
-                Text("Where the song starts").font(.subheadline.weight(.semibold))
+                Text(outro ? "Where the song leaves" : "Where the song starts")
+                    .font(.subheadline.weight(.semibold))
                 readout
                 if let envelope = engine.envelope {
                     overview(envelope)
@@ -49,6 +62,15 @@ struct JoinPicker: View {
 
     private var readout: some View {
         let seconds = joinSeconds
+        if outro {
+            let rest = max(0, total - seconds)
+            return Text(rest < 0.5
+                        ? "The song is kept to its last bar line, and the outro follows it."
+                        : "The song leaves at bar \(engine.exitBar), \(JoinMath.clock(seconds)) in. "
+                          + "The last \(JoinMath.clock(rest)) of the original is replaced by the outro.")
+                .font(.callout)
+                .fixedSize(horizontal: false, vertical: true)
+        }
         return Text(engine.joinBar == 0
                     ? "The song starts at its first bar. Its own opening is kept."
                     : "The song arrives at bar \(engine.joinBar), \(JoinMath.clock(seconds)) in. "
@@ -59,9 +81,9 @@ struct JoinPicker: View {
 
     private var reason: String {
         moved
-            ? "Moved from the suggestion, bar \(track.suggestedJoinBar) "
-              + "(\(JoinMath.clock(JoinMath.seconds(ofBar: track.suggestedJoinBar, in: bars))))."
-            : track.joinReason
+            ? "Moved from the suggestion, bar \(suggestedBar) "
+              + "(\(JoinMath.clock(JoinMath.seconds(ofBar: suggestedBar, in: bars))))."
+            : (outro ? track.exitReason : track.joinReason)
     }
 
     // MARK: - Strips
@@ -75,17 +97,15 @@ struct JoinPicker: View {
             }
             .contentShape(Rectangle())
             .gesture(DragGesture(minimumDistance: 0).onChanged { value in
-                set(bar: JoinMath.nearestBar(
-                    to: JoinMath.seconds(forX: value.location.x, in: 0...max(total, 0.001),
-                                         width: geo.size.width),
-                    in: bars))
+                set(bar: nearest(to: JoinMath.seconds(forX: value.location.x, in: 0...max(total, 0.001),
+                                                      width: geo.size.width)))
             })
         }
         .overlay(PlayheadLayer(engine: engine, window: 0...max(total, 0.001)))
         .frame(height: 44)
         .clipShape(RoundedRectangle(cornerRadius: 4))
         .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.secondary.opacity(0.3)))
-        .help("The whole track. Click or drag to move the join; it snaps to a bar line.")
+        .help("The whole track. Click or drag to move the \(outro ? "exit" : "join"); it snaps to a bar line.")
     }
 
     private func detail(_ envelope: JoinEnvelope) -> some View {
@@ -102,9 +122,8 @@ struct JoinPicker: View {
                     let center = frozenCenter ?? joinSeconds
                     if frozenCenter == nil { frozenCenter = center }
                     let frozen = JoinMath.window(center: center, width: detailSeconds, total: total)
-                    set(bar: JoinMath.nearestBar(
-                        to: JoinMath.seconds(forX: value.location.x, in: frozen, width: geo.size.width),
-                        in: bars))
+                    set(bar: nearest(to: JoinMath.seconds(forX: value.location.x, in: frozen,
+                                                          width: geo.size.width)))
                 }
                 .onEnded { _ in frozenCenter = nil })
         }
@@ -169,8 +188,20 @@ struct JoinPicker: View {
             }
         }
 
+        // What the outro replaces: everything after the exit.
+        if outro, joinX < size.width {
+            let from = max(joinX, 0)
+            context.fill(Path(CGRect(x: from, y: 0, width: size.width - from, height: size.height)),
+                         with: .color(.black.opacity(0.32)))
+            if labels, size.width - from > 110 {
+                context.draw(Text("replaced by the outro").font(.system(size: 10).weight(.medium))
+                                .foregroundColor(.white.opacity(0.85)),
+                             at: CGPoint(x: from + 6, y: size.height - 10), anchor: .leading)
+            }
+        }
+
         // What the intro replaces.
-        if joinX > 0 {
+        if !outro, joinX > 0 {
             context.fill(Path(CGRect(x: 0, y: 0, width: min(joinX, size.width), height: size.height)),
                          with: .color(.black.opacity(0.32)))
             if labels, joinX > 90 {
@@ -183,7 +214,7 @@ struct JoinPicker: View {
 
         // The suggestion, when the person has moved off it.
         if moved {
-            let x = JoinMath.x(for: JoinMath.seconds(ofBar: track.suggestedJoinBar, in: barSeconds),
+            let x = JoinMath.x(for: JoinMath.seconds(ofBar: suggestedBar, in: barSeconds),
                                in: window, width: size.width)
             if x >= 0 && x <= size.width {
                 var dash = Path(); dash.move(to: CGPoint(x: x, y: 0)); dash.addLine(to: CGPoint(x: x, y: size.height))
@@ -212,22 +243,23 @@ struct JoinPicker: View {
             HStack(spacing: 8) {
                 Text("Bar").frame(width: 44, alignment: .leading)
                 Slider(value: Binding(
-                    get: { Double(engine.joinBar) },
+                    get: { Double(markerBar) },
                     set: { set(bar: Int($0.rounded())) }),
-                       in: 0...Double(max(1, track.lastJoinBar)), step: 1)
-                Text("\(engine.joinBar)")
+                       in: Double(lowestBar)...Double(max(lowestBar + 1, highestBar)), step: 1)
+                Text("\(markerBar)")
                     .font(.system(.callout, design: .monospaced)).frame(width: 34, alignment: .trailing)
             }
-            .help("Move the join one bar at a time. Zero keeps the whole opening.")
+            .help(outro ? "Move the exit one bar at a time. The last bar keeps the whole song."
+                        : "Move the join one bar at a time. Zero keeps the whole opening.")
             HStack(spacing: 6) {
                 ForEach([-4, -1, 1, 4], id: \.self) { step in
-                    Button(step > 0 ? "+\(step)" : "\(step)") { set(bar: engine.joinBar + step) }
-                        .help("Move the join \(abs(step)) bar\(abs(step) == 1 ? "" : "s") "
+                    Button(step > 0 ? "+\(step)" : "\(step)") { set(bar: markerBar + step) }
+                        .help("Move the \(outro ? "exit" : "join") \(abs(step)) bar\(abs(step) == 1 ? "" : "s") "
                               + (step > 0 ? "later" : "earlier"))
                 }
-                Button("Suggested") { set(bar: track.suggestedJoinBar) }
+                Button("Suggested") { set(bar: suggestedBar) }
                     .disabled(!moved)
-                    .help("Back to where the groove lands.")
+                    .help(outro ? "Back to where the groove ends." : "Back to where the groove lands.")
                 Spacer()
                 HearButton(engine: engine)
             }
@@ -259,8 +291,8 @@ struct JoinPicker: View {
                 Text("\(Int(detailSeconds.rounded())) s")
                     .font(.system(.caption, design: .monospaced)).frame(width: 42, alignment: .trailing)
             }
-            .help("How many seconds the lower strip shows. Zoom in to place the join "
-                  + "against a single beat.")
+            .help("How many seconds the lower strip shows. Zoom in to place the "
+                  + "\(outro ? "exit" : "join") against a single beat.")
         }
         .disabled(engine.isBusy)
     }
@@ -274,8 +306,13 @@ struct JoinPicker: View {
     }
 
     private func set(bar: Int) {
-        let clamped = JoinMath.clamp(bar, in: bars)
-        if clamped != engine.joinBar { engine.joinBar = clamped }
+        if outro {
+            let clamped = JoinMath.clampExit(bar, in: bars)
+            if clamped != engine.exitBar { engine.exitBar = clamped }
+        } else {
+            let clamped = JoinMath.clamp(bar, in: bars)
+            if clamped != engine.joinBar { engine.joinBar = clamped }
+        }
     }
 }
 
@@ -300,8 +337,11 @@ private struct HearButton: View {
                     .help("Stop playing.")
             } else {
                 Button("Hear it") { engine.playOriginal() }
-                    .help("Plays the original from a few seconds before the join, which is "
-                          + "what the intro will lead into.")
+                    .help(engine.mode == .outro
+                          ? "Plays the original from a few seconds before the exit, and on "
+                            + "into the part the outro replaces."
+                          : "Plays the original from a few seconds before the join, which is "
+                            + "what the intro will lead into.")
             }
         }
     }
@@ -377,14 +417,27 @@ struct EditStrip: View {
             let window = 0...max(envelope.seconds, 0.001)
             Canvas { context, size in
                 StripDrawing.bands(&context, size: size, envelope: envelope, window: window)
-                let joinX = JoinMath.x(for: render.joinSeconds, in: window, width: size.width)
-                context.fill(Path(CGRect(x: 0, y: 0, width: max(0, min(joinX, size.width)),
-                                         height: size.height)),
-                             with: .color(.accentColor.opacity(0.16)))
-                if joinX > 60 {
-                    context.draw(Text("new intro").font(.system(size: 10).weight(.medium))
-                                    .foregroundColor(.primary.opacity(0.7)),
-                                 at: CGPoint(x: 6, y: size.height - 9), anchor: .leading)
+                let isOutro = render.kind == .outro
+                let joinX = JoinMath.x(for: isOutro ? render.exitSeconds : render.joinSeconds,
+                                       in: window, width: size.width)
+                if isOutro {
+                    let from = max(0, min(joinX, size.width))
+                    context.fill(Path(CGRect(x: from, y: 0, width: size.width - from, height: size.height)),
+                                 with: .color(.accentColor.opacity(0.16)))
+                    if size.width - from > 70 {
+                        context.draw(Text("new outro").font(.system(size: 10).weight(.medium))
+                                        .foregroundColor(.primary.opacity(0.7)),
+                                     at: CGPoint(x: from + 6, y: size.height - 9), anchor: .leading)
+                    }
+                } else {
+                    context.fill(Path(CGRect(x: 0, y: 0, width: max(0, min(joinX, size.width)),
+                                             height: size.height)),
+                                 with: .color(.accentColor.opacity(0.16)))
+                    if joinX > 60 {
+                        context.draw(Text("new intro").font(.system(size: 10).weight(.medium))
+                                        .foregroundColor(.primary.opacity(0.7)),
+                                     at: CGPoint(x: 6, y: size.height - 9), anchor: .leading)
+                    }
                 }
                 var line = Path()
                 line.move(to: CGPoint(x: joinX, y: 0)); line.addLine(to: CGPoint(x: joinX, y: size.height))
@@ -400,8 +453,11 @@ struct EditStrip: View {
         .frame(height: 56)
         .clipShape(RoundedRectangle(cornerRadius: 4))
         .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.secondary.opacity(0.3)))
-        .help("The finished edit: the new intro (tinted), then the song from the join. "
-              + "Click anywhere to play from there.")
+        .help(render.kind == .outro
+              ? "The finished edit: the song up to the exit, then the new outro (tinted). "
+                + "Click anywhere to play from there."
+              : "The finished edit: the new intro (tinted), then the song from the join. "
+                + "Click anywhere to play from there.")
     }
 }
 

@@ -275,6 +275,61 @@ when it is done, and a tab left alone for ten minutes lets go of the track
 altogether. The next thing you do loads it again, which takes the half minute
 once, and nothing is lost: your chosen marker and loop stay where they were.
 
+## Making an outro for a track that ends cold or fades out
+
+The other end of the same job. A song that fades away, or stops dead,
+leaves you nowhere to mix out. Switch the Intro tab to **Outro** and it gives
+the song an outro made from itself: **the song is kept up to a bar line, and
+8, 16 or 32 bars of its own instrumental run from there.** The part of the
+song after that bar line, the fade or the last hit, is replaced. It writes
+copies to Music › LoudnessLab › Outro Edits, never over the original.
+
+It is the same tab and the same analysis, so a track you have already
+analysed for an intro is ready: switching to Outro takes seconds, not another
+half minute. The loop, length and bar-line controls work as they do for an
+intro, with these differences.
+
+- **Where the song leaves.** The marker is the bar line the song leaves at,
+  and what is shaded to the right of it is replaced by the outro. The tool
+  suggests the end of the last stretch that holds the record's level, so a
+  fade-out is replaced from where it starts to fall. A record that holds full
+  level to its last bar exits at its last bar line, and the note under the
+  picture says so. If the song's final bars are a hit or a stop you want to
+  keep, move the marker back.
+- **The loop** is chosen to sound like the bars the song plays up to the
+  exit, not the bars after a join.
+- **A vocal still ringing** past the exit bar is kept, so a held last note is
+  not cut mid-word; the loop takes over after it, on the beat.
+- **Style.** *Strip* takes the band away a part at a time, the rest first,
+  then the bass, and the drums play the last repeat alone. *Beat* is only the
+  song's own drums and bass throughout, a groove to mix out on. *Full loop* is
+  the whole instrumental throughout. In the first two, the loop's drums and
+  bass also fade in under the song's last bar, so the loop arrives as a groove
+  that is already running.
+- **Ending.** *Stop* ends on a bar line; *Fade out* fades the outro away over
+  its last four bars.
+
+Press **Make outro**, then **Play the exit**, which starts eight seconds before
+the song leaves, because that is where a bad seam or a late downbeat shows.
+
+**The bar lines can drift.** They are followed bar by bar from the start of
+the song, and on a record whose tempo wanders, or that has a long stretch
+without kicks, they can lose the kicks and end up well off them by the last
+bars, which is exactly where an outro leaves. The tool measures where the
+kicks near the exit really fall and moves the exit onto them, and says so
+under the edit ("had drifted 181 ms from the kicks"). Listen to the exit when
+it does.
+
+**The outro never clips.** The loop is the stems added together, which can be
+louder than the song they came from, so the new part is brought under full
+scale where it needs it. The original is never changed.
+
+**Cue points and the beatgrid are not copied**, the same as for an intro. A cue
+after the exit would point into the loop. In Disco Tags, right-click a track
+and choose **Make Outro Edit…** to open the tab on Outro. **Make outros for
+all** does the selection, exiting where each groove ends and using the best
+loop.
+
 ## Listening to the result
 
 Knowing which version is which biases you, so the pair is written

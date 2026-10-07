@@ -23,17 +23,23 @@ struct IntroPanel: View {
 
     @State private var picked: String?
     @AppStorage("introOutputDirectory") private var outputOverride = ""
+    @AppStorage("outroOutputDirectory") private var outroOutputOverride = ""
     /// On by default: the cards under "Made" belong to the song they were made
     /// from, and left in place under the next song they read as its edits.
     @AppStorage("introClearMade") private var clearMade = true
 
+    private var outro: Bool { engine.mode == .outro }
+
+    /// Intros and outros each remember where they go.
+    private var chosenOutput: String { outro ? outroOutputOverride : outputOverride }
+
     private var outputDirectory: URL? {
-        outputOverride.isEmpty ? nil : URL(fileURLWithPath: outputOverride, isDirectory: true)
+        chosenOutput.isEmpty ? nil : URL(fileURLWithPath: chosenOutput, isDirectory: true)
     }
 
     private var shownDirectory: URL {
         outputDirectory ?? FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Music/LoudnessLab/Intro Edits", isDirectory: true)
+            .appendingPathComponent("Music/LoudnessLab/\(outro ? "Outro" : "Intro") Edits", isDirectory: true)
     }
 
     private var current: Queue.Item? {
@@ -43,6 +49,13 @@ struct IntroPanel: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
+                Picker("", selection: $engine.mode) {
+                    ForEach(IntroEngine.Mode.allCases) { Text($0.rawValue).tag($0) }
+                }
+                .pickerStyle(.segmented).labelsHidden().fixedSize()
+                .disabled(engine.isBusy)
+                .help("Intro: a track that starts cold. Outro: a track that ends cold or fades out. "
+                      + "Both work from the same analysis, so switching is quick.")
                 intro
                 if engine.toolMissing { missing }
                 if ticked.isEmpty {
@@ -77,10 +90,14 @@ struct IntroPanel: View {
 
     private var intro: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text("Intro edits").font(.headline)
-            Text("For a track that starts cold. Builds an intro from the track's own "
-                 + "instrumental, then lets the song arrive where it always did. "
-                 + "Writes copies; the original is never touched.")
+            Text(outro ? "Outro edits" : "Intro edits").font(.headline)
+            Text(outro
+                 ? "For a track that ends cold or fades out. Keeps the song up to a bar line, "
+                   + "then runs a loop of the track's own instrumental, so there is room to mix out. "
+                   + "Writes copies; the original is never touched."
+                 : "For a track that starts cold. Builds an intro from the track's own "
+                   + "instrumental, then lets the song arrive where it always did. "
+                   + "Writes copies; the original is never touched.")
                 .font(.caption).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -88,7 +105,7 @@ struct IntroPanel: View {
 
     private var missing: some View {
         Label("The loudness-lab tool was not found, so there is nothing to make "
-              + "intros with. Choose it in Loudness Lab's Process panel.",
+              + "edits with. Choose it in Loudness Lab's Process panel.",
               systemImage: "exclamationmark.triangle")
             .font(.caption).foregroundStyle(.orange)
     }
@@ -169,6 +186,32 @@ struct IntroPanel: View {
                       + "Longer loops sound less repetitive but need a longer "
                       + "stretch with no vocal.")
             }
+            if outro {
+                HStack(spacing: 10) {
+                    Text("Style").frame(width: 56, alignment: .leading)
+                    Picker("", selection: $engine.outroStyle) {
+                        Text("Strip").tag("strip")
+                        Text("Beat").tag("beat")
+                        Text("Full loop").tag("full")
+                    }
+                    .pickerStyle(.segmented).labelsHidden().frame(width: 260)
+                    .disabled(engine.isBusy)
+                    .help("Strip: the band leaves a part at a time and the drums end it. "
+                          + "Beat: only the song's own drums and bass throughout, a groove to mix out on. "
+                          + "Full loop: the whole instrumental throughout. In the first two the loop's "
+                          + "drums and bass also fade in under the song's last bar.")
+                }
+                HStack(spacing: 10) {
+                    Text("Ending").frame(width: 56, alignment: .leading)
+                    Picker("", selection: $engine.outroFadeBars) {
+                        Text("Stop").tag(0.0)
+                        Text("Fade out").tag(4.0)
+                    }
+                    .pickerStyle(.segmented).labelsHidden().frame(width: 200)
+                    .disabled(engine.isBusy)
+                    .help("Stop: the outro ends on a bar line. Fade out: it fades away over its last four bars.")
+                }
+            } else {
             HStack(spacing: 10) {
                 Text("Style").frame(width: 56, alignment: .leading)
                 Picker("", selection: Binding(get: { engine.style }, set: { engine.chooseStyle($0) })) {
@@ -194,6 +237,7 @@ struct IntroPanel: View {
                       + "into the song the way the song leads into a drop. Only when the "
                       + "song has one that fits; otherwise the intro ends on the loop. "
                       + "Off by default: listen to both with Play the join.")
+            }
         }
     }
 
@@ -263,7 +307,7 @@ struct IntroPanel: View {
     private var renderRow: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Button(engine.isBusy ? "Working…" : "Make intro") {
+                Button(engine.isBusy ? "Working…" : (outro ? "Make outro" : "Make intro")) {
                     Task { await engine.render() }
                 }
                 .disabled(engine.isBusy || engine.track == nil || engine.toolMissing)
@@ -282,18 +326,26 @@ struct IntroPanel: View {
                 .help("Open \(shownDirectory.path) in Finder")
                 Spacer()
                 Button("Change…") { chooseOutput() }.buttonStyle(.link)
-                if !outputOverride.isEmpty {
-                    Button("Default") { outputOverride = "" }.buttonStyle(.link)
+                if !chosenOutput.isEmpty {
+                    Button("Default") {
+                        if outro { outroOutputOverride = "" } else { outputOverride = "" }
+                    }.buttonStyle(.link)
                 }
             }
             .font(.callout)
         }
     }
 
+    /// The edits of the kind being made: switching to the other keeps the
+    /// ones made so far, and shows them again on switching back.
+    private var shownRenders: [IntroEngine.Render] {
+        engine.renders.filter { $0.kind == engine.mode }
+    }
+
     private var results: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                if !engine.renders.isEmpty {
+                if !shownRenders.isEmpty {
                     Text("Made").font(.subheadline.weight(.semibold))
                 }
                 Spacer()
@@ -303,7 +355,7 @@ struct IntroPanel: View {
                           + "so they are not mistaken for the new song's. Unsaved drafts are "
                           + "deleted with them; saved files are kept.")
             }
-            ForEach(engine.renders) { render in resultRow(render) }
+            ForEach(shownRenders) { render in resultRow(render) }
             if engine.playing != nil { AuditionBar(player: engine.player) }
         }
     }
@@ -317,7 +369,20 @@ struct IntroPanel: View {
                         : String(format: "vocal %+.0f dB", render.vocalDB ?? 0),
                         render.repeatScore))
                 .font(.caption).foregroundStyle(.secondary)
-            if let bar = render.leadInBar, let at = render.leadInSeconds {
+            if render.kind == .outro {
+                Text("The song leaves at bar \(render.exitBar) (\(JoinMath.clock(render.exitSeconds)) in)"
+                     + (render.tailSeconds > 0.05
+                        ? String(format: ", its vocal ringing on %.1f s over the loop", render.tailSeconds) : "")
+                     + (render.cutSeconds > 0.5
+                        ? "; the last \(JoinMath.clock(render.cutSeconds)) of the original is replaced."
+                        : "."))
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(render.fadeBars > 0
+                     ? "\(IntroEngine.outroStyleLabel(render.style)) · fades out over its last \(Int(render.fadeBars)) bars."
+                     : "\(IntroEngine.outroStyleLabel(render.style)) · stops on the bar line.")
+                    .font(.caption).foregroundStyle(.secondary)
+            } else if let bar = render.leadInBar, let at = render.leadInSeconds {
                 Text("Ends on the song's own bar \(bar) (\(JoinMath.clock(at)) in), vocal removed.")
                     .font(.caption).foregroundStyle(.secondary)
             } else if let note = render.leadInNote {
@@ -338,7 +403,7 @@ struct IntroPanel: View {
             if let envelope = render.envelope {
                 EditStrip(engine: engine, render: render, envelope: envelope)
             }
-            if render.cutSeconds > 0.5 {
+            if render.kind == .intro, render.cutSeconds > 0.5 {
                 Text("The song arrives at bar \(render.joinBar); the first "
                      + "\(JoinMath.clock(render.cutSeconds)) of the original is replaced.")
                     .font(.caption).foregroundStyle(.secondary)
@@ -350,9 +415,12 @@ struct IntroPanel: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             HStack(spacing: 10) {
-                Button("Play the join") { engine.play(render) }
-                    .help("Starts \(Int(IntroEngine.auditionLead)) seconds before the song "
-                          + "arrives, which is where a bad seam or a late downbeat shows.")
+                Button(render.kind == .outro ? "Play the exit" : "Play the join") { engine.play(render) }
+                    .help(render.kind == .outro
+                          ? "Starts \(Int(IntroEngine.auditionLead)) seconds before the song leaves, "
+                            + "which is where a bad seam or a late downbeat shows."
+                          : "Starts \(Int(IntroEngine.auditionLead)) seconds before the song "
+                            + "arrives, which is where a bad seam or a late downbeat shows.")
                 Button("From the start") { engine.play(render, from: 0) }
                 if engine.playing == render.id {
                     Button("Stop") { engine.stopPlaying() }
@@ -389,8 +457,8 @@ struct IntroPanel: View {
         VStack(alignment: .leading, spacing: 6) {
             Divider()
             HStack {
-                Button(batchNoun == "ticked" ? "Make intros for all \(ticked.count) ticked"
-                       : "Make intros for all \(ticked.count) \(batchNoun)\(ticked.count == 1 ? "" : "s")") {
+                Button(batchNoun == "ticked" ? "Make \(outro ? "outros" : "intros") for all \(ticked.count) ticked"
+                       : "Make \(outro ? "outros" : "intros") for all \(ticked.count) \(batchNoun)\(ticked.count == 1 ? "" : "s")") {
                     Task { await engine.renderBatch(ticked.map(\.path), to: outputDirectory) }
                 }
                 .disabled(engine.isBusy || engine.toolMissing)
@@ -427,8 +495,10 @@ struct IntroPanel: View {
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.canCreateDirectories = true
-        panel.message = "Where should the intro edits go?"
-        if panel.runModal() == .OK, let url = panel.url { outputOverride = url.path }
+        panel.message = outro ? "Where should the outro edits go?" : "Where should the intro edits go?"
+        if panel.runModal() == .OK, let url = panel.url {
+            if outro { outroOutputOverride = url.path } else { outputOverride = url.path }
+        }
     }
 
     private func clock(_ seconds: Double) -> String {

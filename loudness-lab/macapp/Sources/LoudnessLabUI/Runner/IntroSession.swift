@@ -33,6 +33,12 @@ struct IntroEvent: Decodable, Equatable {
     var joinReason: String?
     /// The time of every bar line from the first, for snapping to.
     var barSeconds: [Double]?
+    /// Where an OUTRO would leave the song: the bar line the groove ends at
+    /// (an index into `barSeconds`), why, and how much vocal rings on past it.
+    var suggestedExitBar: Int?
+    var exitReason: String?
+    var exitSeconds: Double?
+    var tailSeconds: Double?
 
     // sources
     var loopBars: Int?
@@ -60,6 +66,13 @@ struct IntroEvent: Decodable, Equatable {
     var leadInNote: String?
     var retunedPct: Double?
     var tempoOffPct: Double?
+
+    // outro (one rendered file; the fields it shares with an intro are above)
+    var secondsOfOutro: Double?
+    var exitBar: Int?
+    var handinBars: Double?
+    var fadeBars: Double?
+    var style: String?
 
     // envelope: the track as three bands over time, for drawing the picker
     var perSecond: Double?
@@ -105,7 +118,15 @@ struct IntroEvent: Decodable, Equatable {
         case vocalFree = "vocal_free"
         case loopRepeat = "loop_repeat"
         case loopSnapped = "loop_snapped"
-        case index, total
+        case index, total, style
+        case suggestedExitBar = "suggested_exit_bar"
+        case exitReason = "exit_reason"
+        case exitSeconds = "exit_seconds"
+        case tailSeconds = "tail_seconds"
+        case secondsOfOutro = "seconds_of_outro"
+        case exitBar = "exit_bar"
+        case handinBars = "handin_bars"
+        case fadeBars = "fade_bars"
     }
 
     init?(_ line: String) {

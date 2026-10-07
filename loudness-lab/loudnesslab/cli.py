@@ -16,7 +16,7 @@ import time
 from pathlib import Path
 
 from . import (__version__, analyze, apply_gain, bs1770, db, declip, decode,
-               air, expand, intro, mp3gain, mud, profiles, render, replace,
+               air, expand, intro, mp3gain, mud, outro, profiles, render, replace,
                report, stems, subbass, write)
 
 
@@ -531,6 +531,89 @@ def cmd_intro(args: argparse.Namespace) -> int:
                           f"({info['seconds_of_intro']:.1f} s), looping bars "
                           f"{info['source_bar']}-{info['source_bar'] + loop_bars - 1}"
                           f" after the join ({info['source_seconds']:.1f} s in)")
+                    for note in info["warnings"]:
+                        print(f"  NOTE: {note}")
+        except Exception as exc:                   # noqa: BLE001 - one bad file
+            failed += 1                            # must not end a batch
+            sys.stderr.write(f"error: {source.name}: {exc}\n")
+            if args.json:
+                print(json.dumps({"event": "error", "path": str(source),
+                                  "name": source.name, "message": str(exc)}),
+                      flush=True)
+    return 1 if failed else 0
+
+
+def _print_sources(source: Path, a, chosen, as_json: bool) -> None:
+    """`--list-sources` for `intro` and `outro`: the best stretches to loop."""
+    if as_json:
+        print(json.dumps({"event": "sources", "path": str(source), "name": source.name,
+                          "sources": [intro.source_fields(s) for s in chosen]}), flush=True)
+        return
+    print(source.name)
+    for rank, s in enumerate(chosen):
+        seconds = int(round(s.seconds))
+        vocal = "no vocal" if s.vocal_free else f"vocal {s.vocal_db:+.0f} dB"
+        print(f"  {'best' if rank == 0 else '    '}  bar {s.bar:<4} {seconds // 60}:{seconds % 60:02d} in  "
+              f"{vocal}  repeats {s.repeat:.2f}")
+
+
+def cmd_outro(args: argparse.Namespace) -> int:
+    """Outro edits: a track that ends cold, or fades out, given an outro made
+    from itself. The mirror of `intro`: the original is kept up to a bar line
+    where its groove ends and a loop of its own instrumental runs from there.
+
+    Writes copies into --out (default ~/Music/LoudnessLab/Outro Edits); the
+    originals are never touched. (The app talks to `intro --serve`, which
+    answers outro requests too; this is the one-shot form.)
+    """
+    files: list[Path] = []
+    for path in args.path:
+        files += decode.find_audio(path) if path.is_dir() else [path]
+    if not files:
+        sys.stderr.write("error: no audio files found\n")
+        return 2
+    out_dir = args.out or outro.default_out_dir()
+    loop_bars = args.loop_bars
+    bad = [b for b in args.bars if b % loop_bars]
+    if bad:
+        sys.stderr.write(f"error: {', '.join(map(str, bad))} bars is not a whole "
+                         f"number of {loop_bars}-bar loops; change --loop-bars\n")
+        return 2
+
+    failed = 0
+    for index, source in enumerate(files, 1):
+        try:
+            if args.json:
+                print(json.dumps({"event": "file", "name": source.name,
+                                  "path": str(source), "index": index,
+                                  "total": len(files)}), flush=True)
+            else:
+                sys.stderr.write(f"{source.name}: separating...\n")
+            a = intro.prepare(source, bpm=args.bpm, downbeat_s=args.downbeat,
+                              separator=args.separator)
+            if args.source_bar is not None:
+                chosen = [outro.source_at(a, args.source_bar, loop_bars, args.exit_bar)]
+            else:
+                chosen = outro.candidates(a, loop_bars, count=5, exit_bar=args.exit_bar)
+            if not chosen:
+                raise ValueError("the track is too short to take a loop from")
+            if args.list_sources:
+                _print_sources(source, a, chosen, args.json)
+                continue
+            for bars in args.bars:
+                audio, info = outro.render(a, bars, chosen[0], loop_bars,
+                                           args.exit_bar, args.style,
+                                           fade_bars=args.fade_bars)
+                target = outro.write_outro(a, source, audio, bars, out_dir, args.format)
+                info.update(source=str(source), output=str(target))
+                if args.json:
+                    print(json.dumps({"event": "outro", **info}), flush=True)
+                else:
+                    print(f"{target}")
+                    print(f"  {bars} bars at {info['bpm']:.2f} BPM "
+                          f"({info['seconds_of_outro']:.1f} s) after bar {info['exit_bar']} "
+                          f"({info['exit_seconds']:.1f} s in), looping bars "
+                          f"{info['source_bar']}-{info['source_bar'] + loop_bars - 1}")
                     for note in info["warnings"]:
                         print(f"  NOTE: {note}")
         except Exception as exc:                   # noqa: BLE001 - one bad file
@@ -1936,6 +2019,48 @@ def build_parser() -> argparse.ArgumentParser:
     made.add_argument("--json", action="store_true",
                       help="one JSON object per line, for a program")
     made.set_defaults(func=cmd_intro)
+
+    ended = subparsers.add_parser(
+        "outro", help="give a track that ends cold, or fades out, an outro made from itself")
+    ended.add_argument("path", type=Path, nargs="+",
+                       help="audio files, or folders of them")
+    ended.add_argument("--bars", type=int, nargs="+", default=[16],
+                       choices=outro.LENGTHS,
+                       help="outro length(s) in bars; several make several "
+                            "files from one separation (default: 16)")
+    ended.add_argument("--loop-bars", type=int, default=outro.DEFAULT_LOOP_BARS,
+                       choices=outro.LOOP_BARS,
+                       help="length of the loop that is tiled (default: 4)")
+    ended.add_argument("--source-bar", type=int, default=None,
+                       help="loop from this bar, instead of the best stretch; "
+                            "see --list-sources")
+    ended.add_argument("--exit-bar", type=int, default=None,
+                       help="the bar line the song leaves at; everything after "
+                            "it is replaced by the outro (default: where the "
+                            "groove ends)")
+    ended.add_argument("--style", choices=outro.STYLES, default="strip",
+                       help="strip: the band leaves one part at a time and the "
+                            "drums end it; beat: only the song's own drums and "
+                            "bass, every repeat, a groove to mix out on; "
+                            "full: the whole instrumental throughout")
+    ended.add_argument("--fade-bars", type=float, default=0.0, metavar="BARS",
+                       help="fade the outro away over its last BARS bars "
+                            "(default: 0, it stops on the bar line)")
+    ended.add_argument("--list-sources", action="store_true",
+                       help="print the best stretches to loop and stop")
+    ended.add_argument("--bpm", type=float, default=None,
+                       help="the tempo, if the file has no BPM tag")
+    ended.add_argument("--downbeat", type=float, default=None, metavar="SECONDS",
+                       help="where the first bar line is, if the guess is wrong")
+    ended.add_argument("--format", choices=list(write.FORMATS), default=None,
+                       help="default: the original's (MP3, AAC or FLAC)")
+    ended.add_argument("--separator", choices=list(stems.BACKENDS), default=None,
+                       help="default: MLX where installed, else PyTorch")
+    ended.add_argument("--out", type=Path, default=None,
+                       help="default: ~/Music/LoudnessLab/Outro Edits")
+    ended.add_argument("--json", action="store_true",
+                       help="one JSON object per line, for a program")
+    ended.set_defaults(func=cmd_outro)
 
     show_profiles = subparsers.add_parser(
         "profiles", help="list the available settings bundles")

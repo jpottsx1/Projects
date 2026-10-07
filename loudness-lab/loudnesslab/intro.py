@@ -311,6 +311,39 @@ def attack(drums_abs: np.ndarray, sample: float, kicks: np.ndarray,
     return (int(lo + over[0]) if over.size else c), found
 
 
+RELOCK_NEIGHBOURS = 3               # kicks a beat apart, each side, that count as support
+RELOCK_SUPPORT = 3                  # how many of them a kick needs to be the beat
+RELOCK_TOLERANCE = 0.15             # of a beat, for those neighbours
+
+
+def relock(sample: float, kicks: np.ndarray, period: float) -> float | None:
+    """The kick a bar line that missed should be on, or None.
+
+    `snap` only believes a kick within a tenth of a beat of where the last
+    line says the next one is. A stretch with no kicks, or a tempo that
+    wandered, can leave the kicks further off than that, and the lines then
+    carry on at a fixed tempo for the rest of the track. The drift is under
+    half a beat, so a kick within half a beat of the line is that bar's beat
+    one, provided it is a beat of the groove and not a syncopated hit: it
+    has to have kicks a whole number of beats from it (at least
+    `RELOCK_SUPPORT` among the `RELOCK_NEIGHBOURS` beats either side). The
+    nearest such kick wins."""
+    if not kicks.size:
+        return None
+    lo, hi = np.searchsorted(kicks, [sample - 0.5 * period, sample + 0.5 * period])
+    best, best_gap = None, 0.0
+    for c in kicks[lo:hi]:
+        support = 0
+        for k in range(1, RELOCK_NEIGHBOURS + 1):
+            for sign in (-1, 1):
+                if np.min(np.abs(kicks - (c + sign * k * period))) <= RELOCK_TOLERANCE * period:
+                    support += 1
+        gap = abs(float(c) - sample)
+        if support >= RELOCK_SUPPORT and (best is None or gap < best_gap):
+            best, best_gap = float(c), gap
+    return best
+
+
 def _low_band(x: np.ndarray, rate: int) -> np.ndarray:
     mono = x.mean(axis=1).astype(np.float64)
     return np.abs(sosfiltfilt(butter(2, 150.0, btype="low", fs=rate,
@@ -441,10 +474,15 @@ def _layout(x: np.ndarray, instrumental: np.ndarray, vocals: np.ndarray,
     # after the LAST ONE FOUND, so a tempo the fit has slightly wrong (or a
     # drummer who pushes) is re-synchronised every bar instead of piling
     # up. Where no kick is near (a breakdown) the grid carries on from the
-    # last real one.
+    # last real one, and when the kicks come back further off than `snap`
+    # accepts, `relock` finds the beat they are on.
     lines, found = [join], [join_found]
     for _ in range(last):
         line, hit = attack(drums_abs, lines[-1] + grid.bar, kicks, period, rate)
+        if not hit:
+            beat_one = relock(lines[-1] + grid.bar, kicks, period)
+            if beat_one is not None:
+                line, hit = attack(drums_abs, beat_one, kicks, period, rate)
         lines.append(line)
         found.append(hit)
     bar_lines = np.array(lines)

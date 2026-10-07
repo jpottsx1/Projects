@@ -1686,10 +1686,16 @@ and stems that sum exactly to the mix, which hides both:
   moves to is usually PAST the last real kick (the exit is where the music
   ends), so it is extrapolated along the beat, not looked for with `attack`
   (the first version looked for it and silently did nothing); the detector's
-  onset-to-attack lag is read from the last kicks. The intro has the same
-  lock loss and was NOT changed (it is judged good by ear): flagged as a
-  separate task. `test_the_test_track_really_has_lost_its_grid` and the live
-  mutation `test_without_the_alignment_the_beat_would_skip` keep that test honest.
+  onset-to-attack lag is read from the last kicks. The intro had the same
+  lock loss; it was fixed at the source separately (PR #59, relock-bars), and
+  re-running this record afterwards gave 191 of 199 bars snapped (was 53), 6
+  bars more than 40 ms from a kick (was 144), and the exit needed to move only
+  +20 ms (was +181). `aligned_exit` stays as a safety net for a drift the
+  following still misses; it is tested against a drift put in by hand
+  (`with_drifted_end`), not one the following may or may not produce, because
+  the lost-lock fixture stopped losing its lock once the fix landed (the
+  tests whose premise it was went red on `main`). The live mutation
+  `test_without_the_alignment_the_beat_would_skip` keeps those tests honest.
 - **The loop can be louder than the mix.** Stems summed overshoot (measured
   loop+hand-in peak 1.094 against a record peaking 0.941), and an encoder
   adds a little. The new material alone is brought under `CEILING` (0.97): the

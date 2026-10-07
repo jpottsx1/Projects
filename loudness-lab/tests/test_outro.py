@@ -278,13 +278,12 @@ class TestTheTailRingsOut(unittest.TestCase):
 
 
 def lost_lock_song(late_s: float, bars_a: int = 24, gap_bars: int = 4, bars_b: int = 28):
-    """A track whose bar lines lose their grip on the kicks: a stretch with no
-    kicks in it, and the groove comes back `late_s` seconds off the grid. The
-    bar lines are followed only while each is within a tenth of a beat of
-    where the last said it should be, so past that they carry on at a fixed
-    tempo, off the kicks for the rest of the track. (A real six-minute dance
-    record did exactly this: 144 of 199 bar lines were more than 40 ms from a
-    kick, the last 0.4 of a beat off.)"""
+    """A track with a stretch of no kicks, after which the groove comes back
+    `late_s` seconds off the grid. Before the bar lines could re-lock this
+    left them off the kicks for the rest of the track (a real six-minute dance
+    record did exactly that: 144 of 199 bar lines more than 40 ms from a kick,
+    the last 0.4 of a beat off); `test_relock` covers the fix. Here it is the
+    check that such a track now comes out right."""
     xa, pa, _ = song(bars=bars_a, breakdown=range(0, 0), vocal_bars=(range(0, 0),))
     xb, pb, _ = song(bars=bars_b, breakdown=range(0, 0), vocal_bars=(range(0, 0),))
     a_len = int(bars_a * BAR * RATE)
@@ -295,23 +294,57 @@ def lost_lock_song(late_s: float, bars_a: int = 24, gap_bars: int = 4, bars_b: i
     return cat(xa, xb), {k: cat(pa[k], pb[k]) for k in pa}
 
 
+def with_drifted_end(a, from_bar: int, shift_s: float):
+    """The same analysis with every bar line from `from_bar` on moved `shift_s`
+    later and marked unsnapped: a grid that has drifted off the kicks near the
+    end, whatever the bar following does. The exit's alignment is a safety net
+    for exactly that, so it is tested against a drift put in by hand and not
+    against one the following may or may not produce."""
+    import dataclasses
+    lines = a.bar_lines.copy()
+    lines[from_bar:] += int(shift_s * a.rate)
+    snapped = a.snapped.copy()
+    snapped[from_bar:] = False
+    return dataclasses.replace(a, bar_lines=lines, snapped=snapped, cache={})
+
+
 def kick_phase_beats(a, sample: int) -> float:
     """Where `sample` falls in the beat the kicks AROUND it keep, in beats
     (0 = on a kick, +-0.5 = between two). Only the kicks within a few seconds
-    count: the track's early kicks sit on a different grid."""
+    count: the track's early kicks can sit on a different grid."""
     near = a.kicks[np.abs(a.kicks - sample) < 4 * RATE]
     angle = np.exp(2j * np.pi * (near - sample) / a.grid.period).mean()
     return float(np.angle(angle)) / (2 * np.pi)
 
 
+def slip_across_exit(audio, info) -> float:
+    """How far the outro's kicks sit from the song's, in ms, on the full mix."""
+    kicks, _ = subbass.detect_kicks(audio, RATE)
+    period = BEAT * RATE
+    exit_ = int(round(info["exit_seconds"] * RATE))
+
+    def phase_ms(selected):
+        angle = np.exp(2j * np.pi * selected / period)
+        return np.angle(angle.mean()) / (2 * np.pi) * period / RATE * 1000
+
+    song_kicks = kicks[(kicks > exit_ - 8 * RATE) & (kicks < exit_ - RATE // 5)]
+    outro_kicks = kicks[kicks > exit_ + RATE // 5]
+    assert len(song_kicks) > 8 and len(outro_kicks) > 50
+    return (phase_ms(outro_kicks) - phase_ms(song_kicks) + BEAT * 500) % (BEAT * 1000) - BEAT * 500
+
+
 class TestAGridThatHasDrifted(unittest.TestCase):
+    """The exit is aligned to the kicks it is really near, so a grid that has
+    drifted by the end does not put the loop half a beat from the song."""
+
     @classmethod
     def setUpClass(cls):
-        cls.x, cls.parts = lost_lock_song(0.20)
-        cls.a = intro.analyse(cls.x, cls.parts, RATE, BPM)
-        cls.last = len(cls.a.bar_lines) - 1
+        x, parts = lost_lock_song(0.0, bars_a=24, gap_bars=4, bars_b=28)
+        cls.good = intro.analyse(x, parts, RATE, BPM)
+        cls.last = len(cls.good.bar_lines) - 1
+        cls.a = with_drifted_end(cls.good, 40, 0.20)
 
-    def test_the_test_track_really_has_lost_its_grid(self):
+    def test_the_test_track_really_has_a_drifted_grid(self):
         # Otherwise the tests below prove nothing.
         beat_ms = self.a.grid.period / RATE * 1000
         off = abs(kick_phase_beats(self.a, int(self.a.bar_lines[self.last]))) * beat_ms
@@ -321,9 +354,7 @@ class TestAGridThatHasDrifted(unittest.TestCase):
         line = int(self.a.bar_lines[self.last])
         exit_, _ = outro.resolve_exit(self.a, self.last)
         self.assertGreater(abs(exit_ - line) / RATE * 1000, 150)
-        # the kick that follows it, within a few ms: the lag between the
-        # detector's onset and the attack is up to ~30 ms and a kick's phase
-        # is measured at its onset, so allow for it
+        # within the detector's onset-to-attack lag (up to ~30 ms) of a kick
         beat_ms = self.a.grid.period / RATE * 1000
         self.assertLess(abs(kick_phase_beats(self.a, exit_)) * beat_ms, 40)
 
@@ -332,20 +363,7 @@ class TestAGridThatHasDrifted(unittest.TestCase):
         audio, info = outro.render(self.a, 16, source, 4, self.last)
         self.assertGreater(abs(info["exit_moved_ms"]), 150)
         self.assertTrue([w for w in info["warnings"] if "drifted" in w])
-        kicks, _ = subbass.detect_kicks(audio, RATE)
-        period = BEAT * RATE
-        exit_ = int(round(info["exit_seconds"] * RATE))
-
-        def phase_ms(selected):
-            angle = np.exp(2j * np.pi * selected / period)
-            return np.angle(angle.mean()) / (2 * np.pi) * period / RATE * 1000
-
-        song_kicks = kicks[(kicks > exit_ - 8 * RATE) & (kicks < exit_ - RATE // 5)]
-        outro_kicks = kicks[kicks > exit_ + RATE // 5]
-        self.assertGreater(len(song_kicks), 8)
-        self.assertGreater(len(outro_kicks), 50)
-        slip = (phase_ms(outro_kicks) - phase_ms(song_kicks) + BEAT * 500) % (BEAT * 1000) - BEAT * 500
-        self.assertLess(abs(slip), 12.0, f"outro kicks sit {slip:.1f} ms off the song's")
+        self.assertLess(abs(slip_across_exit(audio, info)), 12.0)
 
     def test_without_the_alignment_the_beat_would_skip(self):
         # Mutation check, run live: put the exit back on the bar line and the
@@ -354,18 +372,7 @@ class TestAGridThatHasDrifted(unittest.TestCase):
         with mock.patch.object(outro, "aligned_exit",
                                lambda a, bar: int(a.bar_lines[bar])):
             audio, info = outro.render(self.a, 16, source, 4, self.last)
-        kicks, _ = subbass.detect_kicks(audio, RATE)
-        period = BEAT * RATE
-        exit_ = int(round(info["exit_seconds"] * RATE))
-
-        def phase_ms(selected):
-            angle = np.exp(2j * np.pi * selected / period)
-            return np.angle(angle.mean()) / (2 * np.pi) * period / RATE * 1000
-
-        song_kicks = kicks[(kicks > exit_ - 8 * RATE) & (kicks < exit_ - RATE // 5)]
-        outro_kicks = kicks[kicks > exit_ + RATE // 5]
-        slip = (phase_ms(outro_kicks) - phase_ms(song_kicks) + BEAT * 500) % (BEAT * 1000) - BEAT * 500
-        self.assertGreater(abs(slip), 100.0)
+        self.assertGreater(abs(slip_across_exit(audio, info)), 100.0)
 
     def test_a_grid_that_has_not_drifted_is_left_alone(self):
         x, parts, _ = fading_song()
@@ -376,6 +383,29 @@ class TestAGridThatHasDrifted(unittest.TestCase):
         source = outro.candidates(a, 4, exit_bar=exit_bar)[0]
         _, info = outro.render(a, 8, source, 4, exit_bar)
         self.assertFalse([w for w in info["warnings"] if "drifted" in w])
+
+
+class TestATrackThatUsedToLoseItsGrid(unittest.TestCase):
+    """A stretch with no kicks and the groove back 0.2 s off the grid: the bar
+    lines used to lose the kicks for good, and now re-lock (see `test_relock`).
+    The outro on such a track must come out right either way."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.x, cls.parts = lost_lock_song(0.20)
+        cls.a = intro.analyse(cls.x, cls.parts, RATE, BPM)
+        cls.last = len(cls.a.bar_lines) - 1
+
+    def test_the_last_bar_line_is_on_a_kick(self):
+        beat_ms = self.a.grid.period / RATE * 1000
+        off = abs(kick_phase_beats(self.a, int(self.a.bar_lines[self.last]))) * beat_ms
+        self.assertLess(off, 40, f"the last bar line is {off:.0f} ms from a kick")
+
+    def test_the_outro_keeps_the_beat_and_the_exit_barely_moves(self):
+        source = outro.candidates(self.a, 4, exit_bar=self.last)[0]
+        audio, info = outro.render(self.a, 16, source, 4, self.last)
+        self.assertLess(abs(info["exit_moved_ms"]), 30)
+        self.assertLess(abs(slip_across_exit(audio, info)), 12.0)
 
 
 class TestNothingNewClips(unittest.TestCase):

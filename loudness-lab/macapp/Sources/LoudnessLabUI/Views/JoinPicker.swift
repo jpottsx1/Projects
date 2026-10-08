@@ -40,18 +40,22 @@ struct JoinPicker: View {
 
     var body: some View {
         if bars.count > 1 {
-            VStack(alignment: .leading, spacing: 8) {
-                Text(outro ? "Where the song leaves" : "Where the song starts")
-                    .font(.subheadline.weight(.semibold))
+            PanelCard(outro ? "Where the song leaves" : "Where the song starts",
+                      accessory: { HearButton(engine: engine) }) {
                 readout
                 if let envelope = engine.envelope {
-                    overview(envelope)
-                    detail(envelope)
+                    VStack(spacing: 8) {
+                        overview(envelope)
+                        detail(envelope)
+                    }
                 } else {
-                    Text("Drawing the track…").font(.caption).foregroundStyle(.secondary)
+                    HStack(spacing: 8) {
+                        ProgressView().controlSize(.small)
+                        Text("Drawing the track…").font(.callout).foregroundStyle(.secondary)
+                    }
                 }
                 controls
-                Text(reason)
+                Label(reason, systemImage: moved ? "arrow.uturn.backward.circle" : "sparkles")
                     .font(.caption).foregroundStyle(moved ? Color.orange : Color.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -68,14 +72,14 @@ struct JoinPicker: View {
                         ? "The song is kept to its last bar line, and the outro follows it."
                         : "The song leaves at bar \(engine.exitBar), \(JoinMath.clock(seconds)) in. "
                           + "The last \(JoinMath.clock(rest)) of the original is replaced by the outro.")
-                .font(.callout)
+                .font(.body)
                 .fixedSize(horizontal: false, vertical: true)
         }
         return Text(engine.joinBar == 0
                     ? "The song starts at its first bar. Its own opening is kept."
                     : "The song arrives at bar \(engine.joinBar), \(JoinMath.clock(seconds)) in. "
                       + "The first \(JoinMath.clock(seconds)) of the original is replaced by the intro.")
-            .font(.callout)
+            .font(.body)
             .fixedSize(horizontal: false, vertical: true)
     }
 
@@ -102,9 +106,10 @@ struct JoinPicker: View {
             })
         }
         .overlay(PlayheadLayer(engine: engine, window: 0...max(total, 0.001)))
-        .frame(height: 44)
-        .clipShape(RoundedRectangle(cornerRadius: 4))
-        .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.secondary.opacity(0.3)))
+        .frame(height: 52)
+        .background(Color(nsColor: .textBackgroundColor))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.primary.opacity(0.12)))
         .help("The whole track. Click or drag to move the \(outro ? "exit" : "join"); it snaps to a bar line.")
     }
 
@@ -130,9 +135,10 @@ struct JoinPicker: View {
         .overlay(PlayheadLayer(engine: engine,
                                window: JoinMath.window(center: frozenCenter ?? joinSeconds,
                                                        width: detailSeconds, total: total)))
-        .frame(height: 120)
-        .clipShape(RoundedRectangle(cornerRadius: 4))
-        .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.secondary.opacity(0.3)))
+        .frame(height: 150)
+        .background(Color(nsColor: .textBackgroundColor))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.primary.opacity(0.12)))
         .help("Zoomed in on the join, with the bar lines drawn. Click or drag to place "
               + "it; it snaps to a bar line.")
     }
@@ -239,62 +245,80 @@ struct JoinPicker: View {
     // MARK: - Controls
 
     private var controls: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 8) {
-                Text("Bar").frame(width: 44, alignment: .leading)
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                OptionLabel("Bar")
+                Text("\(markerBar)")
+                    .font(.system(.title3, design: .monospaced).weight(.semibold))
+                    .frame(width: 48, alignment: .trailing)
+                HStack(spacing: 4) {
+                    ForEach([-4, -1, 1, 4], id: \.self) { step in
+                        Button(step > 0 ? "+\(step)" : "\u{2212}\(abs(step))") { set(bar: markerBar + step) }
+                            .frame(minWidth: 24)
+                            .help("Move the \(outro ? "exit" : "join") \(abs(step)) bar\(abs(step) == 1 ? "" : "s") "
+                                  + (step > 0 ? "later" : "earlier"))
+                    }
+                }
                 Slider(value: Binding(
                     get: { Double(markerBar) },
                     set: { set(bar: Int($0.rounded())) }),
                        in: Double(lowestBar)...Double(max(lowestBar + 1, highestBar)), step: 1)
-                Text("\(markerBar)")
-                    .font(.system(.callout, design: .monospaced)).frame(width: 34, alignment: .trailing)
-            }
-            .help(outro ? "Move the exit one bar at a time. The last bar keeps the whole song."
-                        : "Move the join one bar at a time. Zero keeps the whole opening.")
-            HStack(spacing: 6) {
-                ForEach([-4, -1, 1, 4], id: \.self) { step in
-                    Button(step > 0 ? "+\(step)" : "\(step)") { set(bar: markerBar + step) }
-                        .help("Move the \(outro ? "exit" : "join") \(abs(step)) bar\(abs(step) == 1 ? "" : "s") "
-                              + (step > 0 ? "later" : "earlier"))
-                }
+                    .help(outro ? "Move the exit one bar at a time. The last bar keeps the whole song."
+                                : "Move the join one bar at a time. Zero keeps the whole opening.")
                 Button("Suggested") { set(bar: suggestedBar) }
                     .disabled(!moved)
                     .help(outro ? "Back to where the groove ends." : "Back to where the groove lands.")
-                Spacer()
-                HearButton(engine: engine)
             }
-            .controlSize(.small)
-            HStack(spacing: 6) {
-                Text("Beat one").frame(width: 56, alignment: .leading)
-                Button("◀ 1 beat") { Task { await engine.moveBeatOne(by: -1) } }
-                Button("1 beat ▶") { Task { await engine.moveBeatOne(by: 1) } }
-                Button("◀ ½") { Task { await engine.moveBeatOne(by: 0, halfBeats: -1) } }
-                    .help("Move the whole grid half a beat earlier, for a song whose bar lines "
-                          + "sit on the offbeat.")
-                Button("½ ▶") { Task { await engine.moveBeatOne(by: 0, halfBeats: 1) } }
-                    .help("Move the whole grid half a beat later, for a song whose bar lines "
-                          + "sit on the offbeat.")
-                Text(engine.beatShift == 0 && engine.halfShift == 0 ? track.downbeatFrom
-                     : "moved \(Self.beats(engine.beatShift, engine.halfShift)) by hand")
-                    .font(.caption).foregroundStyle(.secondary)
-                    .lineLimit(1).truncationMode(.tail)
+            Divider()
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .center, spacing: 24) {
+                    beatOneControls
+                    Spacer(minLength: 0)
+                    zoomControl.frame(width: 300)
+                }
+                VStack(alignment: .leading, spacing: 10) {
+                    beatOneControls
+                    zoomControl
+                }
             }
-            .controlSize(.small)
-            .help("Which beat is the first of the bar. If the numbered bar lines in the zoomed "
-                  + "strip do not sit on the heaviest kick and bass hit, move them a beat "
-                  + "either way, or half a beat when they sit on the offbeat. The small ticks are the beats, the fainter ones the half beats.")
-            HStack(spacing: 8) {
-                Text("Zoom").frame(width: 44, alignment: .leading)
-                Slider(value: Binding(get: { log(detailSeconds) },
-                                      set: { detailSeconds = exp($0) }),
-                       in: log(4)...log(90))
-                Text("\(Int(detailSeconds.rounded())) s")
-                    .font(.system(.caption, design: .monospaced)).frame(width: 42, alignment: .trailing)
-            }
-            .help("How many seconds the lower strip shows. Zoom in to place the "
-                  + "\(outro ? "exit" : "join") against a single beat.")
         }
+        .controlSize(.small)
         .disabled(engine.isBusy)
+    }
+
+    private var beatOneControls: some View {
+        HStack(spacing: 6) {
+            Text("Beat one").foregroundStyle(.secondary)
+            Button("\u{25C0} 1 beat") { Task { await engine.moveBeatOne(by: -1) } }
+            Button("1 beat \u{25B6}") { Task { await engine.moveBeatOne(by: 1) } }
+            Button("\u{25C0} \u{BD}") { Task { await engine.moveBeatOne(by: 0, halfBeats: -1) } }
+                .help("Move the whole grid half a beat earlier, for a song whose bar lines "
+                      + "sit on the offbeat.")
+            Button("\u{BD} \u{25B6}") { Task { await engine.moveBeatOne(by: 0, halfBeats: 1) } }
+                .help("Move the whole grid half a beat later, for a song whose bar lines "
+                      + "sit on the offbeat.")
+            if engine.beatShift != 0 || engine.halfShift != 0 {
+                Chip("moved \(Self.beats(engine.beatShift, engine.halfShift)) by hand", tint: .orange)
+            }
+        }
+        .help("Which beat is the first of the bar. If the numbered bar lines in the zoomed "
+              + "strip do not sit on the heaviest kick and bass hit, move them a beat "
+              + "either way, or half a beat when they sit on the offbeat. The small ticks are the beats, the fainter ones the half beats.")
+    }
+
+    private var zoomControl: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "minus.magnifyingglass").foregroundStyle(.secondary)
+            Slider(value: Binding(get: { log(detailSeconds) },
+                                  set: { detailSeconds = exp($0) }),
+                   in: log(4)...log(90))
+            Image(systemName: "plus.magnifyingglass").foregroundStyle(.secondary)
+            Text("\(Int(detailSeconds.rounded())) s")
+                .font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary)
+                .frame(width: 36, alignment: .trailing)
+        }
+        .help("How many seconds the lower strip shows. Zoom in to place the "
+              + "\(outro ? "exit" : "join") against a single beat.")
     }
 
     /// "1½ beats" from whole beats and half beats, the way a person says it.
@@ -451,8 +475,9 @@ struct EditStrip: View {
             })
         }
         .frame(height: 56)
-        .clipShape(RoundedRectangle(cornerRadius: 4))
-        .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.secondary.opacity(0.3)))
+        .background(Color(nsColor: .textBackgroundColor))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.primary.opacity(0.12)))
         .help(render.kind == .outro
               ? "The finished edit: the song up to the exit, then the new outro (tinted). "
                 + "Click anywhere to play from there."

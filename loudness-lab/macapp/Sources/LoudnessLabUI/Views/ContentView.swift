@@ -438,16 +438,17 @@ struct ContentView: View {
         }
     }
 
-    /// The folders a run works on: the ones added, plus the parent folder of
-    /// any ticked track none of them contains. A host can send single files
-    /// (a crate, a playlist) with no folder added at all; without this the
-    /// queue showed ticked tracks and Process stayed greyed out.
+    /// What a run works on: the folders added, plus each ticked track none of
+    /// them contains, as the file itself. A host can send single files (a
+    /// crate, a playlist) with no folder added at all; without this the
+    /// queue showed ticked tracks and Process stayed greyed out. The files,
+    /// not their parent folders: the CLI measures everything under a root,
+    /// so a parent folder made one ticked track measure its whole folder.
     private var runFolders: [URL] {
         var result = folders
         let roots = folders.map { $0.standardizedFileURL.path + "/" }
         for path in queue.includedPaths.sorted() where !roots.contains(where: { path.hasPrefix($0) }) {
-            let parent = URL(fileURLWithPath: path).deletingLastPathComponent()
-            if !result.contains(parent) { result.append(parent) }
+            result.append(URL(fileURLWithPath: path))
         }
         return result
     }

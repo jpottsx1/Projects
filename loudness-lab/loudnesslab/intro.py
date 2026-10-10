@@ -289,16 +289,34 @@ def fit_grid(kicks: np.ndarray, strengths: np.ndarray, rate: int,
         return None
     period = float(np.median(gaps[usable] / beats[usable]))
 
-    first = float(k[0])
-    near = np.ones(k.size, dtype=bool)
-    for _ in range(4):
-        index = np.round((k - first) / period)
-        residual = k - (first + index * period)
-        near = np.abs(residual) <= 0.12 * period
-        if near.sum() < 8:
-            return None
-        slope, intercept = np.polyfit(index[near], k[near], 1, w=weight[near])
-        period, first = float(slope), float(intercept)
+    def fit_from(first: float, period: float):
+        near = np.ones(k.size, dtype=bool)
+        for _ in range(4):
+            index = np.round((k - first) / period)
+            residual = k - (first + index * period)
+            near = np.abs(residual) <= 0.12 * period
+            if near.sum() < 8:
+                return None
+            slope, intercept = np.polyfit(index[near], k[near], 1, w=weight[near])
+            period, first = float(slope), float(intercept)
+        return period, first, near
+
+    # Counted from the first kick. Only if that finds no grid, from each of the
+    # next few in turn, keeping the count that puts the most kicks on a beat:
+    # a record whose first kick is off the beat (an opening figure, a pickup)
+    # otherwise had every kick after it a fraction of a beat out, and no grid
+    # at all. Not tried when the first kick works: choosing the best count
+    # every time moved Jungle Love's and Kilimanjaro's grids and put their
+    # edits 20-49 ms out (2026-10-10).
+    best = fit_from(float(k[0]), period)
+    if best is None:
+        for start in k[1:8]:
+            found = fit_from(float(start), period)
+            if found is not None and (best is None or found[2].sum() > best[2].sum()):
+                best = found
+    if best is None:
+        return None
+    period, first, near = best
     angle = np.exp(2j * np.pi * (k[near] - first) / period)
     coherence = float(abs((angle * weight[near]).sum() / weight[near].sum()))
     return period, first, coherence
@@ -626,6 +644,14 @@ def _layout(x: np.ndarray, instrumental: np.ndarray, vocals: np.ndarray,
             f"bar {first}, where the best loop meets it {missed:.0f} ms off "
             f"({met:.0f} ms at bar {steady})")
         analysis.suggested_join_bar = steady
+    first = analysis.suggested_join_bar
+    grooved, clash, match = groove_join(analysis, first)
+    if grooved != first:
+        analysis.join_reason += (
+            f"; moved on to bar {grooved}: the song's opening is a different groove "
+            f"from any loop (the best matches it {clash:.2f}), and at bar {grooved} "
+            f"one matches {match:.2f}. Move the join back to keep the opening")
+        analysis.suggested_join_bar = grooved
     from . import outro        # outro imports this module, so not at the top
     analysis.suggested_exit_bar, analysis.exit_reason = outro.suggest_exit(analysis)
     return analysis
@@ -685,6 +711,59 @@ def steady_join(a: Analysis, bar: int) -> tuple[int, float, float]:
         if there is not None and abs(there) <= abs(here) / 2 and abs(there) <= STEADY_MS:
             return b, abs(here), abs(there)
     return bar, abs(here), abs(here)
+
+
+# A song whose opening is a different groove from any loop: when the best
+# loop's bars match the song's first bars after the join below GROOVE_CLASH
+# (`phrase_alike`), the join moves on, up to GROOVE_LOOKAHEAD bars, to the first
+# bar where a loop matches at GROOVE_MET or better and meets it on the beat.
+# Jackson 5's "ABC" opens with its "A-B-C" figure, a different drum part from
+# its groove: its best loop matched the opening 0.05 and the join clashed
+# however it was timed; at bar 8 a loop matches 1.00 and meets it 5.5 ms out.
+# Let's Groove's vocoder opening read 0.12 (0.80 at bar 8). Records whose
+# loops carry straight on into the song read 0.84-1.00 (2026-10-10).
+GROOVE_CLASH = 0.3
+GROOVE_MET = 0.7
+GROOVE_LOOKAHEAD = 16
+
+
+def phrase_alike(a: Analysis, loop_bar: int, join_bar: int, loop_bars: int = DEFAULT_LOOP_BARS) -> float | None:
+    """How alike the loop starting at `loop_bar` is to the song's bars from
+    `join_bar` on, bar for bar (`bar_alike`, averaged): whether the song goes
+    on the way the loop would have. None when no bar pair can be compared."""
+    alike = [bar_alike(a, loop_bar + k, join_bar + k) for k in range(loop_bars)]
+    alike = [x for x in alike if x is not None]
+    return float(np.mean(alike)) if alike else None
+
+
+def groove_join(a: Analysis, bar: int) -> tuple[int, float, float]:
+    """(the bar to join at, how alike the best loop is to the song at `bar`,
+    and at the bar chosen). `bar` itself unless its best loop clashes with
+    the song's opening (`GROOVE_CLASH`) and one soon after matches."""
+    def best(b: int):
+        found = candidates(a, DEFAULT_LOOP_BARS, count=1, join_bar=b)
+        return found[0] if found else None
+
+    s = best(bar)
+    here = None if s is None else phrase_alike(a, s.bar, bar)
+    if here is None or here >= GROOVE_CLASH:
+        return bar, 0.0, 0.0
+    for b in range(bar + 1, min(bar + GROOVE_LOOKAHEAD, len(a.bar_lines) - 2 - DEFAULT_LOOP_BARS) + 1):
+        s = best(b)
+        if s is None:
+            continue
+        there = phrase_alike(a, s.bar, b)
+        # The bar it arrives on has to match too: averaged over four bars, three
+        # of the groove outvoted the opening's last bar and the join landed on it.
+        first = bar_alike(a, s.bar, b)
+        # The beat check has no say on a record too loose for it to be trusted
+        # (`groove_match`): it called ABC's bar-8 join, the song's own bars
+        # looped into themselves, 17 ms out (2026-10-10).
+        on_beat = is_loose(a) or s.edge_ms is None or abs(s.edge_ms) <= STEADY_MS
+        if (there is not None and there >= GROOVE_MET and first is not None
+                and first >= GROOVE_MET and on_beat):
+            return b, here, there
+    return bar, here, here
 
 
 def suggest_join(a: Analysis) -> tuple[int, str]:
@@ -1011,6 +1090,40 @@ def cost(s: Source) -> float:
 LOOSE_GROOVE = 0.5
 
 
+def _fine_patterns(a: Analysis) -> np.ndarray:
+    """Per bar: the drums' envelope at 192 points from its line to the next,
+    less its mean. What `groove_match` and `bar_alike` compare."""
+    key = ("fine_patterns", id(a.drums), id(a.bar_lines))
+    pats = a.cache.get(key)
+    if pats is None:
+        lines = a.bar_lines.astype(np.float64)
+        env = uniform_filter1d(np.abs(a.drums.mean(axis=1)).astype(np.float64),
+                               max(1, int(0.004 * a.rate)))
+        pats = np.array([np.interp(np.linspace(lines[i], lines[i + 1], 192, endpoint=False),
+                                   np.arange(len(env)), env) for i in range(len(lines) - 1)])
+        pats = a.cache[key] = pats - pats.mean(axis=1, keepdims=True) if len(pats) else pats
+    return pats
+
+
+def bar_alike(a: Analysis, i: int, j: int) -> float | None:
+    """How alike bars `i` and `j` of the drums are, laid on their bar lines
+    (correlation, 1 = the same bar)."""
+    pats = _fine_patterns(a)
+    if not (0 <= i < len(pats) and 0 <= j < len(pats)):
+        return None
+    x, y = pats[i], pats[j]
+    den = float(np.sqrt((x ** 2).sum() * (y ** 2).sum()))
+    return float((x * y).sum() / den) if den > 0 else None
+
+
+def is_loose(a: Analysis) -> bool:
+    """A record too loose for the bar lines and the beat check to be trusted
+    (`groove_match` under LOOSE_GROOVE). Its renders keep the warning that
+    says so and drop the beat check's own, which would read as exact."""
+    match = groove_match(a)
+    return match is not None and match < LOOSE_GROOVE
+
+
 def groove_match(a: Analysis) -> float | None:
     """How alike consecutive bars' drums look laid on the bar lines (median
     correlation, 1 = the same bar again), which is how far the bar lines and
@@ -1021,15 +1134,9 @@ def groove_match(a: Analysis) -> float | None:
     key = ("groove_match", id(a.drums), id(a.bar_lines))
     if key in a.cache:
         return a.cache[key]
-    lines = a.bar_lines.astype(np.float64)
     result = None
-    if len(lines) >= 4:
-        env = uniform_filter1d(np.abs(a.drums.mean(axis=1)).astype(np.float64),
-                               max(1, int(0.004 * a.rate)))
-        slots = 192
-        pats = np.array([np.interp(np.linspace(lines[i], lines[i + 1], slots, endpoint=False),
-                                   np.arange(len(env)), env) for i in range(len(lines) - 1)])
-        pats -= pats.mean(axis=1, keepdims=True)
+    if len(a.bar_lines) >= 4:
+        pats = _fine_patterns(a)
         num = (pats[1:] * pats[:-1]).sum(axis=1)
         den = np.sqrt((pats[1:] ** 2).sum(axis=1) * (pats[:-1] ** 2).sum(axis=1)) + 1e-20
         result = float(np.median(num / den))
@@ -1518,7 +1625,7 @@ def render(a: Analysis, bars: int, source: Source,
         # The same loop's drums and bass, one repeat past the join, for the
         # hand-over below.
         hand = None
-        if hand_bars > 0:
+        if hand_bars > 0 and hand_pick is not None:
             hand = lay(hand_pick, repeats - 1, 2, join_out + lead + unit)
 
         # --- the song's own bar to end on, in place of the loop's last bar.
@@ -1598,7 +1705,12 @@ def render(a: Analysis, bars: int, source: Source,
     stemmed = len(a.drums) == len(a.original) and len(a.vocals) == len(a.original)
     out = assemble(layer, beat_only, a.original, mono_in, a.vocals if stemmed else None)
     # The drums alone, for the beat check; the pickup is a vocal, so none of it.
-    drums_out = (assemble(drums_only, drums_only, a.drums, a.drums, np.zeros((0, 2)))
+    # Nor the hand-over: it is the loop's own drums on the loop's own grid,
+    # measured already as the bars before the join, and laid under the song's
+    # first bar it made one beat out of two drum parts: Let's Groove's join
+    # read 30 ms with it where the song's first kick lands 2 ms from the
+    # loop's (2026-10-10).
+    drums_out = (assemble(drums_only, None, a.drums, a.drums, np.zeros((0, 2)))
                  if stemmed else None)
 
     info = {
@@ -1657,7 +1769,8 @@ def render(a: Analysis, bars: int, source: Source,
     beat_len = g.period * (ratio if retune else 1.0)
     info["timing"], heard = timing.check(out if drums_out is None else drums_out,
                                          rate, beat_len, places, "join")
-    info["warnings"].extend(heard)
+    if not is_loose(a):
+        info["warnings"].extend(heard)
     return out, info
 
 
@@ -1805,7 +1918,8 @@ def render_underlay(a: Analysis, bars: int, source: Source,
     drums_out = a.drums.astype(np.float64) + layer_d * (gain * k)[:, None]
     beat_len = a.grid.period * (ratio if retune else 1.0)     # see `render`
     info["timing"], heard = timing.check(drums_out, rate, beat_len, places, "join")
-    info["warnings"].extend(heard)
+    if not is_loose(a):
+        info["warnings"].extend(heard)
     return out, info
 
 

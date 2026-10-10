@@ -469,7 +469,8 @@ def render(a: Analysis, bars: int, source: Source,
     beat_len = g.period * (ratio if retune else 1.0)          # see `intro.render`
     info["timing"], heard = timing.check(out if drums_out is None else drums_out,
                                          rate, beat_len, places, "exit")
-    info["warnings"].extend(heard)
+    if not intro.is_loose(a):
+        info["warnings"].extend(heard)
     return out, info
 
 

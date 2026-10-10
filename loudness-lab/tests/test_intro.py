@@ -238,6 +238,42 @@ class TestALooseGroove(unittest.TestCase):
         self.assertTrue([w for w in a.warnings if "repeat steadily" in w], a.warnings)
 
 
+class TestAnOpeningOfAnotherGroove(unittest.TestCase):
+    """An opening as loud as the groove but a different drum part (ABC's
+    "A-B-C" figure): no loop matches it, so the song arrives where its
+    groove starts, and the reason says how to keep the opening."""
+
+    @classmethod
+    def setUpClass(cls):
+        _, parts, _ = song(breakdown=range(0, 0))
+        parts = {k: v.copy() for k, v in parts.items()}
+        bar = int(BAR * RATE)
+        rng = np.random.default_rng(3)
+        figure = np.zeros(4 * bar)
+        for b in range(4):
+            for i in (1, 6, 11, 14):                   # off-beat sixteenths, every bar
+                fx._place(figure, b * BAR + i * BEAT / 4, fx._kick(int(0.25 * RATE), rng) * 0.9)
+        parts["drums"][:4 * bar] = (figure * 0.9 * np.abs(parts["drums"]).max()
+                                    / np.abs(figure).max())[:, None]
+        cls.a = intro.analyse(sum(parts.values()).astype(np.float32), parts, RATE, BPM)
+
+    def test_no_loop_matches_the_opening(self):
+        best = intro.candidates(self.a, 4, join_bar=0)[0]
+        self.assertLess(intro.phrase_alike(self.a, best.bar, 0), intro.GROOVE_CLASH)
+
+    def test_the_song_arrives_where_its_groove_starts(self):
+        self.assertEqual(self.a.suggested_join_bar, 4)
+        self.assertIn("different groove", self.a.join_reason)
+        best = intro.candidates(self.a, 4)[0]
+        self.assertGreater(intro.phrase_alike(self.a, best.bar, 4), intro.GROOVE_MET)
+
+    def test_a_loop_that_carries_on_into_the_song_keeps_its_join(self):
+        x, parts, _ = song()
+        a = intro.analyse(x, parts, RATE, BPM)
+        self.assertEqual(a.suggested_join_bar, 0)
+        self.assertNotIn("different groove", a.join_reason)
+
+
 class TestWhereTheSongArrives(unittest.TestCase):
     """The song's own opening is cut out and the intro takes its place, so
     where the song joins matters: at the first bar where the groove lands."""

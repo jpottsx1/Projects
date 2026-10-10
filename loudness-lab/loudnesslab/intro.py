@@ -999,9 +999,28 @@ def cost(s: Source) -> float:
                                 - SEAM_OK_MS))
 
 
+def _inst_power(a: Analysis, lo: int, hi: int) -> float:
+    """The instrumental's mean power over samples [lo, hi), from a running
+    sum of its energy made once per track. Computed afresh it cost a mono
+    copy of the whole stem for every bar a loop could start at, which was
+    most of the time it takes to rank the loops (2026-10-10)."""
+    # Keyed by the audio it was made from: an Analysis copied with other
+    # stems (`dataclasses.replace`) shares this dict.
+    key = ("inst_energy", id(a.instrumental))
+    total = a.cache.get(key)
+    if total is None:
+        mono = a.instrumental.mean(axis=1).astype(np.float64)
+        total = a.cache[key] = np.concatenate([[0.0], np.cumsum(mono ** 2)])
+    lo, hi = max(0, int(lo)), min(len(total) - 1, int(hi))
+    return float((total[hi] - total[lo]) / (hi - lo)) if hi > lo else 0.0
+
+
 def _bar_powers(a: Analysis) -> dict | None:
     """Per bar: the instrumental's, the vocal's and the drums' power, and
-    the track's typical bar for the first and last."""
+    the track's typical bar for the first and last. Made once per track."""
+    key = ("bar_powers", id(a.instrumental), id(a.vocals), id(a.drums), id(a.bar_lines))
+    if key in a.cache:
+        return a.cache[key]
     lines = a.bar_lines
     bars = len(lines) - 1
     if bars < 1:
@@ -1013,9 +1032,11 @@ def _bar_powers(a: Analysis) -> dict | None:
                          for i in range(bars)])
 
     inst, voc, drm = power(a.instrumental), power(a.vocals), power(a.drums)
-    return {"inst": inst, "voc": voc, "drm": drm, "dev": bar_deviation(a),
-            "typical_inst": np.median(inst[inst > 0]) if np.any(inst > 0) else 1.0,
-            "typical_drm": np.median(drm[drm > 0]) if np.any(drm > 0) else 1.0}
+    a.cache[key] = {
+        "inst": inst, "voc": voc, "drm": drm, "dev": bar_deviation(a),
+        "typical_inst": np.median(inst[inst > 0]) if np.any(inst > 0) else 1.0,
+        "typical_drm": np.median(drm[drm > 0]) if np.any(drm > 0) else 1.0}
+    return a.cache[key]
 
 
 def _reference(a: Analysis, join_bar: int, loop_bars: int) -> dict:
@@ -1026,12 +1047,11 @@ def _reference(a: Analysis, join_bar: int, loop_bars: int) -> dict:
     bars = len(lines) - 1
     j = min(max(join_bar, 0), max(bars - 1, 0))
     n = max(1, min(loop_bars, bars - j))
-    mono = a.instrumental.mean(axis=1).astype(np.float64)
     return {
         "bar": j, "n": n,
         "pattern": bar_patterns(a)[j:j + n],
         "chroma": bar_chroma(a)[j:j + n],
-        "power": float(np.mean(mono[lines[j]:lines[j + n]] ** 2)),
+        "power": _inst_power(a, lines[j], lines[j + n]),
         "bar_len": float(lines[j + n] - lines[j]) / n,
     }
 
@@ -1046,8 +1066,7 @@ def _compare(a: Analysis, ref: dict, i: int, loop_bars: int, length: int) -> dic
                            / (np.linalg.norm(chroma[i + t]) * np.linalg.norm(ref["chroma"][t]) + 1e-12)
                            for t in range(k)])) if k else 1.0
     lines = a.bar_lines
-    mono = a.instrumental.mean(axis=1).astype(np.float64)
-    power = float(np.mean(mono[lines[i]:lines[i + loop_bars]] ** 2))
+    power = _inst_power(a, lines[i], lines[i + loop_bars])
     return {"feel": feel, "chroma_match": match,
             "tempo_off": length / loop_bars / ref["bar_len"] - 1.0,
             "level_vs_join_db": float(_db(power / max(ref["power"], 1e-12)))}
@@ -1072,16 +1091,33 @@ def _measure(a: Analysis, powers: dict, i: int, loop_bars: int,
                                           int(a.bar_lines[end] - a.bar_lines[i]))))
 
 
+def _kick_table(a: Analysis) -> tuple[np.ndarray, np.ndarray]:
+    """Every kick on the drum stem with its strength, found once per track:
+    what `beat_fit` lays out in place of the audio they came from."""
+    key = ("kick_table", id(a.drums))                    # see `_inst_power`
+    found = a.cache.get(key)
+    if found is None:
+        kicks, strengths = subbass.detect_kicks(a.original, a.rate, a.drums)
+        order = np.argsort(kicks)
+        found = a.cache[key] = (kicks[order].astype(np.int64), strengths[order])
+    return found
+
+
 def beat_fit(a: Analysis, s: Source, loop_bars: int, join_bar: int | None = None,
              exit_bar: int | None = None) -> tuple[float | None, float | None]:
     """(slip at the seams, slip at the join or exit), in ms, of `s` made into
     an edit: its drums laid end to end at `s.length`, met by the song's own
     drums the way `render` (an intro, at `join_bar`) or `outro.render` (at
     `exit_bar`) meets them, and put through the same beat check a finished
-    edit gets (`timing.check`). So what ranks a loop is what will be
-    measured of it. Not resampled: a uniform change of speed moves neither.
-    None where there are too few kicks to say."""
-    key = ("beat_fit", s.start, s.length, join_bar, exit_bar)
+    edit gets (`timing`). So what ranks a loop is what will be measured of
+    it. Not resampled: a uniform change of speed moves neither.
+
+    The kicks are the track's own (`_kick_table`), laid where that audio
+    would be laid, not found again in audio built for the purpose: the same
+    answers to well under a millisecond, and it was most of the time it
+    takes to rank the loops (2026-10-10). None where there are too few
+    kicks to say."""
+    key = ("beat_fit", id(a.drums), id(a.bar_lines), s.start, s.length, join_bar, exit_bar)
     if key in a.cache:
         return a.cache[key]
     start, length = int(s.start), int(s.length)
@@ -1090,28 +1126,36 @@ def beat_fit(a: Analysis, s: Source, loop_bars: int, join_bar: int | None = None
     n = len(a.drums)
     result: tuple[float | None, float | None] = (None, None)
     if length > 0 and start - guard >= 0 and start - guard + length <= n:
+        kicks, strengths = _kick_table(a)
         beats = BEATS_PER_BAR * loop_bars
         first = -(-timing.WINDOW_BEATS // beats)            # seams with a full window before
-        # Cut where a render cuts, a guard ahead of the kick, so the kick's
-        # front is whole at every seam.
-        piece = a.drums[start - guard:start - guard + length].astype(np.float64)
+        cut = start - guard                                  # where a render cuts, ahead of the kick
+        inside = (kicks >= cut) & (kicks < cut + length)
+        loop_k, loop_s = kicks[inside] - cut, strengths[inside]
+
+        def tiles(count: int, offset: int) -> tuple[np.ndarray, np.ndarray]:
+            ks = [loop_k + offset + t * length for t in range(count)]
+            return np.concatenate(ks), np.tile(loop_s, count)
+
         reach = int((timing.WINDOW_BEATS + 4) * period)
         if exit_bar is None:
             from_bar = a.suggested_join_bar if join_bar is None else join_bar
             join, pickup = resolve_join(a, from_bar)
             nudge = kick_offset(a, start, join)
-            # One repeat ahead of the seams read: the detector reads the very
-            # first kick of a file late, and a window reaching back to it
-            # put 1.8 ms on every seam of an exact grid.
             repeats = first + 3
-            tiled = np.concatenate([piece] * (repeats + 1))
             arrive = repeats * length + guard                # where the song's first beat lands
-            o_start = max(0, join - pickup - guard)
+            # The song's drums begin where `render` begins them: at the join,
+            # its pickup being the vocal alone, when there are stems for that.
+            # Counting the pickup's drums in had We Are Family's best loop at
+            # bar 1 a few ms out where the render measured 115 (2026-10-10).
+            stemmed = len(a.vocals) == len(a.original) and len(a.drums) == len(a.original)
+            o_start = max(0, join - (0 if stemmed else pickup) - guard)
             at = o_start + arrive - join - nudge
-            song = a.drums[o_start:min(n, join + reach)].astype(np.float64)
-            out = np.zeros((at + len(song), 2))
-            out[:min(at, len(tiled))] = tiled[:min(at, len(tiled))]
-            out[at:] = song
+            lk, ls = tiles(repeats + 1, 0)
+            keep = lk < at
+            song = (kicks >= o_start) & (kicks < min(n, join + reach))
+            laid = np.concatenate([lk[keep], kicks[song] - o_start + at])
+            power = np.concatenate([ls[keep], strengths[song]])
             places = [(f"seam {k}", k * length + guard, None) for k in (first + 1, first + 2)]
             places.append(("edge", arrive, None))
         else:
@@ -1120,16 +1164,16 @@ def beat_fit(a: Analysis, s: Source, loop_bars: int, join_bar: int | None = None
             beat0 = exit_ + kick_offset(a, start, exit_)
             x_end = min(exit_ + tail - guard, n)
             base = max(0, exit_ - reach)
-            repeats = first + 3
-            tiled = np.concatenate([piece] * repeats)
             loop_at = beat0 - guard - base
-            out = np.zeros((loop_at + len(tiled), 2))
-            out[:x_end - base] = a.drums[base:x_end]
             lo = max(x_end - base, loop_at)                  # the song may stop just short of the loop
-            out[lo:] = tiled[lo - loop_at:]
+            song = (kicks >= base) & (kicks < x_end)
+            lk, ls = tiles(first + 3, loop_at)
+            keep = lk >= lo
+            laid = np.concatenate([kicks[song] - base, lk[keep]])
+            power = np.concatenate([strengths[song], ls[keep]])
             places = [("edge", exit_ - base, x_end - base)]
             places += [(f"seam {k}", loop_at + k * length + guard, None) for k in (first, first + 1)]
-        report, _ = timing.check(out.astype(np.float32), rate, period, places, "edge")
+        report, _ = timing.check_kicks(laid, power, rate, period, places, "edge")
         result = (report["worst_seam_ms"], report["edge_offset_ms"])
     a.cache[key] = result
     return result

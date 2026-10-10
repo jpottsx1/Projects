@@ -135,6 +135,13 @@ def check(audio: np.ndarray, rate: int, period: float,
     exit, in file samples. `what` names the edge ("join" or "exit") the way
     the report and the warnings should."""
     kicks, strengths = subbass.detect_kicks(audio, rate)
+    return check_kicks(kicks, strengths, rate, period, places, what)
+
+
+def check_kicks(kicks: np.ndarray, strengths: np.ndarray, rate: int, period: float,
+                places: list[tuple[str, int, int | None]], what: str) -> tuple[dict, list[str]]:
+    """`check`, from kicks already found: (sample, strength) pairs laid out
+    the way the edit lays out the audio they came from."""
     order = np.argsort(kicks)
     kicks, strengths = kicks[order], strengths[order]
     seams, edge = [], None

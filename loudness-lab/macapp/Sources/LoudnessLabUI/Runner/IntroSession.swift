@@ -1,5 +1,27 @@
 import Foundation
 
+/// How well a rendered edit keeps the beat, measured off the file: how far
+/// the kicks after the join (or exit) and after each loop seam land from
+/// where the bars before them put them, and any change of tempo there.
+struct IntroTiming: Decodable, Equatable {
+    var joinOffsetMs: Double?
+    var joinTempoStepPct: Double?
+    var exitOffsetMs: Double?
+    var exitTempoStepPct: Double?
+    var worstSeamMs: Double?
+
+    /// The join's for an intro, the exit's for an outro.
+    var edgeOffsetMs: Double? { joinOffsetMs ?? exitOffsetMs }
+
+    enum CodingKeys: String, CodingKey {
+        case joinOffsetMs = "join_offset_ms"
+        case joinTempoStepPct = "join_tempo_step_pct"
+        case exitOffsetMs = "exit_offset_ms"
+        case exitTempoStepPct = "exit_tempo_step_pct"
+        case worstSeamMs = "worst_seam_ms"
+    }
+}
+
 /// What `loudness-lab intro --serve` says back, one JSON object a line.
 ///
 /// Every field but `event` is optional because several events share the
@@ -73,6 +95,9 @@ struct IntroEvent: Decodable, Equatable {
     var handinBars: Double?
     var fadeBars: Double?
     var style: String?
+    /// The finished file's kicks, read back across every seam and the join
+    /// or exit (`loudnesslab/timing.py`).
+    var timing: IntroTiming?
 
     // envelope: the track as three bands over time, for drawing the picker
     var perSecond: Double?
@@ -127,6 +152,7 @@ struct IntroEvent: Decodable, Equatable {
         case exitBar = "exit_bar"
         case handinBars = "handin_bars"
         case fadeBars = "fade_bars"
+        case timing
     }
 
     init?(_ line: String) {
@@ -165,6 +191,11 @@ struct IntroSource: Decodable, Identifiable, Equatable {
     var feel: Double? = nil
     var tempoOff: Double? = nil
     var chromaMatch: Double? = nil
+    /// The beat check run on this loop before it is rendered: how far the
+    /// beat would slip at its seams, and where the song arrives or is left,
+    /// in ms. Nil where there were too few kicks to say.
+    var seamMs: Double? = nil
+    var edgeMs: Double? = nil
 
     var id: Int { bar }
 
@@ -175,6 +206,8 @@ struct IntroSource: Decodable, Identifiable, Equatable {
         case vocalDB = "vocal_db"
         case vocalFree = "vocal_free"
         case repeatScore = "repeat"
+        case seamMs = "seam_ms"
+        case edgeMs = "edge_ms"
     }
 }
 

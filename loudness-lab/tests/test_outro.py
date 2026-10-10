@@ -365,6 +365,15 @@ class TestAGridThatHasDrifted(unittest.TestCase):
         self.assertTrue([w for w in info["warnings"] if "drifted" in w])
         self.assertLess(abs(slip_across_exit(audio, info)), 12.0)
 
+    def test_a_line_found_on_a_kick_is_not_moved(self):
+        # The same drifted kicks around it, but the exit's own line said to be
+        # on a kick: it is on the beat already, and stays where it is.
+        snapped = self.a.snapped.copy()
+        snapped[self.last] = True
+        a = intro.Analysis(**{**self.a.__dict__, "snapped": snapped, "cache": {}})
+        exit_, _ = outro.resolve_exit(a, self.last)
+        self.assertEqual(exit_, int(a.bar_lines[self.last]))
+
     def test_without_the_alignment_the_beat_would_skip(self):
         # Mutation check, run live: put the exit back on the bar line and the
         # same measurement shows the drift the alignment removes.

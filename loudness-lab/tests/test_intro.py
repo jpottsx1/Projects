@@ -205,6 +205,39 @@ class TestASongThatSettlesIn(unittest.TestCase):
         self.assertLess(abs(info["timing"]["join_offset_ms"]), 2.0)
 
 
+class TestALooseGroove(unittest.TestCase):
+    """A record whose drums do not repeat steadily bar to bar is called out:
+    on it the bar lines and the beat check cannot be trusted."""
+
+    def test_a_steady_groove_is_not_called_out(self):
+        x, parts, _ = song()
+        a = intro.analyse(x, parts, RATE, BPM)
+        self.assertGreater(intro.groove_match(a), 0.9)
+        self.assertFalse([w for w in a.warnings if "repeat steadily" in w])
+
+    def test_loose_drums_are_called_out(self):
+        _, parts, _ = song(breakdown=range(0, 0))
+        beat = int(BEAT * RATE)
+        parts = {k: v.copy() for k, v in parts.items()}
+        rng = np.random.default_rng(1)
+        drums = parts["drums"]
+        loose = np.zeros_like(drums)
+        # every beat of the drums moved by up to a quarter of a beat, and every
+        # other bar's hits doubled half a beat on: no bar is like the last
+        for i in range(len(drums) // beat):
+            seg = drums[i * beat:(i + 1) * beat]
+            d = int(rng.uniform(-0.25, 0.25) * beat)
+            at = max(0, min(len(drums) - len(seg), i * beat + d))
+            loose[at:at + len(seg)] += seg
+            if (i // 4) % 2 and at + beat // 2 + len(seg) <= len(drums):
+                loose[at + beat // 2:at + beat // 2 + len(seg)] += 0.7 * seg
+        parts["drums"] = loose
+        x = sum(parts.values()).astype(np.float32)
+        a = intro.analyse(x, parts, RATE, BPM)
+        self.assertLess(intro.groove_match(a), intro.LOOSE_GROOVE)
+        self.assertTrue([w for w in a.warnings if "repeat steadily" in w], a.warnings)
+
+
 class TestWhereTheSongArrives(unittest.TestCase):
     """The song's own opening is cut out and the intro takes its place, so
     where the song joins matters: at the first bar where the groove lands."""

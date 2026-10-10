@@ -611,6 +611,12 @@ def _layout(x: np.ndarray, instrumental: np.ndarray, vocals: np.ndarray,
         warnings=warnings,
         **({} if bass is None else {"bass": bass}),
         **({} if other is None else {"other": other}))
+    match = groove_match(analysis)
+    if match is not None and match < LOOSE_GROOVE:
+        analysis.warnings.append(
+            f"the drums do not repeat steadily bar to bar here (match {match:.2f}; a "
+            f"steady groove reads 0.7 or more), so the bar lines and the beat check "
+            f"can be tens of ms out on this record: judge the join and the seams by ear")
     analysis.suggested_join_bar, analysis.join_reason = suggest_join(analysis)
     first = analysis.suggested_join_bar
     steady, missed, met = steady_join(analysis, first)
@@ -997,6 +1003,38 @@ def cost(s: Source) -> float:
                                 - SEAM_OK_MS)
             + SEAM_WEIGHT * max(0.0, abs(SEAM_UNKNOWN_MS if s.edge_ms is None else s.edge_ms)
                                 - SEAM_OK_MS))
+
+
+# Under this `groove_match` the record's beat is too loose for the bar lines
+# and the beat check to be trusted, and it is said so. Nine records measured
+# (2026-10-10): ABC 0.22; The Cult's "Rain" 0.68; the disco 0.71-0.89.
+LOOSE_GROOVE = 0.5
+
+
+def groove_match(a: Analysis) -> float | None:
+    """How alike consecutive bars' drums look laid on the bar lines (median
+    correlation, 1 = the same bar again), which is how far the bar lines and
+    the beat check can be trusted on this record. Steady grooves read
+    0.8-0.9; Jackson 5's "ABC", loose live drums whose pattern changes
+    between sections, reads 0.22, and no grid we tried did better there
+    (2026-10-10). None for a track too short to say."""
+    key = ("groove_match", id(a.drums), id(a.bar_lines))
+    if key in a.cache:
+        return a.cache[key]
+    lines = a.bar_lines.astype(np.float64)
+    result = None
+    if len(lines) >= 4:
+        env = uniform_filter1d(np.abs(a.drums.mean(axis=1)).astype(np.float64),
+                               max(1, int(0.004 * a.rate)))
+        slots = 192
+        pats = np.array([np.interp(np.linspace(lines[i], lines[i + 1], slots, endpoint=False),
+                                   np.arange(len(env)), env) for i in range(len(lines) - 1)])
+        pats -= pats.mean(axis=1, keepdims=True)
+        num = (pats[1:] * pats[:-1]).sum(axis=1)
+        den = np.sqrt((pats[1:] ** 2).sum(axis=1) * (pats[:-1] ** 2).sum(axis=1)) + 1e-20
+        result = float(np.median(num / den))
+    a.cache[key] = result
+    return result
 
 
 def _inst_power(a: Analysis, lo: int, hi: int) -> float:

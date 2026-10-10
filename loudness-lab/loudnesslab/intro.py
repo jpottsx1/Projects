@@ -49,9 +49,10 @@ from pathlib import Path
 
 import numpy as np
 from scipy.ndimage import uniform_filter1d
-from scipy.signal import butter, fftconvolve, resample_poly, sosfilt, sosfiltfilt
+from scipy.fft import next_fast_len
+from scipy.signal import butter, fftconvolve, hilbert, resample_poly, sosfilt, sosfiltfilt
 
-from . import decode, stems, subbass, write
+from . import decode, stems, subbass, timing, write
 
 # Bars of the loop's own drums and bass kept running under the song's first
 # bars, fading out, in the stem styles: the intro hands over to the song as a
@@ -135,7 +136,11 @@ MIN_REPEAT = 0.6
 # (`bar_deviation`) costs this many dB.
 FILL_OK = 0.3
 FILL_WEIGHT = 30.0
-FILL_NOTED = 0.5                # from here the loop is called out as having a fill
+# From here the loop is called out as having a fill. Was 0.5; with the bar
+# lines found on every kick (`attack`), the test tracks' repeated fill bars read
+# 0.46-0.58 against a groove median of 0.175 (2026-10-09). The 0.6-0.75 some
+# had read before came from bar lines 5 ms off their kicks.
+FILL_NOTED = 0.4
 DEVIATION_SLOTS = 16
 # A loop is chosen to sound like the bars the song arrives with, not like the
 # song's typical bar: how far its rhythm pattern is from theirs (0 = the same,
@@ -311,8 +316,83 @@ def attack(drums_abs: np.ndarray, sample: float, kicks: np.ndarray,
     peak = float(drums_abs[lo:hi].max())
     if peak <= 0:
         return c, found
-    over = np.nonzero(drums_abs[lo:min(hi, c + int(0.005 * rate))] > 0.08 * peak)[0]
+    # Searched to the end of the window, not only a little past the onset:
+    # the detector's onset is sometimes AHEAD of the kick (5 ms on the test
+    # tracks' kicks), and a search that stopped 5 ms after it ended before
+    # the kick began, found nothing, and left the line on the early onset.
+    # One line in five of an exact grid was 5 ms early that way, and a loop
+    # cut from one was 5 ms long at every seam (2026-10-09).
+    over = np.nonzero(drums_abs[lo:hi] > 0.08 * peak)[0]
     return (int(lo + over[0]) if over.size else c), found
+
+
+# Lining one kick up against another (`kick_offset`): the stretch of each
+# compared, how far either way the second may be moved, and how alike they
+# must be (normalised correlation of their envelopes) for the move to be made.
+MATCH_BEFORE_S = 0.005
+MATCH_AFTER_S = 0.040
+MATCH_REACH_S = 0.025
+MATCH_MIN = 0.7
+MATCH_DEADBAND_S = 0.0005       # a move smaller than this is not made: inaudible
+
+
+def _kick_envelope(a: "Analysis") -> np.ndarray:
+    env = a.cache.get("kick_envelope")
+    if env is None:
+        mono = a.drums.mean(axis=1).astype(np.float64)
+        low = sosfiltfilt(butter(2, 200.0, btype="low", fs=a.rate, output="sos"), mono)
+        # The analytic envelope: |low| ripples at the kick's own pitch, every
+        # 5-9 ms, and lining two kicks up on that ripple can land a whole
+        # ripple out (5 ms on the test tracks' exact grid).
+        env = a.cache["kick_envelope"] = np.abs(hilbert(low, N=next_fast_len(len(low))))[:len(low)]
+    return env
+
+
+def kick_offset(a: "Analysis", ref: int, at: int) -> int:
+    """Samples the kick at bar line `at` sits later against its line than the
+    kick at bar line `ref` does against its own, found by lining the two
+    kicks' low-band envelopes up rather than by reading each one's front.
+
+    Each line is a kick's front read off the drum stem (`attack`), and a
+    separated stem smears a little of every kick ahead of it, so the front
+    reads early by however much smear there is. That is the same at every
+    line in a groove, and cancels; it is not the same where the drums come
+    in from silence or the track starts, which is where an intro's join
+    almost always is. On a test track with an exact grid, separated by
+    Demucs, the first bar line read 7.6 ms later against its kick than every
+    other one, and the song arrived that much out against the intro's beat
+    (2026-10-09). Matching the kicks themselves does not depend on what is
+    in front of them. 0 when the two do not look enough alike to trust, or
+    when either line has no kick on it to match: Celebration's join is a
+    second from its nearest kick, and matching it to whatever was there put
+    the song 21 ms off the beat where leaving it gave 4 (2026-10-09)."""
+    near = 0.1 * a.grid.period
+    if not a.kicks.size or max(np.min(np.abs(a.kicks - ref)), np.min(np.abs(a.kicks - at))) > near:
+        return 0
+    env = _kick_envelope(a)
+    r = a.rate
+    b, f, reach = int(MATCH_BEFORE_S * r), int(MATCH_AFTER_S * r), int(MATCH_REACH_S * r)
+    def take(lo: int, hi: int) -> np.ndarray:
+        """env[lo:hi], silent where it runs off either end of the track."""
+        piece = np.zeros(hi - lo)
+        a0, a1 = max(lo, 0), min(hi, len(env))
+        if a1 > a0:
+            piece[a0 - lo:a1 - lo] = env[a0:a1]
+        return piece
+
+    template = take(ref - b, ref + f)
+    region = take(at - b - reach, at + f + reach)
+    windows = np.lib.stride_tricks.sliding_window_view(region, template.size)
+    t = template - template.mean()
+    w = windows - windows.mean(axis=1, keepdims=True)
+    denom = np.sqrt((w ** 2).sum(axis=1) * (t ** 2).sum())
+    if not np.all(denom > 0):
+        return 0
+    corr = (w @ t) / denom
+    best = int(np.argmax(corr))
+    if corr[best] < MATCH_MIN or abs(best - reach) < MATCH_DEADBAND_S * r:
+        return 0
+    return best - reach
 
 
 RELOCK_NEIGHBOURS = 3               # kicks a beat apart, each side, that count as support
@@ -747,6 +827,14 @@ def refine_length(a: Analysis, bar: int, loop_bars: int) -> tuple[int, float]:
     """
     start = int(a.bar_lines[bar])
     direct = int(a.bar_lines[bar + loop_bars] - a.bar_lines[bar])
+    # Both ends on a kick's attack: that distance IS the record's own, and
+    # the beat across the seam is the one the drummer played. Lining up the
+    # whole kit's envelope instead was pulled by the hats and the snare,
+    # whose feel is not the kick's: 12-16 ms long on I Will Survive and
+    # Night Fever, heard at every seam and at the join (2026-10-09). The
+    # match is still read, for how well the stretch repeats.
+    keep = bool(len(a.snapped) > bar + loop_bars
+                and a.snapped[bar] and a.snapped[bar + loop_bars])
     env = a.envelope
     width = min(int(a.grid.bar), len(env) - start - direct - 1)
     reach = int(0.025 * a.rate)
@@ -765,7 +853,7 @@ def refine_length(a: Analysis, bar: int, loop_bars: int) -> tuple[int, float]:
     best = int(np.argmax(corr))
     seen = later[best:best + width]
     r = float(np.corrcoef(first, seen)[0, 1]) if seen.std() > 0 and first.std() > 0 else 0.0
-    return direct + best - reach, r
+    return (direct if keep else direct + best - reach), r
 
 
 def bar_patterns(a: Analysis) -> np.ndarray:
@@ -1131,7 +1219,10 @@ def render(a: Analysis, bars: int, source: Source,
     unit = int(round(src_unit * ratio)) if retune else src_unit
     repeats = bars // loop_bars
     join_out = repeats * unit                    # grid coordinates; the file
-    shift = join_out - join                      # adds `lead` at the end
+    # The song is laid so its first kick falls where the loop's next one
+    # would, matched kick to kick (`kick_offset`), not front to front.
+    nudge = kick_offset(a, int(source.start), join)
+    shift = join_out - join - nudge              # adds `lead` at the end
     total = n + shift
     if style not in ("full", "build", "beat"):
         raise ValueError(f"style must be 'full', 'build', 'beat' or 'underlay', not {style!r}")
@@ -1183,71 +1274,91 @@ def render(a: Analysis, bars: int, source: Source,
                 buf[at + lo:hi] += (seg * win[:, None])[lo:hi - at]
         return buf
 
-    loop = lay(lambda m, lo, hi: layer(m, lo, hi), 0, repeats, join_out + lead)
+    def beat_only(m: int, lo: int, hi: int) -> np.ndarray:
+        return a.drums[lo:hi].astype(np.float64) + a.bass[lo:hi]
 
-    # The same loop's drums and bass, one repeat past the join, for the
-    # hand-over below.
+    def drums_only(m: int, lo: int, hi: int) -> np.ndarray:
+        return a.drums[lo:hi].astype(np.float64)
+
     hand_bars = handover if (stems and lead_in_bar is None) else 0.0
-    hand = None
-    if hand_bars > 0:
-        def beat_only(m: int, lo: int, hi: int) -> np.ndarray:
-            return a.drums[lo:hi].astype(np.float64) + a.bass[lo:hi]
-        hand = lay(beat_only, repeats - 1, 2, join_out + lead + unit)
+    flen = 0
+    if lead_in_bar is not None and 1 <= lead_in_bar < len(a.bar_lines) - 1:
+        flen = int(a.bar_lines[lead_in_bar + 1]) - int(a.bar_lines[lead_in_bar])
 
-    # --- the song's own bar to end on, in place of the loop's last bar.
-    if lead_in_bar is not None:
-        if not 1 <= lead_in_bar < len(a.bar_lines) - 1:
-            raise ValueError(f"lead-in bar {lead_in_bar} is outside the track")
-        fb0, fb1 = int(a.bar_lines[lead_in_bar]), int(a.bar_lines[lead_in_bar + 1])
-        flen = fb1 - fb0
-        if join_out < 2 * flen:
-            raise ValueError("the intro is too short to end on a bar of its own")
-        stop = join_out - flen - guard + lead     # where the loop gives way
-        if stop - seam >= 0 and fb0 - guard >= 0:
-            loop[stop - seam:stop] *= _fade(seam)[1][:, None]
-            loop[stop:] = 0.0
-            pre = min(seam, fb0 - guard)
-            seg = mono_in[fb0 - guard - pre:fb1].astype(np.float64)
-            win = np.ones(len(seg))
-            if pre:
-                win[:pre] = _fade(pre)[0]
-            at = stop - pre
-            hi = min(len(loop), at + len(seg))
-            loop[at:hi] += (seg * win[:, None])[:hi - at]
+    def assemble(pick, hand_pick, song: np.ndarray, bar_src: np.ndarray) -> np.ndarray:
+        """The edit built from `pick` (the loop's audio per repeat), `hand_pick`
+        (the hand-over's) and `song` / `bar_src` (the original and the bar the
+        intro may end on). Called once with the real audio and once with the
+        drums alone, laid out the same way, so the beat check can read the
+        kicks without the bass and the band in the way."""
+        # One repeat more than is heard, so that when the song is laid a
+        # little later than the grid (`nudge`) the loop is still playing up
+        # to it; it is gated off where the song begins.
+        loop = lay(pick, 0, repeats + 1, join_out + lead + max(0, -nudge) + seam)
 
-    # --- the hand-over: where the original begins (its pickup, or its
-    # downbeat), minus the guard. With room before it, it fades in over a
-    # seam while the loop fades out; with none (a track that starts on the
-    # kick) it simply begins and the loop has finished.
-    o_start = max(0, join - pickup - guard)
-    fade_len = min(seam, o_start)
-    o0 = o_start - fade_len
-    out_o = o_start + shift + lead               # file coordinates
-    out = np.zeros((total + lead, 2), dtype=np.float64)
-    loop_fade = max(fade_len, int(0.0005 * rate))
-    gain = np.ones(len(loop))
-    f_in, f_out = _fade(loop_fade)
-    gain[out_o - loop_fade:out_o] = f_out
-    gain[out_o:] = 0.0
-    out[:len(loop)] += loop * gain[:, None]
-    if hand is not None:
-        # The loop's drums and bass take over from the loop at the moment it
-        # stops and fade out over `hand_bars` bars. Both are the same audio
-        # on the same grid, so the take-over itself is inaudible; what is
-        # heard is the band thinning out under the song's first bars.
-        h = min(int(round(hand_bars * unit / loop_bars)), len(hand) - out_o, len(out) - out_o)
-        if h > 0:
-            ramp_down = np.cos(np.linspace(0.0, np.pi / 2, h, endpoint=False)) ** 2
-            out[out_o:out_o + h] += hand[out_o:out_o + h] * ramp_down[:, None]
-    tail = a.original[o0:].astype(np.float64)
-    window = np.ones(len(tail))
-    if fade_len:
-        window[:fade_len] = _fade(fade_len)[0]
-    at = o0 + shift + lead
-    out[at:at + len(tail)] += tail * window[:, None]
-    # the start of the file: the loop's first pre-attack samples faded in
-    ramp = min(lead, len(out))
-    out[:ramp] *= _fade(ramp)[0][:, None]
+        # The same loop's drums and bass, one repeat past the join, for the
+        # hand-over below.
+        hand = None
+        if hand_bars > 0:
+            hand = lay(hand_pick, repeats - 1, 2, join_out + lead + unit)
+
+        # --- the song's own bar to end on, in place of the loop's last bar.
+        if lead_in_bar is not None:
+            if not 1 <= lead_in_bar < len(a.bar_lines) - 1:
+                raise ValueError(f"lead-in bar {lead_in_bar} is outside the track")
+            fb0, fb1 = int(a.bar_lines[lead_in_bar]), int(a.bar_lines[lead_in_bar + 1])
+            if join_out < 2 * flen:
+                raise ValueError("the intro is too short to end on a bar of its own")
+            stop = join_out - flen - guard + lead     # where the loop gives way
+            if stop - seam >= 0 and fb0 - guard >= 0:
+                loop[stop - seam:stop] *= _fade(seam)[1][:, None]
+                loop[stop:] = 0.0
+                pre = min(seam, fb0 - guard)
+                seg = bar_src[fb0 - guard - pre:fb1].astype(np.float64)
+                win = np.ones(len(seg))
+                if pre:
+                    win[:pre] = _fade(pre)[0]
+                at = stop - pre
+                hi = min(len(loop), at + len(seg))
+                loop[at:hi] += (seg * win[:, None])[:hi - at]
+
+        # --- the hand-over: where the original begins (its pickup, or its
+        # downbeat), minus the guard. With room before it, it fades in over a
+        # seam while the loop fades out; with none (a track that starts on the
+        # kick) it simply begins and the loop has finished.
+        o_start = max(0, join - pickup - guard)
+        fade_len = min(seam, o_start)
+        o0 = o_start - fade_len
+        out_o = o_start + shift + lead               # file coordinates
+        out = np.zeros((total + lead, 2), dtype=np.float64)
+        loop_fade = max(fade_len, int(0.0005 * rate))
+        gain = np.ones(len(loop))
+        f_in, f_out = _fade(loop_fade)
+        gain[out_o - loop_fade:out_o] = f_out
+        gain[out_o:] = 0.0
+        out[:len(loop)] += loop * gain[:, None]
+        if hand is not None:
+            # The loop's drums and bass take over from the loop at the moment it
+            # stops and fade out over `hand_bars` bars. Both are the same audio
+            # on the same grid, so the take-over itself is inaudible; what is
+            # heard is the band thinning out under the song's first bars.
+            h = min(int(round(hand_bars * unit / loop_bars)), len(hand) - out_o, len(out) - out_o)
+            if h > 0:
+                ramp_down = np.cos(np.linspace(0.0, np.pi / 2, h, endpoint=False)) ** 2
+                out[out_o:out_o + h] += hand[out_o:out_o + h] * ramp_down[:, None]
+        tail = song[o0:].astype(np.float64)
+        window = np.ones(len(tail))
+        if fade_len:
+            window[:fade_len] = _fade(fade_len)[0]
+        at = o0 + shift + lead
+        out[at:at + len(tail)] += tail * window[:, None]
+        # the start of the file: the loop's first pre-attack samples faded in
+        ramp = min(lead, len(out))
+        out[:ramp] *= _fade(ramp)[0][:, None]
+        return out
+
+    out = assemble(layer, beat_only, a.original, mono_in)
+    drums_out = assemble(drums_only, drums_only, a.drums, a.drums) if len(a.drums) == len(a.original) else None
 
     info = {
         "bpm": round(60.0 * rate * BEATS_PER_BAR * loop_bars / unit, 3),
@@ -1268,6 +1379,8 @@ def render(a: Analysis, bars: int, source: Source,
         "lead_in_seconds": None if lead_in_bar is None
         else round(float(a.bar_lines[lead_in_bar]) / rate, 3),
         "join_seconds": round(join / rate, 3),
+        "join_nudge_ms": round(nudge / rate * 1000.0, 2),
+        "join_nudge_samples": int(nudge),
         "pickup_seconds": round(pickup / rate, 3),
         "suggested_join_bar": a.suggested_join_bar,
         "cut_seconds": round(max(0, join - pickup) / rate, 3),
@@ -1291,7 +1404,15 @@ def render(a: Analysis, bars: int, source: Source,
         info["warnings"].append(
             "no vocal-free stretch to loop: the intro carries some vocal "
             "bleed from the source bars")
-    return out.astype(np.float32), info
+    out = out.astype(np.float32)
+    places = [(f"seam {m}", starts[m] + lead, None) for m in range(1, repeats)]
+    if lead_in_bar is not None:
+        places.append(("lead-in", join_out - flen + lead, None))
+    places.append(("join", join_out + lead, None))
+    info["timing"], heard = timing.check(out if drums_out is None else drums_out,
+                                         rate, g.period, places, "join")
+    info["warnings"].extend(heard)
+    return out, info
 
 
 def render_underlay(a: Analysis, bars: int, source: Source,
@@ -1339,26 +1460,33 @@ def render_underlay(a: Analysis, bars: int, source: Source,
 
     # `repeats` repeats laid back from the join, and one more after it for
     # the hand-over, each crossfaded into the next.
-    layer = np.zeros((n, 2), dtype=np.float64)
-    for m in range(repeats + 1):
-        pre_src = min(seam, cut)
-        lo_src, hi_src = cut - pre_src, min(cut + src_unit, n)
-        seg = a.drums[lo_src:hi_src].astype(np.float64) + a.bass[lo_src:hi_src]
-        pre = pre_src
-        if retune:
-            fraction = Fraction(ratio).limit_denominator(4000)
-            seg = resample_poly(seg, fraction.numerator, fraction.denominator, axis=0)
-            pre = int(round(pre_src * ratio))
-        win = np.ones(len(seg))
-        if pre:
-            win[:pre] = _fade(pre)[0]
-        if m < repeats and len(seg) > seam:
-            win[-seam:] = _fade(seam)[1]
-        at = join - (repeats - m) * unit - guard - pre
-        lo = max(0, -at)
-        hi = min(n, at + len(seg))
-        if hi > at + lo:
-            layer[at + lo:hi] += (seg * win[:, None])[lo:hi - at]
+    def build(take) -> np.ndarray:
+        """The beat layer from `take(lo, hi)`: drums and bass for the edit,
+        drums alone for the beat check, laid the same way."""
+        layer = np.zeros((n, 2), dtype=np.float64)
+        for m in range(repeats + 1):
+            pre_src = min(seam, cut)
+            lo_src, hi_src = cut - pre_src, min(cut + src_unit, n)
+            seg = take(lo_src, hi_src)
+            pre = pre_src
+            if retune:
+                fraction = Fraction(ratio).limit_denominator(4000)
+                seg = resample_poly(seg, fraction.numerator, fraction.denominator, axis=0)
+                pre = int(round(pre_src * ratio))
+            win = np.ones(len(seg))
+            if pre:
+                win[:pre] = _fade(pre)[0]
+            if m < repeats and len(seg) > seam:
+                win[-seam:] = _fade(seam)[1]
+            at = join - (repeats - m) * unit - guard - pre
+            lo = max(0, -at)
+            hi = min(n, at + len(seg))
+            if hi > at + lo:
+                layer[at + lo:hi] += (seg * win[:, None])[lo:hi - at]
+        return layer
+
+    layer = build(lambda lo, hi: a.drums[lo:hi].astype(np.float64) + a.bass[lo:hi])
+    layer_d = build(lambda lo, hi: a.drums[lo:hi].astype(np.float64))
 
     # The level: rising to the join, then out over the hand-over bars.
     gain = np.zeros(n)
@@ -1422,7 +1550,16 @@ def render_underlay(a: Analysis, bars: int, source: Source,
         info["warnings"].append(
             f"the beat would have pushed the song over full scale, so it was "
             f"turned down {-20.0 * np.log10(max(k, 1e-6)):.1f} dB to fit")
-    return out.astype(np.float32), info
+    out = out.astype(np.float32)
+    # The beat is laid under the song, so what can go wrong is the layer's
+    # kicks against the song's own: read the layer by itself across the join
+    # (where the song's drums arrive under it) and at each of its seams.
+    places = [(f"seam {m}", join - (repeats - m) * unit, None) for m in range(1, repeats)]
+    places.append(("join", join, None))
+    drums_out = a.drums.astype(np.float64) + layer_d * (gain * k)[:, None]
+    info["timing"], heard = timing.check(drums_out, rate, a.grid.period, places, "join")
+    info["warnings"].extend(heard)
+    return out, info
 
 
 # ------------------------------------------------------------ files in, out

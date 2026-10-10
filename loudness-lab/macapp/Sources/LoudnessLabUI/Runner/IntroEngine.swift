@@ -83,6 +83,9 @@ final class IntroEngine: ObservableObject {
         /// The finished file drawn the way the original is; nil if the tool
         /// did not send it.
         var envelope: JoinEnvelope?
+        /// How far off the beat the finished file's kicks land at the join
+        /// or exit and at the loop seams; nil if the tool did not measure.
+        var timing: IntroTiming?
         /// A render sits in the drafts folder until it is saved: `url` is the
         /// draft, `savedAs` the copy kept. A batch writes straight to the
         /// output folder, so its renders are not drafts.
@@ -670,12 +673,13 @@ final class IntroEngine: ObservableObject {
         render.tailSeconds = event.tailSeconds ?? 0
         render.style = event.style ?? ""
         render.fadeBars = event.fadeBars ?? 0
+        render.timing = event.timing
         return render
     }
 
     nonisolated static func render(from event: IntroEvent) -> Render? {
         guard let output = event.output, let bars = event.bars else { return nil }
-        return Render(url: URL(fileURLWithPath: output), bars: bars,
+        var render = Render(url: URL(fileURLWithPath: output), bars: bars,
                       loopBars: event.loopBars ?? 4,
                       joinSeconds: event.joinInOutput ?? 0,
                       introSeconds: event.secondsOfIntro ?? 0,
@@ -690,6 +694,8 @@ final class IntroEngine: ObservableObject {
                       leadInBar: event.leadInBar, leadInSeconds: event.leadInSeconds,
                       leadInNote: event.leadInNote,
                       retunedPct: event.retunedPct, tempoOffPct: event.tempoOffPct)
+        render.timing = event.timing
+        return render
     }
 }
 

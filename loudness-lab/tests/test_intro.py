@@ -216,9 +216,11 @@ class TestWhereTheSongArrives(unittest.TestCase):
         # how long the file is.)
         # (Each intro is made to the tempo of the bars the song arrives with,
         # which differ by a few samples between the two joins; that is in
-        # `intro_samples`.)
+        # `intro_samples`. And each song is laid kick to kick on its intro's
+        # beat, which moves it by `join_nudge_samples`.)
         self.assertEqual(len(whole) - len(cut),
-                         join - self.a.join + whole_info["intro_samples"] - info["intro_samples"])
+                         join - self.a.join + whole_info["intro_samples"] - info["intro_samples"]
+                         - whole_info["join_nudge_samples"] + info["join_nudge_samples"])
         self.assertAlmostEqual((join - self.a.join) / RATE, 8 * BAR, delta=0.02)
         self.assertEqual(info["join_bar"], 8)
         self.assertEqual(info["suggested_join_bar"], 8)
@@ -229,7 +231,10 @@ class TestWhereTheSongArrives(unittest.TestCase):
         audio, info = intro.render(self.a, 16, source)
         join, _ = intro.resolve_join(self.a, 8)
         join_out = info["intro_samples"] + round(info["lead_seconds"] * RATE)
-        np.testing.assert_allclose(audio[join_out + 2000:], self.x[join + 2000:], atol=1e-6)
+        # Laid kick to kick (`join_nudge_samples`, nothing on true stems with
+        # an exact grid), and otherwise sample for sample itself.
+        nudge = info["join_nudge_samples"]
+        np.testing.assert_allclose(audio[join_out + 2000:], self.x[join + nudge + 2000:], atol=1e-6)
 
     def test_the_intro_has_the_groove_where_the_original_had_a_pad(self):
         source = intro.candidates(self.a, 4)[0]
@@ -383,7 +388,7 @@ class TestAFillIsNotALoop(unittest.TestCase):
         dev = intro.bar_deviation(self.a)
         fill = np.mean([dev[b] for b in self.fills[1:-1]])
         groove = np.median(dev)
-        self.assertGreater(fill, 0.5)
+        self.assertGreater(fill, intro.FILL_NOTED)
         self.assertLess(groove, 0.2)
 
     def test_a_plain_groove_has_no_fill_anywhere(self):

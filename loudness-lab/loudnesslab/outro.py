@@ -38,7 +38,7 @@ from pathlib import Path
 import numpy as np
 from scipy.signal import resample_poly
 
-from . import intro, write
+from . import intro, timing, write
 from .intro import (Analysis, Source, _fade, _reference, GUARD_S, JOIN_FULL_DB,
                     JOIN_LOOKBACK, JOIN_SUSTAIN, MIN_REPEAT, PICKUP_SHARE,
                     PICKUP_STEPS, RETUNE_MAX, RETUNE_MIN, SEAM_S, LENGTHS,
@@ -141,6 +141,14 @@ def aligned_exit(a: Analysis, exit_bar: int) -> int:
     move is under half a beat, so it is the same beat of the bar as before.
     Otherwise the grid's own line stands."""
     line = int(a.bar_lines[exit_bar])
+    # A line found on a kick (`intro.attack`) is on the beat already: the bar
+    # lines re-lock to the kicks every bar, so there is no drift to take out,
+    # and the kicks' circular mean there is pulled by syncopation instead.
+    # Moving such an exit put Celebration's 119 ms and Kilimanjaro's 27 ms off
+    # the beat, against 4.5 and 12 left where it was (2026-10-09). A line the
+    # grid carried is still moved: Jungle Love's was 93 ms off, and 18 moved.
+    if exit_bar < len(a.snapped) and a.snapped[exit_bar]:
+        return line
     cached = a.cache.get(("aligned_exit", exit_bar))
     if cached is not None:
         return cached
@@ -275,7 +283,11 @@ def render(a: Analysis, bars: int, source: Source,
     retune = RETUNE_MIN < abs(ratio - 1.0) <= RETUNE_MAX
     unit = int(round(src_unit * ratio)) if retune else src_unit
     repeats = bars // loop_bars
-    end = exit_ + repeats * unit                  # the file's length, on the grid
+    # The loop's first kick is laid where the song's own kick at the exit is,
+    # matched kick to kick (`intro.kick_offset`), not front to front.
+    nudge = intro.kick_offset(a, int(source.start), exit_)
+    beat0 = exit_ + nudge                         # where the loop's repeats are counted from
+    end = beat0 + repeats * unit                  # the file's length, on the grid
     stems = (style in ("beat", "strip") and len(a.bass) == len(a.instrumental)
              and len(a.other) == len(a.instrumental))
     bass_in = round(repeats * 0.25)
@@ -299,7 +311,7 @@ def render(a: Analysis, bars: int, source: Source,
 
     cut = max(source.start - guard, 0)             # where each repeat's audio begins
     # Repeat m begins at the grid's exit + m * unit; m = -1 is the one before.
-    starts = {m: exit_ + m * unit for m in range(-1, repeats + 1)}
+    starts = {m: beat0 + m * unit for m in range(-1, repeats + 1)}
 
     def lay(pick, first: int, count: int, size: int) -> np.ndarray:
         """Repeats `first` .. `first + count - 1` of `pick(m, lo, hi)` placed
@@ -325,64 +337,81 @@ def render(a: Analysis, bars: int, source: Source,
                 buf[at + lo:hi] += (seg * win[:, None])[lo:hi - at]
         return buf
 
-    loop = lay(layer, 0, repeats, end)
-    loop_peak = float(np.abs(loop[exit_:]).max()) if end > exit_ else 0.0
-    loop_gain = min(1.0, CEILING / loop_peak) if loop_peak > 0 else 1.0
-    loop *= loop_gain
+    def beat_only(m: int, lo: int, hi: int) -> np.ndarray:
+        return a.drums[lo:hi].astype(np.float64) + a.bass[lo:hi]
 
-    # Where the original gives way to the loop: the exit plus its vocal tail,
-    # a guard ahead of the attack there. The loop has been on the grid since
-    # the exit; it is simply not heard until now.
+    def drums_only(m: int, lo: int, hi: int) -> np.ndarray:
+        return a.drums[lo:hi].astype(np.float64)
+
     x_end = min(exit_ + tail - guard, n)
-    fade_len = min(seam, x_end)
-    out = np.zeros((end, 2), dtype=np.float64)
-    gate = np.zeros(end)
-    gate[x_end:] = 1.0
-    if fade_len:
-        gate[x_end - fade_len:x_end] = _fade(fade_len)[0]
-    out += loop * gate[:, None]
-    original = a.original[:x_end].astype(np.float64)
-    window = np.ones(len(original))
-    if fade_len:
-        window[-fade_len:] = _fade(fade_len)[1]
-    out[:x_end] += original * window[:, None]
-
-    # The hand-in: the loop's drums and bass, fading in under the song's last
-    # stretch and handing over to the loop proper at x_end.
     hand_bars = handin if stems else 0.0
-    if hand_bars > 0:
-        def beat_only(m: int, lo: int, hi: int) -> np.ndarray:
-            return a.drums[lo:hi].astype(np.float64) + a.bass[lo:hi]
-        hand = lay(beat_only, -1, 2, end)
-        h = min(int(round(hand_bars * unit / loop_bars)), x_end)
-        if h > 0:
-            ramp_up = np.sin(np.linspace(0.0, np.pi / 2, h, endpoint=False)) ** 2
-            added = hand[x_end - h:x_end] * ramp_up[:, None]
-            kept = out[x_end - h:x_end]
-            # Under a loud master there may be no room to double the drums and
-            # bass: take the most of them that fits, down to none.
-            over = (np.sign(kept) == np.sign(added)) & (np.abs(kept) + np.abs(added) > CEILING)
-            if over.any():
-                room = (CEILING - np.abs(kept[over])) / np.maximum(np.abs(added[over]), 1e-12)
-                added = added * float(np.clip(room.min(), 0.0, 1.0))
-            out[x_end - h:x_end] += added
 
-    # The ending: a fade over the last bars, or a stop a few milliseconds long
-    # so the last sample is not a click.
-    stop = end - guard
-    fade_samples = int(round(fade_bars * unit / loop_bars)) if fade_bars > 0 else 0
-    fade_samples = min(fade_samples, repeats * unit)
-    if fade_samples > 0:
-        ramp = np.cos(np.linspace(0.0, np.pi / 2, fade_samples, endpoint=False)) ** 2
-        out[end - fade_samples:] *= ramp[:, None]
-    elif stop - seam >= 0:
-        out[stop - seam:stop] *= _fade(seam)[1][:, None]
-        out[stop:] = 0.0
+    def assemble(pick, hand_pick, song: np.ndarray, loop_gain: float | None):
+        """(edit, the loop's gain) from `pick`, `hand_pick` and `song`. Called
+        again with the drums alone, at the first call's gain, for the beat
+        check (see `intro.render`)."""
+        loop = lay(pick, 0, repeats, end)
+        if loop_gain is None:
+            loop_peak = float(np.abs(loop[exit_:]).max()) if end > exit_ else 0.0
+            loop_gain = min(1.0, CEILING / loop_peak) if loop_peak > 0 else 1.0
+        loop *= loop_gain
 
-    # The seam itself (an equal-power crossfade of two full-level signals) can
-    # reach past full scale for a few milliseconds; hold it there.
-    edge = slice(max(0, x_end - max(fade_len, 1)), min(end, x_end + max(fade_len, 1)))
-    np.clip(out[edge], -1.0, 1.0, out=out[edge])
+        # Where the original gives way to the loop: the exit plus its vocal tail,
+        # a guard ahead of the attack there. The loop has been on the grid since
+        # the exit; it is simply not heard until now. (`x_end`, above.)
+        fade_len = min(seam, x_end)
+        out = np.zeros((end, 2), dtype=np.float64)
+        gate = np.zeros(end)
+        gate[x_end:] = 1.0
+        if fade_len:
+            gate[x_end - fade_len:x_end] = _fade(fade_len)[0]
+        out += loop * gate[:, None]
+        original = song[:x_end].astype(np.float64)
+        window = np.ones(len(original))
+        if fade_len:
+            window[-fade_len:] = _fade(fade_len)[1]
+        out[:x_end] += original * window[:, None]
+
+        # The hand-in: the loop's drums and bass, fading in under the song's last
+        # stretch and handing over to the loop proper at x_end.
+        if hand_bars > 0:
+            hand = lay(hand_pick, -1, 2, end)
+            h = min(int(round(hand_bars * unit / loop_bars)), x_end)
+            if h > 0:
+                ramp_up = np.sin(np.linspace(0.0, np.pi / 2, h, endpoint=False)) ** 2
+                added = hand[x_end - h:x_end] * ramp_up[:, None]
+                kept = out[x_end - h:x_end]
+                # Under a loud master there may be no room to double the drums and
+                # bass: take the most of them that fits, down to none.
+                over = (np.sign(kept) == np.sign(added)) & (np.abs(kept) + np.abs(added) > CEILING)
+                if over.any():
+                    room = (CEILING - np.abs(kept[over])) / np.maximum(np.abs(added[over]), 1e-12)
+                    added = added * float(np.clip(room.min(), 0.0, 1.0))
+                out[x_end - h:x_end] += added
+
+        # The ending: a fade over the last bars, or a stop a few milliseconds long
+        # so the last sample is not a click.
+        stop = end - guard
+        fade_samples = int(round(fade_bars * unit / loop_bars)) if fade_bars > 0 else 0
+        fade_samples = min(fade_samples, repeats * unit)
+        if fade_samples > 0:
+            ramp = np.cos(np.linspace(0.0, np.pi / 2, fade_samples, endpoint=False)) ** 2
+            out[end - fade_samples:] *= ramp[:, None]
+        elif stop - seam >= 0:
+            out[stop - seam:stop] *= _fade(seam)[1][:, None]
+            out[stop:] = 0.0
+
+        # The seam itself (an equal-power crossfade of two full-level signals) can
+        # reach past full scale for a few milliseconds; hold it there.
+        edge = slice(max(0, x_end - max(fade_len, 1)), min(end, x_end + max(fade_len, 1)))
+        np.clip(out[edge], -1.0, 1.0, out=out[edge])
+
+        return out, loop_gain
+
+    out, loop_gain = assemble(layer, beat_only, a.original, None)
+    drums_out = None
+    if len(a.drums) == len(a.original):
+        drums_out, _ = assemble(drums_only, drums_only, a.drums, loop_gain)
 
     info = {
         "bpm": round(60.0 * rate * BEATS_PER_BAR * loop_bars / unit, 3),
@@ -401,6 +430,7 @@ def render(a: Analysis, bars: int, source: Source,
         "tempo_off_pct": round((ratio - 1.0) * 100.0, 3) if not retune else 0.0,
         "exit_bar": exit_bar,
         "exit_seconds": round(exit_ / rate, 3),
+        "exit_nudge_ms": round(nudge / rate * 1000.0, 2),
         "exit_moved_ms": round((exit_ - int(a.bar_lines[exit_bar])) / rate * 1000.0, 1),
         "tail_seconds": round(tail / rate, 3),
         "suggested_exit_bar": a.suggested_exit_bar,
@@ -429,7 +459,15 @@ def render(a: Analysis, bars: int, source: Source,
         info["warnings"].append(
             "no vocal-free stretch to loop: the outro carries some vocal "
             "bleed from the source bars")
-    return out.astype(np.float32), info
+    out = out.astype(np.float32)
+    # The exit is read from where the loop is heard (past the vocal tail),
+    # against the beat the song kept up to the exit.
+    places = [("exit", exit_, x_end)]
+    places += [(f"seam {m}", beat0 + m * unit, None) for m in range(1, repeats)]
+    info["timing"], heard = timing.check(out if drums_out is None else drums_out,
+                                         rate, g.period, places, "exit")
+    info["warnings"].extend(heard)
+    return out, info
 
 
 # ----------------------------------------------------------------- writing

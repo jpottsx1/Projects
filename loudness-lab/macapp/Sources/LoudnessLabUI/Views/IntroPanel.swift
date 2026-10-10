@@ -315,7 +315,8 @@ struct IntroPanel: View {
                                   + "resampling the loop; more is left alone and will be heard.")
                     }
                     if !source.snapped { Chip("grid-timed", tint: .orange) }
-                    if (source.fill ?? 0) >= 0.5 {
+                    // intro.FILL_NOTED in the Python.
+                    if (source.fill ?? 0) >= 0.4 {
                         Chip("has a fill", tint: .orange)
                             .help("A bar here differs from the groove around it, and a loop "
                                   + "repeats it every time, the last one running into the song.")
@@ -399,6 +400,18 @@ struct IntroPanel: View {
         }
     }
 
+    /// "On the beat: the join 0.4 ms, the seams within 1.2 ms", from the
+    /// file's own kicks. Nil when nothing was measured.
+    static func timingLine(_ render: IntroEngine.Render) -> String? {
+        guard let timing = render.timing else { return nil }
+        let edge = render.kind == .outro ? "the exit" : "the join"
+        var parts: [String] = []
+        if let ms = timing.edgeOffsetMs { parts.append(String(format: "%@ %.1f ms", edge, abs(ms))) }
+        if let ms = timing.worstSeamMs { parts.append(String(format: "the seams within %.1f ms", abs(ms))) }
+        guard !parts.isEmpty else { return nil }
+        return "Beat check: " + parts.joined(separator: ", ")
+    }
+
     private func resultRow(_ render: IntroEngine.Render) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(render.name).fontWeight(.semibold).lineLimit(1).truncationMode(.middle)
@@ -447,6 +460,11 @@ struct IntroPanel: View {
                      + "\(JoinMath.clock(render.cutSeconds)) of the original is replaced.")
                     .font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+            }
+            if let line = Self.timingLine(render) {
+                Text(line).font(.caption).foregroundStyle(.secondary)
+                    .help("Measured off the finished file: how far its kicks land from where "
+                          + "the bars before each seam say they should. Under 5 ms is on the beat.")
             }
             ForEach(render.warnings, id: \.self) { warning in
                 Label(warning, systemImage: "exclamationmark.triangle")

@@ -228,13 +228,15 @@ def candidates(a: Analysis, loop_bars: int = DEFAULT_LOOP_BARS, count: int = 5,
     """The best stretches of `loop_bars` bars to loop, best first, judged
     against the bars the song plays up to the exit."""
     exit_bar = a.suggested_exit_bar if exit_bar is None else exit_bar
-    return intro.candidates(a, loop_bars, count, join_bar=_reference_bar(exit_bar, loop_bars))
+    return intro.candidates(a, loop_bars, count, join_bar=_reference_bar(exit_bar, loop_bars),
+                            exit_bar=exit_bar)
 
 
 def source_at(a: Analysis, bar: int, loop_bars: int, exit_bar: int | None = None) -> Source:
     """A hand-picked stretch, measured like any other."""
     exit_bar = a.suggested_exit_bar if exit_bar is None else exit_bar
-    return intro.source_at(a, bar, loop_bars, join_bar=_reference_bar(exit_bar, loop_bars))
+    return intro.source_at(a, bar, loop_bars, join_bar=_reference_bar(exit_bar, loop_bars),
+                           exit_bar=exit_bar)
 
 
 # --------------------------------------------------------------- rendering
@@ -464,8 +466,9 @@ def render(a: Analysis, bars: int, source: Source,
     # against the beat the song kept up to the exit.
     places = [("exit", exit_, x_end)]
     places += [(f"seam {m}", beat0 + m * unit, None) for m in range(1, repeats)]
+    beat_len = g.period * (ratio if retune else 1.0)          # see `intro.render`
     info["timing"], heard = timing.check(out if drums_out is None else drums_out,
-                                         rate, g.period, places, "exit")
+                                         rate, beat_len, places, "exit")
     info["warnings"].extend(heard)
     return out, info
 

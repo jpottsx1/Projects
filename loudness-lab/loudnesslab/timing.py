@@ -54,13 +54,23 @@ def _fit(kicks: np.ndarray, period: float, anchor: float) -> tuple[float, float]
     left out rather than allowed to bend the line."""
     if kicks.size < MIN_KICKS:
         return None
-    index = np.round((kicks - anchor) / period)
-    residual = kicks - (anchor + index * period)
-    on = np.abs(residual) <= 0.2 * period
-    if on.sum() < MIN_KICKS or np.unique(index[on]).size < 2:
-        return None
-    slope, intercept = np.polyfit(index[on], kicks[on].astype(np.float64), 1)
-    return float(slope), float(intercept)
+    # Fitted, then fitted again with the beat it found: a loop resampled to
+    # another tempo has beats a percent off `period`, which over four bars is
+    # enough to count the wrong kicks as on the beat. We Are Family's loop,
+    # resampled 1.1%, read 29 ms at its seams with the song's beat and 10.5
+    # with its own (2026-10-09).
+    slope, intercept = period, anchor
+    for _ in range(3):
+        index = np.round((kicks - intercept) / slope)
+        residual = kicks - (intercept + index * slope)
+        on = np.abs(residual) <= 0.2 * period
+        if on.sum() < MIN_KICKS or np.unique(index[on]).size < 2:
+            return None
+        slope, intercept = np.polyfit(index[on], kicks[on].astype(np.float64), 1)
+        slope, intercept = float(slope), float(intercept)
+    # Counted from the kick nearest the anchor, as callers expect.
+    shift = np.round((anchor - intercept) / slope)
+    return slope, intercept + shift * slope
 
 
 def meeting(kicks: np.ndarray, strengths: np.ndarray, at: int, period: float,

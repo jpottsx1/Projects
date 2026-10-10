@@ -315,6 +315,11 @@ struct IntroPanel: View {
                                   + "resampling the loop; more is left alone and will be heard.")
                     }
                     if !source.snapped { Chip("grid-timed", tint: .orange) }
+                    if let slip = Self.worstSlip(source), slip > 5 {
+                        Chip(String(format: "off the beat %.0f ms", slip), tint: .orange)
+                            .help("Measured before rendering: this loop's kicks would land this far "
+                                  + "from the beat at its seams or where it meets the song.")
+                    }
                     // intro.FILL_NOTED in the Python.
                     if (source.fill ?? 0) >= 0.4 {
                         Chip("has a fill", tint: .orange)
@@ -398,6 +403,13 @@ struct IntroPanel: View {
                 if engine.playing != nil { AuditionBar(player: engine.player) }
             }
         }
+    }
+
+    /// The larger of a loop's predicted slips, at its seams or at the join or
+    /// exit; nil when neither could be measured.
+    static func worstSlip(_ source: IntroSource) -> Double? {
+        let slips = [source.seamMs, source.edgeMs].compactMap { $0 }.map(abs)
+        return slips.max()
     }
 
     /// "On the beat: the join 0.4 ms, the seams within 1.2 ms", from the

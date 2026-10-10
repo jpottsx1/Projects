@@ -191,6 +191,11 @@ struct IntroSource: Decodable, Identifiable, Equatable {
     var feel: Double? = nil
     var tempoOff: Double? = nil
     var chromaMatch: Double? = nil
+    /// The beat check run on this loop before it is rendered: how far the
+    /// beat would slip at its seams, and where the song arrives or is left,
+    /// in ms. Nil where there were too few kicks to say.
+    var seamMs: Double? = nil
+    var edgeMs: Double? = nil
 
     var id: Int { bar }
 
@@ -201,6 +206,8 @@ struct IntroSource: Decodable, Identifiable, Equatable {
         case vocalDB = "vocal_db"
         case vocalFree = "vocal_free"
         case repeatScore = "repeat"
+        case seamMs = "seam_ms"
+        case edgeMs = "edge_ms"
     }
 }
 

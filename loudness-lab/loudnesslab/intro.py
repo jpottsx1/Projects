@@ -162,6 +162,19 @@ RETUNE_MAX = 0.012
 # change key at the seam.
 LEAD_IN_JUMP_DB = 10.0
 LEAD_IN_MATCH = 0.8
+# How far a loop's beat slips at its own seams, and where the song arrives or
+# is left (`beat_fit`), costs this many dB
+# a millisecond past SEAM_OK_MS: a slip is heard on every repeat, the last one
+# right before the song. We Are Family and Kilimanjaro both chose their own
+# loose opening bars (37 and 11 ms) on vocal and feel alone, and on its seams
+# alone Kilimanjaro's outro chose a steady loop that left the song 49 ms off
+# the beat, where the next one down left it 10 ms off (2026-10-09). A
+# loop whose seams cannot be measured (too few kicks in it) is charged as if
+# it slipped SEAM_UNKNOWN_MS: when it was charged nothing, Jungle Love gave up
+# a loop measured at 0.8 ms for one nobody could check.
+SEAM_OK_MS = 2.0
+SEAM_WEIGHT = 1.0
+SEAM_UNKNOWN_MS = 10.0
 
 
 @dataclass
@@ -201,6 +214,8 @@ class Source:
     tempo_off: float = 0.0          # its bar length over theirs, minus 1
     chroma_match: float = 1.0       # pitch content, 1 = the same
     level_vs_join_db: float = 0.0   # its instrumental level minus theirs
+    seam_ms: float | None = 0.0     # the beat's slip at its seams, looped (`beat_fit`); None: unmeasurable
+    edge_ms: float | None = 0.0     # ... and where the song arrives or is left (`beat_fit`)
 
 
 @dataclass
@@ -927,7 +942,11 @@ def cost(s: Source) -> float:
             + FEEL_WEIGHT * s.feel
             + TEMPO_WEIGHT * 100.0 * abs(s.tempo_off)
             + CHROMA_WEIGHT * (1.0 - s.chroma_match)
-            + JOIN_LEVEL_WEIGHT * abs(s.level_vs_join_db))
+            + JOIN_LEVEL_WEIGHT * abs(s.level_vs_join_db)
+            + SEAM_WEIGHT * max(0.0, abs(SEAM_UNKNOWN_MS if s.seam_ms is None else s.seam_ms)
+                                - SEAM_OK_MS)
+            + SEAM_WEIGHT * max(0.0, abs(SEAM_UNKNOWN_MS if s.edge_ms is None else s.edge_ms)
+                                - SEAM_OK_MS))
 
 
 def _bar_powers(a: Analysis) -> dict | None:
@@ -1003,8 +1022,72 @@ def _measure(a: Analysis, powers: dict, i: int, loop_bars: int,
                                           int(a.bar_lines[end] - a.bar_lines[i]))))
 
 
+def beat_fit(a: Analysis, s: Source, loop_bars: int, join_bar: int | None = None,
+             exit_bar: int | None = None) -> tuple[float | None, float | None]:
+    """(slip at the seams, slip at the join or exit), in ms, of `s` made into
+    an edit: its drums laid end to end at `s.length`, met by the song's own
+    drums the way `render` (an intro, at `join_bar`) or `outro.render` (at
+    `exit_bar`) meets them, and put through the same beat check a finished
+    edit gets (`timing.check`). So what ranks a loop is what will be
+    measured of it. Not resampled: a uniform change of speed moves neither.
+    None where there are too few kicks to say."""
+    key = ("beat_fit", s.start, s.length, join_bar, exit_bar)
+    if key in a.cache:
+        return a.cache[key]
+    start, length = int(s.start), int(s.length)
+    rate, period = a.rate, a.grid.period
+    guard = int(GUARD_S * rate)
+    n = len(a.drums)
+    result: tuple[float | None, float | None] = (None, None)
+    if length > 0 and start - guard >= 0 and start - guard + length <= n:
+        beats = BEATS_PER_BAR * loop_bars
+        first = -(-timing.WINDOW_BEATS // beats)            # seams with a full window before
+        # Cut where a render cuts, a guard ahead of the kick, so the kick's
+        # front is whole at every seam.
+        piece = a.drums[start - guard:start - guard + length].astype(np.float64)
+        reach = int((timing.WINDOW_BEATS + 4) * period)
+        if exit_bar is None:
+            from_bar = a.suggested_join_bar if join_bar is None else join_bar
+            join, pickup = resolve_join(a, from_bar)
+            nudge = kick_offset(a, start, join)
+            # One repeat ahead of the seams read: the detector reads the very
+            # first kick of a file late, and a window reaching back to it
+            # put 1.8 ms on every seam of an exact grid.
+            repeats = first + 3
+            tiled = np.concatenate([piece] * (repeats + 1))
+            arrive = repeats * length + guard                # where the song's first beat lands
+            o_start = max(0, join - pickup - guard)
+            at = o_start + arrive - join - nudge
+            song = a.drums[o_start:min(n, join + reach)].astype(np.float64)
+            out = np.zeros((at + len(song), 2))
+            out[:min(at, len(tiled))] = tiled[:min(at, len(tiled))]
+            out[at:] = song
+            places = [(f"seam {k}", k * length + guard, None) for k in (first + 1, first + 2)]
+            places.append(("edge", arrive, None))
+        else:
+            from . import outro
+            exit_, tail = outro.resolve_exit(a, exit_bar)
+            beat0 = exit_ + kick_offset(a, start, exit_)
+            x_end = min(exit_ + tail - guard, n)
+            base = max(0, exit_ - reach)
+            repeats = first + 3
+            tiled = np.concatenate([piece] * repeats)
+            loop_at = beat0 - guard - base
+            out = np.zeros((loop_at + len(tiled), 2))
+            out[:x_end - base] = a.drums[base:x_end]
+            lo = max(x_end - base, loop_at)                  # the song may stop just short of the loop
+            out[lo:] = tiled[lo - loop_at:]
+            places = [("edge", exit_ - base, x_end - base)]
+            places += [(f"seam {k}", loop_at + k * length + guard, None) for k in (first, first + 1)]
+        report, _ = timing.check(out.astype(np.float32), rate, period, places, "edge")
+        result = (report["worst_seam_ms"], report["edge_offset_ms"])
+    a.cache[key] = result
+    return result
+
+
 def candidates(a: Analysis, loop_bars: int = DEFAULT_LOOP_BARS,
-               count: int = 5, join_bar: int | None = None) -> list[Source]:
+               count: int = 5, join_bar: int | None = None,
+               exit_bar: int | None = None) -> list[Source]:
     """The best stretches of `loop_bars` bars to loop, best first.
 
     Measured per bar: the vocal stem's power against the instrumental's,
@@ -1054,12 +1137,13 @@ def candidates(a: Analysis, loop_bars: int = DEFAULT_LOOP_BARS,
     for s in shortlist:
         s.length, s.repeat = refine_length(a, s.bar, loop_bars)
         s.tempo_off = s.length / loop_bars / ref["bar_len"] - 1.0
+        s.seam_ms, s.edge_ms = beat_fit(a, s, loop_bars, join_bar, exit_bar)
     shortlist.sort(key=cost)
     return shortlist[:count]
 
 
 def source_at(a: Analysis, bar: int, loop_bars: int,
-              join_bar: int | None = None) -> Source:
+              join_bar: int | None = None, exit_bar: int | None = None) -> Source:
     """The stretch starting `bar` bars after the join, for a hand-picked
     loop: measured like any other, whether or not it would have ranked.
     Raises if it runs off the end."""
@@ -1073,6 +1157,7 @@ def source_at(a: Analysis, bar: int, loop_bars: int,
     source = _measure(a, _bar_powers(a), bar, loop_bars, ref)
     source.length, source.repeat = refine_length(a, bar, loop_bars)
     source.tempo_off = source.length / loop_bars / ref["bar_len"] - 1.0
+    source.seam_ms, source.edge_ms = beat_fit(a, source, loop_bars, join_bar, exit_bar)
     return source
 
 
@@ -1409,8 +1494,13 @@ def render(a: Analysis, bars: int, source: Source,
     if lead_in_bar is not None:
         places.append(("lead-in", join_out - flen + lead, None))
     places.append(("join", join_out + lead, None))
+    # The beat the loop actually plays at: resampled to the song's tempo, a
+    # loop's beat is up to RETUNE_MAX off the grid's, and a check told the
+    # grid's beat counts a syncopated kick wrong (We Are Family's seams read
+    # 32 ms with it and 3 with the loop's own, 2026-10-09).
+    beat_len = g.period * (ratio if retune else 1.0)
     info["timing"], heard = timing.check(out if drums_out is None else drums_out,
-                                         rate, g.period, places, "join")
+                                         rate, beat_len, places, "join")
     info["warnings"].extend(heard)
     return out, info
 
@@ -1557,7 +1647,8 @@ def render_underlay(a: Analysis, bars: int, source: Source,
     places = [(f"seam {m}", join - (repeats - m) * unit, None) for m in range(1, repeats)]
     places.append(("join", join, None))
     drums_out = a.drums.astype(np.float64) + layer_d * (gain * k)[:, None]
-    info["timing"], heard = timing.check(drums_out, rate, a.grid.period, places, "join")
+    beat_len = a.grid.period * (ratio if retune else 1.0)     # see `render`
+    info["timing"], heard = timing.check(drums_out, rate, beat_len, places, "join")
     info["warnings"].extend(heard)
     return out, info
 
@@ -1861,6 +1952,8 @@ def source_fields(s: Source) -> dict:
         "tempo_off": round(float(s.tempo_off), 5),
         "chroma_match": round(float(s.chroma_match), 3),
         "level_vs_join_db": round(float(s.level_vs_join_db), 1),
+        "seam_ms": None if s.seam_ms is None else round(float(s.seam_ms), 1),
+        "edge_ms": None if s.edge_ms is None else round(float(s.edge_ms), 1),
     }
 
 

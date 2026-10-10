@@ -281,6 +281,11 @@ final class Engine: ObservableObject {
             if let reference = event.reference { say("Reference: \(reference)") }
             say("\(event.selected ?? 0) track(s) to process"
                 + (event.format.map { " as \($0)" } ?? "") + ".")
+            // Choosing is over, but the first per-track report only comes
+            // when a track is finished -- after any drum separation and the
+            // render, which for one track is most of the run. Say what is
+            // happening meanwhile, not what already did.
+            progressNote = "Processing \(event.selected ?? 0) track(s)…"
             if let duplicates = event.duplicates, duplicates > 0 {
                 say("  \(duplicates) duplicate(s) skipped — same artist and "
                     + "title already in this batch.")

@@ -254,7 +254,7 @@ struct ContentView: View {
                 Button(engine.isRunning ? "Running…" : "Process") {
                     if replaceOriginals { confirmingReplace = true } else { start() }
                 }
-                    .disabled(engine.isRunning || folders.isEmpty
+                    .disabled(engine.isRunning || runFolders.isEmpty
                               || queue.includedPaths.isEmpty)
                     .keyboardShortcut(.return, modifiers: .command)
                     .help(replaceOriginals
@@ -438,11 +438,26 @@ struct ContentView: View {
         }
     }
 
+    /// What a run works on: the folders added, plus each ticked track none of
+    /// them contains, as the file itself. A host can send single files (a
+    /// crate, a playlist) with no folder added at all; without this the
+    /// queue showed ticked tracks and Process stayed greyed out. The files,
+    /// not their parent folders: the CLI measures everything under a root,
+    /// so a parent folder made one ticked track measure its whole folder.
+    private var runFolders: [URL] {
+        var result = folders
+        let roots = folders.map { $0.standardizedFileURL.path + "/" }
+        for path in queue.includedPaths.sorted() where !roots.contains(where: { path.hasPrefix($0) }) {
+            result.append(URL(fileURLWithPath: path))
+        }
+        return result
+    }
+
     private func start() {
         player.stop()
         chosen = nil
         Task {
-            await engine.run(folders: folders, profile: profile,
+            await engine.run(folders: runFolders, profile: profile,
                              limit: limited ? limit : Int.max,
                              compare: compare && !replaceOriginals,
                              dryRun: dryRun && !replaceOriginals,
@@ -462,7 +477,7 @@ struct ContentView: View {
         player.stop()
         savingFinished = true
         Task {
-            await engine.saveFinished(track, folders: folders, profile: profile,
+            await engine.saveFinished(track, folders: runFolders, profile: profile,
                                       outputDirectory: outputDirectory,
                                       databaseURL: databaseURL, format: format)
             chosen = engine.manifest?.tracks.first { $0.source == track.source }

@@ -909,11 +909,17 @@ def cmd_subbass(args: argparse.Namespace) -> int:
         reporter = None
     else:
         reporter = _progress_printer(start)
+    # With a selection, measure the selected tracks and nothing else. The
+    # folders still scope the processing below, but a host that ticked one
+    # track out of a 5,000-track library should not wait for all 5,000 to be
+    # measured first. Not under --auto: a reference named by label is one of
+    # the folders given, and its numbers have to be current.
+    narrow = selected is not None and not args.auto
+    roots = [Path(p) for p in selected] if narrow else list(args.path)
     # A reference given as a folder is measured too, if it is not one of
     # the folders being processed -- it only has to be in the library, and
     # choosing a new one should not first need a separate Measure. Only
     # measured: the processing scope below is still `args.path`.
-    roots = list(args.path)
     for wanted in (wanted_references if args.auto else []):
         chosen = reference_folder(wanted)
         if chosen is None:

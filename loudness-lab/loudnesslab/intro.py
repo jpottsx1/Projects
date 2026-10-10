@@ -118,6 +118,12 @@ PICKUP_SHARE = 0.25
 VOCAL_FREE_DB = -20.0
 MIN_DRUMS_DB = -6.0
 MIN_LEVEL_DB = -6.0
+# ...or, however far under the typical bar, within this of the bars the song
+# arrives with: a loop that sounds like the bars it leads into is the point.
+# The Cult's "Rain" opens with twelve bars of drums and band 8 dB under its
+# typical bar; the level floor alone threw them out, and the intro was built
+# from a chorus 7 dB louder than the opening it led into (2026-10-10).
+NEAR_JOIN_DB = 3.0
 # A loop's drums should come round again one loop later (Pearson r of the
 # drum envelope of its first bar against the same place a loop on). Each
 # step short of 1 costs this many dB of vocal in the ranking, and below
@@ -652,14 +658,12 @@ STEADY_LOOKAHEAD = 4
 STEADY_MS = 5.0
 
 
-# The loops `steady_join` puts through the beat check at each bar it tries: the
-# best few on everything else. All twelve made analysing Jungle Love 28 s slower.
-STEADY_SHORTLIST = 4
-
-
 def _best_join_ms(a: Analysis, bar: int) -> float | None:
-    found = candidates(a, DEFAULT_LOOP_BARS, count=1, join_bar=bar,
-                       shortlist_size=STEADY_SHORTLIST)
+    # The same ranking the loop list uses, so this judges the loop that will
+    # be offered. Ranking only the best four on everything else (to save
+    # time) judged a different loop: Let's Groove's join was moved off a bar
+    # its best loop meets 1 ms out, onto one met 19-33 ms out (2026-10-10).
+    found = candidates(a, DEFAULT_LOOP_BARS, count=1, join_bar=bar)
     return found[0].edge_ms if found else None
 
 
@@ -1162,7 +1166,8 @@ def candidates(a: Analysis, loop_bars: int = DEFAULT_LOOP_BARS,
              for i in range(0, bars - loop_bars + 1)]
 
     def eligible(s: Source) -> bool:
-        return s.drums_db >= MIN_DRUMS_DB and s.level_db >= MIN_LEVEL_DB
+        return s.drums_db >= MIN_DRUMS_DB and (s.level_db >= MIN_LEVEL_DB
+                                               or abs(s.level_vs_join_db) <= NEAR_JOIN_DB)
 
     # A loop whose two ends are real kicks has a length measured off the
     # record; one whose ends are the grid's guess has the grid's error in

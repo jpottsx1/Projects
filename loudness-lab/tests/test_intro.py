@@ -164,6 +164,47 @@ class TestTheJoin(unittest.TestCase):
             intro.analyse(x, parts, RATE, None)
 
 
+class TestASongThatSettlesIn(unittest.TestCase):
+    """A record whose first bars run off its own beat and settle into it, a
+    hit at a time (Jungle Love's first hits are 60, 30, 12 ms ahead of its
+    groove, then on it): no loop can meet those bars, so the song arrives at
+    the first one that is on its beat."""
+
+    @classmethod
+    def setUpClass(cls):
+        _, parts, _ = song(breakdown=range(0, 0))
+        beat = int(BEAT * RATE)
+        parts = {k: v.copy() for k, v in parts.items()}
+        # Each of the first eight beats late by less than the one before.
+        for i, late_ms in enumerate((60, 50, 40, 32, 24, 16, 10, 6)):
+            d = int(late_ms / 1000 * RATE)
+            for y in parts.values():
+                seg = y[i * beat:(i + 1) * beat].copy()
+                y[i * beat:(i + 1) * beat] = 0
+                y[i * beat + d:(i + 1) * beat] = seg[:beat - d]
+        cls.x = sum(parts.values()).astype(np.float32)
+        cls.a = intro.analyse(cls.x, parts, RATE, BPM)
+
+    def test_no_loop_meets_the_song_on_its_first_bars(self):
+        self.assertGreater(abs(intro._best_join_ms(self.a, 0)), intro.STEADY_MS)
+        self.assertLess(abs(intro._best_join_ms(self.a, 2)), 1.0)
+
+    def test_the_song_arrives_at_the_first_bar_on_its_beat(self):
+        self.assertEqual(self.a.suggested_join_bar, 2)
+        self.assertIn("not yet on its own beat", self.a.join_reason)
+
+    def test_a_song_on_its_beat_keeps_its_join(self):
+        x, parts, _ = song()
+        a = intro.analyse(x, parts, RATE, BPM)
+        self.assertEqual(a.suggested_join_bar, 0)
+        self.assertNotIn("moved on", a.join_reason)
+
+    def test_and_the_intro_meets_it_on_the_beat(self):
+        source = intro.candidates(self.a, 4)[0]
+        _, info = intro.render(self.a, 16, source, 4)
+        self.assertLess(abs(info["timing"]["join_offset_ms"]), 2.0)
+
+
 class TestWhereTheSongArrives(unittest.TestCase):
     """The song's own opening is cut out and the intro takes its place, so
     where the song joins matters: at the first bar where the groove lands."""

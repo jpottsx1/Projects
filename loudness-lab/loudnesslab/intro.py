@@ -606,6 +606,14 @@ def _layout(x: np.ndarray, instrumental: np.ndarray, vocals: np.ndarray,
         **({} if bass is None else {"bass": bass}),
         **({} if other is None else {"other": other}))
     analysis.suggested_join_bar, analysis.join_reason = suggest_join(analysis)
+    first = analysis.suggested_join_bar
+    steady, missed, met = steady_join(analysis, first)
+    if steady != first:
+        analysis.join_reason += (
+            f"; moved on to bar {steady}: the song is not yet on its own beat at "
+            f"bar {first}, where the best loop meets it {missed:.0f} ms off "
+            f"({met:.0f} ms at bar {steady})")
+        analysis.suggested_join_bar = steady
     from . import outro        # outro imports this module, so not at the top
     analysis.suggested_exit_bar, analysis.exit_reason = outro.suggest_exit(analysis)
     return analysis
@@ -630,6 +638,44 @@ def rephase(a: Analysis, beats: int, half_beats: int = 0) -> Analysis:
 
 
 # ------------------------------------------------------------ where it joins
+
+# A song that settles into its beat a bar or two in: when the best loop cannot
+# meet the song at the suggested join within STEADY_MS (`beat_fit`), the join
+# moves on, up to STEADY_LOOKAHEAD bars, to the first bar where one meets it in
+# at most half that. Jungle Love's first hits run 52 and 32 ms ahead of its
+# groove; joined at bar 0 the intro was 22-25 ms off however it was laid, at
+# bar 2 it is 1.8 (2026-10-10). Judged by the join itself and not by how far a
+# bar strays from the beat of bars further on: a live drummer's tempo moves
+# that far over six bars, and that rule moved I Will Survive off a join that
+# was 0.7 ms out.
+STEADY_LOOKAHEAD = 4
+STEADY_MS = 5.0
+
+
+# The loops `steady_join` puts through the beat check at each bar it tries: the
+# best few on everything else. All twelve made analysing Jungle Love 28 s slower.
+STEADY_SHORTLIST = 4
+
+
+def _best_join_ms(a: Analysis, bar: int) -> float | None:
+    found = candidates(a, DEFAULT_LOOP_BARS, count=1, join_bar=bar,
+                       shortlist_size=STEADY_SHORTLIST)
+    return found[0].edge_ms if found else None
+
+
+def steady_join(a: Analysis, bar: int) -> tuple[int, float, float]:
+    """(the bar to join at, how far off the best loop met the song at `bar`,
+    and at the bar chosen), in ms. `bar` itself unless the best loop misses
+    it by more than STEADY_MS and a bar soon after is met in half that."""
+    here = _best_join_ms(a, bar)
+    if here is None or abs(here) <= STEADY_MS:
+        return bar, 0.0, 0.0
+    for b in range(bar + 1, min(bar + STEADY_LOOKAHEAD, len(a.bar_lines) - 2) + 1):
+        there = _best_join_ms(a, b)
+        if there is not None and abs(there) <= abs(here) / 2 and abs(there) <= STEADY_MS:
+            return b, abs(here), abs(there)
+    return bar, abs(here), abs(here)
+
 
 def suggest_join(a: Analysis) -> tuple[int, str]:
     """(bar index, why): the bar line where the song's groove lands.
@@ -1087,7 +1133,7 @@ def beat_fit(a: Analysis, s: Source, loop_bars: int, join_bar: int | None = None
 
 def candidates(a: Analysis, loop_bars: int = DEFAULT_LOOP_BARS,
                count: int = 5, join_bar: int | None = None,
-               exit_bar: int | None = None) -> list[Source]:
+               exit_bar: int | None = None, shortlist_size: int | None = None) -> list[Source]:
     """The best stretches of `loop_bars` bars to loop, best first.
 
     Measured per bar: the vocal stem's power against the instrumental's,
@@ -1132,7 +1178,7 @@ def candidates(a: Analysis, loop_bars: int = DEFAULT_LOOP_BARS,
     for s in pool:
         if all(abs(s.bar - c.bar) >= loop_bars for c in shortlist):
             shortlist.append(s)
-        if len(shortlist) == max(3 * count, 12):
+        if len(shortlist) == (shortlist_size or max(3 * count, 12)):
             break
     for s in shortlist:
         s.length, s.repeat = refine_length(a, s.bar, loop_bars)
@@ -1370,7 +1416,8 @@ def render(a: Analysis, bars: int, source: Source,
     if lead_in_bar is not None and 1 <= lead_in_bar < len(a.bar_lines) - 1:
         flen = int(a.bar_lines[lead_in_bar + 1]) - int(a.bar_lines[lead_in_bar])
 
-    def assemble(pick, hand_pick, song: np.ndarray, bar_src: np.ndarray) -> np.ndarray:
+    def assemble(pick, hand_pick, song: np.ndarray, bar_src: np.ndarray,
+                 lead_vocal: np.ndarray | None = None) -> np.ndarray:
         """The edit built from `pick` (the loop's audio per repeat), `hand_pick`
         (the hand-over's) and `song` / `bar_src` (the original and the bar the
         intro may end on). Called once with the real audio and once with the
@@ -1407,11 +1454,12 @@ def render(a: Analysis, bars: int, source: Source,
                 hi = min(len(loop), at + len(seg))
                 loop[at:hi] += (seg * win[:, None])[:hi - at]
 
-        # --- the hand-over: where the original begins (its pickup, or its
-        # downbeat), minus the guard. With room before it, it fades in over a
-        # seam while the loop fades out; with none (a track that starts on the
-        # kick) it simply begins and the loop has finished.
-        o_start = max(0, join - pickup - guard)
+        # --- the hand-over: where the original begins (its downbeat, or with
+        # no stems to take a vocal from, its pickup), minus the guard. With
+        # room before it, it fades in over a seam while the loop fades out;
+        # with none (a track that starts on the kick) it simply begins and the
+        # loop has finished.
+        o_start = max(0, join - (0 if lead_vocal is not None else pickup) - guard)
         fade_len = min(seam, o_start)
         o0 = o_start - fade_len
         out_o = o_start + shift + lead               # file coordinates
@@ -1437,13 +1485,34 @@ def render(a: Analysis, bars: int, source: Source,
             window[:fade_len] = _fade(fade_len)[0]
         at = o0 + shift + lead
         out[at:at + len(tail)] += tail * window[:, None]
+        # --- the pickup: the song's vocal alone, over the loop, up to the
+        # join, where the whole song takes over with the same vocal in it.
+        # Not the whole original: the bars before a join can be off the beat
+        # (the reason a join is moved on, `steady_join`), and their drums under
+        # the pickup put the song 14 ms off the intro's beat on a test track
+        # whose first two bars ran late (2026-10-10).
+        if lead_vocal is not None and pickup > 0:
+            v0 = max(0, join - pickup - guard - seam)
+            voice = lead_vocal[v0:o_start].astype(np.float64)
+            vwin = np.ones(len(voice))
+            vin = min(seam, len(voice))
+            if vin:
+                vwin[:vin] = _fade(vin)[0]
+            vout = min(fade_len, len(voice) - vin)
+            if vout > 0:
+                vwin[len(voice) - vout:] = _fade(vout)[1]
+            vat = v0 + shift + lead
+            out[vat:vat + len(voice)] += voice * vwin[:, None]
         # the start of the file: the loop's first pre-attack samples faded in
         ramp = min(lead, len(out))
         out[:ramp] *= _fade(ramp)[0][:, None]
         return out
 
-    out = assemble(layer, beat_only, a.original, mono_in)
-    drums_out = assemble(drums_only, drums_only, a.drums, a.drums) if len(a.drums) == len(a.original) else None
+    stemmed = len(a.drums) == len(a.original) and len(a.vocals) == len(a.original)
+    out = assemble(layer, beat_only, a.original, mono_in, a.vocals if stemmed else None)
+    # The drums alone, for the beat check; the pickup is a vocal, so none of it.
+    drums_out = (assemble(drums_only, drums_only, a.drums, a.drums, np.zeros((0, 2)))
+                 if stemmed else None)
 
     info = {
         "bpm": round(60.0 * rate * BEATS_PER_BAR * loop_bars / unit, 3),

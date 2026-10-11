@@ -74,9 +74,9 @@ public enum HTMLText {
             } else {
                 replacement = named[name.lowercased()]
             }
-            guard let replacement else { continue }
+            guard let decoded = replacement else { continue }
             result += text[cursor..<whole.lowerBound]
-            result += replacement
+            result += decoded
             cursor = whole.upperBound
         }
         result += text[cursor...]

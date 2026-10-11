@@ -94,9 +94,9 @@ public enum MarkdownBlocks {
         var lines = text.components(separatedBy: "\n")
         guard lines.indices.contains(line),
               case let (done, _)? = task(lines[line].trimmingCharacters(in: .whitespaces)) else { return text }
-        let box = done ? (lines[line].range(of: "[x]") ?? lines[line].range(of: "[X]"))
-                       : lines[line].range(of: "[ ]")
-        guard let box else { return text }
+        let found = done ? (lines[line].range(of: "[x]") ?? lines[line].range(of: "[X]"))
+                         : lines[line].range(of: "[ ]")
+        guard let box = found else { return text }
         lines[line].replaceSubrange(box, with: done ? "[ ]" : "[x]")
         return lines.joined(separator: "\n")
     }

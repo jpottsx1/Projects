@@ -79,7 +79,7 @@ final class Item {
 
     var url: URL? { urlString.flatMap(URL.init(string:)) }
 
-    var contentType: UTType? { contentTypeIdentifier.flatMap(UTType.init) }
+    var contentType: UTType? { contentTypeIdentifier.flatMap { UTType($0) } }
 
     var sortedTags: [Tag] {
         (tags ?? []).sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }

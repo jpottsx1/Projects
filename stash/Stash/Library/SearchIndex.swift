@@ -98,8 +98,8 @@ final class SearchIndex {
 
     /// Prepares `sql`, binds `values` in order, and calls `row` for each row.
     private func run(_ sql: String, _ values: [String], row: (OpaquePointer) -> Void = { _ in }) {
-        var statement: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK, let statement else { return }
+        var prepared: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &prepared, nil) == SQLITE_OK, let statement = prepared else { return }
         defer { sqlite3_finalize(statement) }
         for (index, value) in values.enumerated() {
             sqlite3_bind_text(statement, Int32(index + 1), value, -1, Self.transient)

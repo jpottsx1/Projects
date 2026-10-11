@@ -25,6 +25,16 @@ final class SyncMonitor {
         case failed(String)
     }
 
+    /// The container named in the entitlements, read from the Info.plist
+    /// (both come from ICLOUD_CONTAINER in Config/Stash.xcconfig).
+    /// `CKContainer.default()` would assume "iCloud." + the bundle id and
+    /// crash if the two had drifted apart.
+    private static let container: CKContainer? = {
+        guard let id = Bundle.main.object(forInfoDictionaryKey: "StashICloudContainer") as? String,
+              id.hasPrefix("iCloud.") else { return nil }
+        return CKContainer(identifier: id)
+    }()
+
     private(set) var state: State = .starting
     private(set) var lastSynced: Date?
 
@@ -74,7 +84,7 @@ final class SyncMonitor {
 
     private func checkAccount() {
         Task {
-            let status = try? await CKContainer.default().accountStatus()
+            let status = try? await Self.container?.accountStatus()
             if status == .available {
                 if state == .noAccount { state = .starting }
             } else {

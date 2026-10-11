@@ -6,6 +6,9 @@
 	     changes, so they're already there when it's next opened. Ignored on
 	     the Mac, and harmless when sync is off. Xcode merges this with the
 	     rest of the Info.plist it generates. -->
+	<!-- Where SyncMonitor checks the iCloud account. -->
+	<key>StashICloudContainer</key>
+	<string>$(ICLOUD_CONTAINER)</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>remote-notification</string>

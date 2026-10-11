@@ -59,6 +59,7 @@ final class Library {
         index = SearchIndex(url: support.appendingPathComponent("SearchIndex.sqlite"))
         refreshAfterStoreChange()
 
+        guard SyncMonitor.isEnabled else { return }
         // Posted when changes arrive in the store from outside this
         // context -- in practice, from iCloud. The views update on their
         // own; the search index, merged tags and files need a hand.

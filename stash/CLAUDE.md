@@ -31,7 +31,7 @@ SwiftData, one multiplatform target. Read README.md first.
 - **Sync is off by default** (`ICLOUD_SYNC` in `Config/Stash.xcconfig`)
   because iCloud entitlements need a paid developer team, and the app has
   to keep building without one. Code that touches CloudKit directly, such as
-  `CKContainer.default()`, goes behind `SyncMonitor.isEnabled` or
+  the account check in `SyncMonitor`, goes behind `SyncMonitor.isEnabled` or
   `#if ICLOUD_SYNC`. Without the entitlement it crashes.
 - Anything deduplicated across devices picks its survivor by `uuid`, so
   every device makes the same choice.

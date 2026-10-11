@@ -12,7 +12,8 @@ struct NoteTextEditor: View {
     @Binding var text: String
     /// Set to move the cursor (honoured from iOS 18, and on the Mac); cleared once done.
     @Binding var moveCursorTo: String.Index?
-    var onCursorMoved: (String.Index) -> Void
+    /// Nil when a stretch of text is selected rather than a cursor placed.
+    var onCursorMoved: (String.Index?) -> Void
 
     var body: some View {
         if #available(iOS 18, *) {
@@ -30,15 +31,18 @@ struct NoteTextEditor: View {
 private struct SelectionReportingEditor: View {
     @Binding var text: String
     @Binding var moveCursorTo: String.Index?
-    var onCursorMoved: (String.Index) -> Void
+    var onCursorMoved: (String.Index?) -> Void
     @State private var selection: TextSelection?
 
     var body: some View {
         TextEditor(text: $text, selection: $selection)
             .onChange(of: selection) { _, selection in
-                // Only a plain cursor; a selected stretch of text isn't typing.
-                guard case .selection(let range)? = selection?.indices, range.isEmpty else { return }
-                onCursorMoved(range.lowerBound)
+                // Only a plain cursor counts; a selected stretch of text isn't typing.
+                if case .selection(let range)? = selection?.indices, range.isEmpty {
+                    onCursorMoved(range.lowerBound)
+                } else {
+                    onCursorMoved(nil)
+                }
             }
             .onChange(of: moveCursorTo) { _, target in
                 guard let target else { return }

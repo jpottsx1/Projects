@@ -86,7 +86,7 @@ Capabilities* for each target, find App Groups, and tick
 |---|---|
 | **Notes** | Written in Markdown, shown as a formatted preview. Ticking a `- [ ]` box in the preview ticks it in the note. |
 | **Documents** | Any file: PDFs open in place, other files show a Quick Look preview. Each is copied into the app, so moving or deleting the original doesn't lose it. |
-| **Links** | Paste or type a web address. The page's title and description are fetched, and its text is kept so searching finds it. |
+| **Links** | Paste or type a web address. The page's title and description are fetched, and a full copy of the page (text, pictures and styles) is saved, so you can read it offline exactly as it was. Search covers the page's words, including text the page adds itself once it has loaded. *Refresh* fetches it all again. |
 | **Linking items** | Type `[[` in a note and pick from the suggestions (arrows and Return or Tab on a keyboard, or tap one), or type `[[Title]]` in full, or use *Link to Item…* in the side panel for any kind of item. Each item lists what it links to and what links to it. Renaming an item updates the `[[links]]` that point at it. Tapping a link to an item that doesn't exist yet creates it. |
 | **Categories** | One per item, and they can nest. Choosing a category also shows everything in the categories inside it. |
 | **Tags** | As many per item as you like. Type them separated by commas. Tags are single words: "to read" becomes `to-read`. |
@@ -126,6 +126,10 @@ StashCore/              no-interface logic, with tests
   When changes arrive from iCloud, `Library` rebuilds the search index,
   merges duplicate tags and categories, and removes files for deleted
   documents.
+- **Saved pages** are Safari web archives, made by loading the page in a
+  browser view nobody sees (`PageArchiver`), so pages that build
+  themselves with JavaScript are copied as shown. They sit in `Files/`
+  beside documents and sync the same way, up to the same size limit.
 - **Sharing** never touches the library from the share extension: two
   processes writing to an iCloud-synced database at once is asking for
   trouble. The extension leaves each thing in an inbox folder in the App
@@ -141,5 +145,4 @@ Cmd-U, or run `swift test` in it.
 
 ## Not done yet
 
-- Full copies of web pages for reading offline (only the text is kept for now)
 - An app icon

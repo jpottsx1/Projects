@@ -173,16 +173,66 @@ final class Library {
         save()
     }
 
+    /// Fetches a link's title, summary and text, then saves a full copy of
+    /// the page. Each step stands alone: a page whose HTML can't be read
+    /// can often still be copied, and the other way round.
     func refreshPage(of item: Item) async {
-        guard let url = item.url, let page = await TextExtractor.page(at: url), isAlive(item) else { return }
-        // Only replace a title nobody has typed over.
-        if let title = page.title, item.title.isEmpty || item.title == WebAddress.displayHost(of: url) {
+        if let url = item.url, let page = await TextExtractor.page(at: url), isAlive(item) {
+            if let title = page.title, !Self.hasOwnTitle(item, url: url) {
+                item.title = title
+            }
+            item.summary = page.summary ?? ""
+            item.extractedText = page.text
+            reindex(item)
+            save()
+        }
+        guard isAlive(item) else { return }
+        await savePageCopy(of: item)
+    }
+
+    /// Links whose page is being copied right now, for the views to show it.
+    private(set) var copyingPages: Set<UUID> = []
+
+    func savePageCopy(of item: Item) async {
+        guard let url = item.url, !copyingPages.contains(item.uuid) else { return }
+        copyingPages.insert(item.uuid)
+        defer { copyingPages.remove(item.uuid) }
+
+        guard let page = await PageArchiver.archive(url), isAlive(item) else { return }
+        let path = "\(item.uuid.uuidString)/Page.webarchive"
+        do {
+            try files.write(page.archive, to: path)
+        } catch {
+            return
+        }
+        item.archivePath = path
+        item.archivedAt = .now
+        item.archiveData = page.archive.count <= Self.largestSyncedFile ? page.archive : nil
+        if let title = page.title, !title.isEmpty, !Self.hasOwnTitle(item, url: url) {
             item.title = title
         }
-        item.summary = page.summary ?? ""
-        item.extractedText = page.text
+        // The page as shown can hold far more text than its HTML did.
+        if page.text.count > item.extractedText.count {
+            item.extractedText = String(page.text.prefix(TextExtractor.maxLength))
+        }
         reindex(item)
         save()
+    }
+
+    /// The saved copy on this device, written out from iCloud the first
+    /// time it's asked for, as with `localFile(for:)`.
+    func localPageCopy(for item: Item) -> URL? {
+        guard let path = item.archivePath else { return nil }
+        if !files.exists(path), let data = item.archiveData {
+            try? files.write(data, to: path)
+        }
+        return files.exists(path) ? files.url(for: path) : nil
+    }
+
+    /// Whether someone has typed a title over the one a link started with
+    /// (its site's name), which a fetched title mustn't replace.
+    private static func hasOwnTitle(_ item: Item, url: URL) -> Bool {
+        !item.title.isEmpty && item.title != WebAddress.displayHost(of: url)
     }
 
     func extractText(from item: Item) async {
@@ -216,7 +266,7 @@ final class Library {
     func delete(_ items: [Item]) {
         for item in items {
             if selection == item { selection = nil }
-            if let path = item.storedFilePath { files.remove(path) }
+            if let path = item.storedFilePath ?? item.archivePath { files.remove(path) }
             index?.remove(item.uuid)
             context.delete(item)
         }

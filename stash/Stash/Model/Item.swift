@@ -44,6 +44,13 @@ final class Item {
     var urlString: String?
     /// The page's own description, shown under its title.
     var summary: String = ""
+    /// The full copy of the page (a Safari web archive), inside the app's
+    /// own storage, for reading offline.
+    var archivePath: String?
+    var archivedAt: Date?
+    /// The copy's contents, which is what iCloud syncs, as with documents'
+    /// `fileData`. Nil for copies too large to sync.
+    @Attribute(.externalStorage) var archiveData: Data?
 
     // Documents
     /// Where the file lives inside the app's own storage (see `FileStore`).

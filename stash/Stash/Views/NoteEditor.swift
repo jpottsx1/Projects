@@ -94,8 +94,8 @@ struct NoteEditor: View {
         return result
     }
 
-    private func updateCompletion(at cursor: String.Index) {
-        let found = WikiLinkCompletion.context(in: item.body, cursor: cursor)
+    private func updateCompletion(at cursor: String.Index?) {
+        let found = cursor.flatMap { WikiLinkCompletion.context(in: item.body, cursor: $0) }
         if found?.query != completion?.query { highlighted = 0 }
         completion = found
     }

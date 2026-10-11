@@ -28,6 +28,9 @@ struct SidebarView: View {
                     .tag(SidebarSelection.all)
                 Label("Favorites", systemImage: "star")
                     .tag(SidebarSelection.favorites)
+                Label("Reminders", systemImage: "bell")
+                    .badge(items.filter { $0.isDue && !$0.isTrashed }.count)
+                    .tag(SidebarSelection.reminders)
                 ForEach(ItemKind.allCases) { kind in
                     Label(kind.pluralName, systemImage: kind.systemImage)
                         .tag(SidebarSelection.kind(kind))

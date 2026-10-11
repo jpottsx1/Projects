@@ -10,7 +10,8 @@ import Foundation
 /// - `#work`, `-#work` -- only items tagged "work", or only items without it
 /// - `kind:pdf` -- note, link, document, pdf, image, video or audio
 /// - `in:Work`, `in:"Work Stuff"` -- in that category or one inside it
-/// - `is:favorite`, `is:unread`, `is:read`, `is:inbox`, `is:untagged`, `is:uncategorized`
+/// - `is:favorite`, `is:unread`, `is:read`, `is:inbox`, `is:untagged`, `is:uncategorized`,
+///   `is:due` (a reminder that has come round), `is:reminder` (any reminder)
 /// - `label:red` (or any label colour, or `label:none`); `rating:3` -- three stars or more
 /// - `after:2026-03-01`, `before:2026-03-01` -- last changed from that day on,
 ///   or before it; also `today`, `yesterday`, and `7d`, `2w`, `3m`, `1y` ago
@@ -44,7 +45,7 @@ public struct SearchQuery: Equatable {
     }
 
     public enum Flag: String, Equatable {
-        case favorite, unread, read, inbox, untagged, uncategorized
+        case favorite, unread, read, inbox, untagged, uncategorized, due, reminder
 
         init?(typed: String) {
             switch typed.lowercased() {
@@ -52,6 +53,8 @@ public struct SearchQuery: Equatable {
             case "unread", "new": self = .unread
             case "read": self = .read
             case "inbox", "unfiled": self = .inbox
+            case "due", "overdue": self = .due
+            case "reminder", "reminders", "remind": self = .reminder
             case "untagged": self = .untagged
             case "uncategorized", "uncategorised": self = .uncategorized
             default: return nil

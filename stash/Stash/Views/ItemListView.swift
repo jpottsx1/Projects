@@ -1,6 +1,9 @@
 import SwiftUI
 import SwiftData
 import StashCore
+#if os(macOS)
+import AppKit
+#endif
 
 struct ItemListView: View {
     @Environment(Library.self) private var library
@@ -9,6 +12,11 @@ struct ItemListView: View {
     @State private var confirmingEmptyTrash = false
     @State private var confirmingDelete: [Item] = []
     @Environment(\.horizontalSizeClass) private var sizeClass
+    #if os(iOS)
+    @Environment(\.editMode) private var editMode
+    #endif
+    /// Where a Shift-click range starts in the grid.
+    @State private var anchor: Item?
 
     var body: some View {
         @Bindable var library = library
@@ -27,6 +35,23 @@ struct ItemListView: View {
         .searchable(text: $library.searchText, prompt: "Search, #tag, kind:pdf…")
         .toolbar {
             ToolbarItem(placement: .primaryAction) { AddMenu() }
+            #if os(iOS)
+            ToolbarItem(placement: .topBarLeading) { EditButton() }
+            if editMode?.wrappedValue.isEditing == true {
+                ToolbarItemGroup(placement: .bottomBar) {
+                    let chosen = library.selectedItems
+                    Text(chosen.isEmpty ? "Select Items" : "\(chosen.count) Selected")
+                        .font(.callout)
+                    Spacer()
+                    Menu {
+                        bulkMenu(for: chosen)
+                    } label: {
+                        Label("Actions", systemImage: "ellipsis.circle")
+                    }
+                    .disabled(chosen.isEmpty)
+                }
+            }
+            #endif
             ToolbarItem {
                 SortMenu()
             }
@@ -64,8 +89,9 @@ struct ItemListView: View {
         }
         #if os(macOS)
         .onDeleteCommand {
-            guard let item = library.selection else { return }
-            if item.isTrashed { confirmingDelete = [item] } else { library.moveToTrash([item]) }
+            let chosen = library.selectedItems
+            guard !chosen.isEmpty else { return }
+            if chosen.allSatisfy(\.isTrashed) { confirmingDelete = chosen } else { library.moveToTrash(chosen) }
         }
         #endif
         .sheet(item: Binding(get: { savingSearch.map(SearchDraft.init) }, set: { savingSearch = $0?.query })) { draft in
@@ -89,12 +115,10 @@ struct ItemListView: View {
     }
 
     private func list(_ items: [Item]) -> some View {
-        @Bindable var library = library
-        return List(selection: $library.selection) {
+        List(selection: Binding(get: { library.listSelection }, set: { library.select($0) })) {
             ForEach(items) { item in
                 ItemRow(item: item)
                     .tag(item)
-                    .contextMenu { menu(for: item) }
                     .swipeActions(edge: .trailing) {
                         if item.isTrashed {
                             Button("Delete", role: .destructive) { confirmingDelete = [item] }
@@ -114,6 +138,47 @@ struct ItemListView: View {
                     }
             }
         }
+        .contextMenu(forSelectionType: Item.self) { chosen in
+            if chosen.count == 1, let item = chosen.first {
+                menu(for: item)
+            } else if !chosen.isEmpty {
+                bulkMenu(for: Array(chosen))
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func bulkMenu(for items: [Item]) -> some View {
+        if !items.isEmpty, items.allSatisfy(\.isTrashed) {
+            Button("Put Back") { library.restore(items) }
+            Button("Delete Immediately…", role: .destructive) { confirmingDelete = items }
+        } else if !items.isEmpty {
+            BulkActions(items: items)
+        }
+    }
+
+    /// Click to choose one; Cmd-click to add or take away one, Shift-click
+    /// for a run of them (on a Mac). On an iPad, tapping while editing
+    /// adds or takes away.
+    private func tap(_ item: Item, in items: [Item]) {
+        var chosen = library.listSelection
+        #if os(macOS)
+        let flags = NSEvent.modifierFlags
+        let adding = flags.contains(.command)
+        if flags.contains(.shift), let anchor, let from = items.firstIndex(of: anchor), let to = items.firstIndex(of: item) {
+            library.select(chosen.union(items[min(from, to)...max(from, to)]))
+            return
+        }
+        #else
+        let adding = editMode?.wrappedValue.isEditing == true
+        #endif
+        if adding {
+            if chosen.contains(item) { chosen.remove(item) } else { chosen.insert(item) }
+            library.select(chosen)
+        } else {
+            library.select([item])
+        }
+        anchor = item
     }
 
     /// Cards with pictures, for a wide window.
@@ -121,9 +186,16 @@ struct ItemListView: View {
         ScrollView {
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 170, maximum: 240), spacing: 14)], spacing: 14) {
                 ForEach(items) { item in
-                    ItemCard(item: item, isSelected: library.selection == item)
-                        .onTapGesture { library.selection = item }
-                        .contextMenu { menu(for: item) }
+                    ItemCard(item: item, isSelected: library.listSelection.contains(item))
+                        .onTapGesture { tap(item, in: items) }
+                        .contextMenu {
+                            let chosen = library.listSelection
+                            if chosen.count > 1, chosen.contains(item) {
+                                bulkMenu(for: Array(chosen))
+                            } else {
+                                menu(for: item)
+                            }
+                        }
                 }
             }
             .padding()
@@ -146,6 +218,7 @@ struct ItemListView: View {
                 Button("Done (Take Out of Inbox)") { library.markFiled([item]) }
             }
             LabelAndRatingMenus(items: [item])
+            ReminderMenu(items: [item])
             Divider()
             Button("Export…") { library.exportRequest = .items([item], name: item.displayTitle) }
             Divider()
@@ -165,6 +238,9 @@ struct ItemListView: View {
             case .inbox:
                 ContentUnavailableView("Inbox Is Empty", systemImage: "tray.and.arrow.down",
                                        description: Text("Pages, files and things shared from other apps wait here until you give them a category."))
+            case .reminders:
+                ContentUnavailableView("No Reminders", systemImage: "bell",
+                                       description: Text("Use Remind Me on an item to come back to it later."))
             case .favorites:
                 ContentUnavailableView("No Favorites", systemImage: "star",
                                        description: Text("Swipe an item, or use its menu, to add it to Favorites."))
@@ -274,6 +350,9 @@ struct ItemRow: View {
                         Text(String(repeating: "★", count: item.rating))
                             .foregroundStyle(.orange)
                             .accessibilityLabel("\(item.rating) stars")
+                    }
+                    if let date = item.remindAt {
+                        ReminderBadge(date: date)
                     }
                     Text(item.modifiedAt, format: .dateTime.day().month().year())
                     ForEach(item.sortedTags) { tag in

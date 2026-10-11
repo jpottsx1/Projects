@@ -54,6 +54,9 @@ final class Item {
     var labelRaw: Int = 0
     /// 0 to 5 stars; 0 for unrated.
     var rating: Int = 0
+    /// When to be reminded to look at it again; nil for no reminder.
+    /// Stays set once it's come round, until it's marked done.
+    var remindAt: Date?
 
     // Links
     var urlString: String?
@@ -114,6 +117,9 @@ final class Item {
     var url: URL? { urlString.flatMap(URL.init(string:)) }
 
     var isTrashed: Bool { trashedAt != nil }
+
+    /// A reminder that has come round.
+    var isDue: Bool { remindAt.map { $0 <= .now } ?? false }
 
     var label: ItemLabel {
         get { ItemLabel(rawValue: labelRaw) ?? .none }

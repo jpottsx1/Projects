@@ -134,6 +134,7 @@ final class EPUBController: NSObject, WKNavigationDelegate, WKScriptMessageHandl
         configuration.setURLSchemeHandler(EPUBSchemeHandler(controller: self), forURLScheme: Self.scheme)
         let scripts = configuration.userContentController
         scripts.add(WeakMessageHandler(self), name: "stash")
+        scripts.addUserScript(WKUserScript(source: WebHighlights.script, injectionTime: .atDocumentEnd, forMainFrameOnly: true))
         scripts.addUserScript(WKUserScript(source: Self.script, injectionTime: .atDocumentEnd, forMainFrameOnly: true))
         let view = WKWebView(frame: .zero, configuration: configuration)
         view.navigationDelegate = self
@@ -198,21 +199,15 @@ final class EPUBController: NSObject, WKNavigationDelegate, WKScriptMessageHandl
     /// Draws this chapter's highlights, found again by their words.
     func showHighlights() {
         guard let webView, let path = chapterPath, let item else { return }
-        let highlights = item.sortedHighlights
+        let highlights = item.sortedHighlights.compactMap { highlight -> (Highlight, TextQuote)? in
+            guard case .epub(let chapter, let quote)? = highlight.anchor, chapter == path else { return nil }
+            return (highlight, quote)
+        }
         Task {
-            guard let text = try? await webView.evaluateJavaScript("stash.text()") as? String else { return }
-            var marks: [[String: Any]] = []
-            for highlight in highlights {
-                guard case .epub(let chapter, let quote)? = highlight.anchor, chapter == path,
-                      let range = quote.locate(in: text) else { continue }
-                marks.append(["id": highlight.uuid.uuidString, "start": range.lowerBound, "end": range.upperBound,
-                              "color": highlight.colorRaw])
-            }
-            let json = (try? JSONSerialization.data(withJSONObject: marks)).map { String(decoding: $0, as: UTF8.self) } ?? "[]"
-            _ = try? await webView.evaluateJavaScript("stash.unmarkAll(); stash.mark(\(json));")
+            await WebHighlights.show(highlights, in: webView)
             if let reveal = revealAfterLoad {
                 revealAfterLoad = nil
-                _ = try? await webView.evaluateJavaScript("stash.reveal('\(reveal.uuidString)')")
+                WebHighlights.reveal(reveal, in: webView)
             }
         }
     }
@@ -221,7 +216,7 @@ final class EPUBController: NSObject, WKNavigationDelegate, WKScriptMessageHandl
         guard case .epub(let path, _)? = highlight.anchor, let book = document?.book,
               let index = book.chapterIndex(for: path) else { return }
         if index == chapter {
-            webView?.evaluateJavaScript("stash.reveal('\(highlight.uuid.uuidString)')")
+            if let webView { WebHighlights.reveal(highlight.uuid, in: webView) }
         } else {
             revealAfterLoad = highlight.uuid
             load(index)
@@ -229,17 +224,11 @@ final class EPUBController: NSObject, WKNavigationDelegate, WKScriptMessageHandl
     }
 
     func selectedPassage() async -> Passage? {
-        guard let webView, let path = chapterPath,
-              let found = try? await webView.evaluateJavaScript("stash.selection()") as? [String: Any],
-              let start = (found["start"] as? NSNumber)?.intValue, let end = (found["end"] as? NSNumber)?.intValue,
-              let text = found["text"] as? String,
-              let quote = TextQuote(in: text, start: start, end: end) else { return nil }
-        let words = quote.exact.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !words.isEmpty else { return nil }
-        _ = try? await webView.evaluateJavaScript("window.getSelection().removeAllRanges()")
-        let length = max(text.utf16.count, 1)
-        return Passage(text: words, anchor: .epub(chapter: path, quote: quote),
-                       position: Double(chapter) + Double(start) / Double(length))
+        guard let webView, let path = chapterPath, let selected = await WebHighlights.selection(in: webView) else {
+            return nil
+        }
+        return Passage(text: selected.words, anchor: .epub(chapter: path, quote: selected.quote),
+                       position: Double(chapter) + selected.fraction)
     }
 
     // MARK: - Web view
@@ -296,105 +285,31 @@ final class EPUBController: NSObject, WKNavigationDelegate, WKScriptMessageHandl
         }
     }
 
-    /// Finds text, marks highlights, reports scrolling and taps. Offsets
-    /// count UTF-16 units through the body's text nodes, as `TextQuote` does.
+    /// The book's layout, and reporting how far through a chapter you are.
+    /// Highlighting comes from `WebHighlights.script`.
     static let script = #"""
     (function () {
       const style = document.createElement('style');
       style.textContent = `
         :root { color-scheme: light dark; }
         body { max-width: 40em; margin: 0 auto !important; padding: 1.5em 1.5em 4em !important; line-height: 1.6; }
-        img, svg, video { max-width: 100%; height: auto; }
-        mark.stash-hl { color: inherit; border-radius: 2px; cursor: pointer; }
-        mark.stash-yellow { background: rgba(255, 214, 10, .45); }
-        mark.stash-green { background: rgba(52, 199, 89, .35); }
-        mark.stash-blue { background: rgba(10, 132, 255, .3); }
-        mark.stash-pink { background: rgba(255, 55, 95, .3); }
-        mark.stash-purple { background: rgba(191, 90, 242, .3); }`;
+        img, svg, video { max-width: 100%; height: auto; }`;
       (document.head || document.documentElement).appendChild(style);
 
-      const post = (message) => window.webkit.messageHandlers.stash.postMessage(message);
-      const textNodes = () => {
-        const nodes = [];
-        if (!document.body) return nodes;
-        const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-        let node;
-        while ((node = walker.nextNode())) nodes.push(node);
-        return nodes;
+      window.stash.scrollTo = (fraction) => {
+        setTimeout(() => {
+          const height = document.documentElement.scrollHeight - window.innerHeight;
+          window.scrollTo(0, Math.max(0, fraction * height));
+        }, 60);
       };
-      const offsetOf = (container, offset) => {
-        const range = document.createRange();
-        range.setStart(document.body, 0);
-        range.setEnd(container, offset);
-        return range.toString().length;
-      };
-
-      const stash = {
-        text: () => textNodes().map((node) => node.data).join(''),
-        selection: () => {
-          const selection = window.getSelection();
-          if (!selection || selection.rangeCount === 0 || selection.isCollapsed) return null;
-          const range = selection.getRangeAt(0);
-          try {
-            return { start: offsetOf(range.startContainer, range.startOffset),
-                     end: offsetOf(range.endContainer, range.endOffset), text: stash.text() };
-          } catch (error) { return null; }
-        },
-        mark: (marks) => {
-          for (const mark of marks) {
-            let position = 0;
-            const spans = textNodes().map((node) => {
-              const span = { node, start: position, end: position + node.data.length };
-              position = span.end;
-              return span;
-            });
-            for (const span of spans) {
-              const from = Math.max(mark.start, span.start), to = Math.min(mark.end, span.end);
-              if (from >= to) continue;
-              if (!span.node.data.slice(from - span.start, to - span.start).trim()) continue;
-              let target = span.node;
-              if (to - span.start < target.data.length) target.splitText(to - span.start);
-              if (from > span.start) target = target.splitText(from - span.start);
-              const element = document.createElement('mark');
-              element.className = 'stash-hl stash-' + mark.color;
-              element.dataset.stash = mark.id;
-              target.parentNode.insertBefore(element, target);
-              element.appendChild(target);
-            }
-          }
-        },
-        unmarkAll: () => {
-          document.querySelectorAll('mark.stash-hl').forEach((element) => {
-            const parent = element.parentNode;
-            while (element.firstChild) parent.insertBefore(element.firstChild, element);
-            parent.removeChild(element);
-          });
-          if (document.body) document.body.normalize();
-        },
-        reveal: (id) => {
-          const element = document.querySelector('mark[data-stash="' + id + '"]');
-          if (element) element.scrollIntoView({ block: 'center' });
-        },
-        scrollTo: (fraction) => {
-          setTimeout(() => {
-            const height = document.documentElement.scrollHeight - window.innerHeight;
-            window.scrollTo(0, Math.max(0, fraction * height));
-          }, 60);
-        },
-      };
-      window.stash = stash;
-
       let timer;
       window.addEventListener('scroll', () => {
         clearTimeout(timer);
         timer = setTimeout(() => {
           const height = document.documentElement.scrollHeight - window.innerHeight;
-          post({ type: 'position', value: height > 0 ? window.scrollY / height : 0 });
+          window.webkit.messageHandlers.stash.postMessage(
+            { type: 'position', value: height > 0 ? window.scrollY / height : 0 });
         }, 800);
-      });
-      document.addEventListener('click', (event) => {
-        const element = event.target.closest && event.target.closest('mark.stash-hl');
-        if (element) post({ type: 'tap', id: element.dataset.stash });
       });
     })();
     """#
@@ -431,7 +346,7 @@ private final class EPUBSchemeHandler: NSObject, WKURLSchemeHandler {
 
 /// The content controller holds its handlers strongly; this keeps that
 /// from keeping the reader alive.
-private final class WeakMessageHandler: NSObject, WKScriptMessageHandler {
+final class WeakMessageHandler: NSObject, WKScriptMessageHandler {
     weak var target: WKScriptMessageHandler?
 
     init(_ target: WKScriptMessageHandler) {

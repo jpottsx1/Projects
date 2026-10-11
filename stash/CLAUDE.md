@@ -8,6 +8,8 @@ SwiftData, one multiplatform target. Read README.md first.
 - `Stash.xcodeproj` uses **Xcode 16 file-system-synchronized groups**:
   any file put under `Stash/` is part of the app, so adding a Swift file
   doesn't require editing the project file.
+- Two targets: **Stash** (the app) and **StashShare** (the share
+  extension, folder `ShareExtension/`, embedded in the app).
 - `StashCore/` is a local Swift package with no UI and no Apple-only
   frameworks. Logic that can live there should, because it's the only part
   that can be tested without building the app. `swift test --package-path StashCore`.
@@ -33,6 +35,12 @@ SwiftData, one multiplatform target. Read README.md first.
   to keep building without one. Code that touches CloudKit directly, such as
   the account check in `SyncMonitor`, goes behind `SyncMonitor.isEnabled` or
   `#if ICLOUD_SYNC`. Without the entitlement it crashes.
+- **Sharing is off by default** (`SHARE_EXTENSION`) for the same reason.
+  The share extension never opens the SwiftData store. It writes to the
+  `SharedInbox`, and the app imports from it. Keep it that way.
+- Entitlements come from both switches together: `STASH_X_<sync>_<share>`
+  in `Config/Stash.xcconfig`, one file per combination. Changing an
+  entitlement means changing every file that has it.
 - Anything deduplicated across devices picks its survivor by `uuid`, so
   every device makes the same choice.
 - **`[[Title]]` links are read from the note's text, never stored.**

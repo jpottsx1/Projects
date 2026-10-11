@@ -139,3 +139,53 @@ final class WebAddressTests: XCTestCase {
         XCTAssertEqual(WebAddress.displayHost(of: URL(string: "https://www.example.com/x")!), "example.com")
     }
 }
+
+final class SharedInboxTests: XCTestCase {
+    private var root: URL!
+
+    override func setUpWithError() throws {
+        root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+    }
+
+    override func tearDownWithError() throws {
+        try? FileManager.default.removeItem(at: root)
+    }
+
+    func testEntriesComeBackOldestFirstWithTheirFiles() throws {
+        let inbox = SharedInbox(root: root)
+        let file = root.appendingPathComponent("Report.pdf")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try Data("pdf".utf8).write(to: file)
+
+        // Whole seconds: the dates are stored as ISO 8601.
+        let newer = SharedEntry(kind: .file, title: "Report", tags: ["work"], createdAt: Date(timeIntervalSince1970: 2000))
+        let older = SharedEntry(kind: .link, title: "Article", url: "https://example.com", createdAt: Date(timeIntervalSince1970: 1000))
+        try inbox.add(newer, file: file)
+        try inbox.add(older)
+
+        let pending = inbox.pending()
+        XCTAssertEqual(pending.map(\.entry.title), ["Article", "Report"])
+        XCTAssertEqual(pending[0].entry, older)
+        XCTAssertEqual(pending[1].entry.fileName, "Report.pdf")
+        XCTAssertEqual(try pending[1].file.map { try Data(contentsOf: $0) }, Data("pdf".utf8))
+        XCTAssertNil(pending[0].file)
+
+        inbox.remove(pending[0])
+        XCTAssertEqual(inbox.pending().map(\.entry.title), ["Report"])
+    }
+
+    func testAFolderWithoutItsEntryIsLeftAlone() throws {
+        // What a share still copying its file in looks like.
+        let half = root.appendingPathComponent("Inbox/\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: half, withIntermediateDirectories: true)
+        XCTAssertTrue(SharedInbox(root: root).pending().isEmpty)
+    }
+
+    func testCategoriesRoundTrip() {
+        let inbox = SharedInbox(root: root)
+        XCTAssertEqual(inbox.categories(), [])
+        let categories = [SharedCategory(id: UUID(), path: "Work"), SharedCategory(id: UUID(), path: "Work › Clients")]
+        inbox.writeCategories(categories)
+        XCTAssertEqual(inbox.categories(), categories)
+    }
+}

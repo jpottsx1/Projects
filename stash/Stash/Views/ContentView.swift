@@ -5,6 +5,7 @@ import UniformTypeIdentifiers
 /// same three become screens you move between.
 struct ContentView: View {
     @Environment(Library.self) private var library
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         @Bindable var library = library
@@ -29,6 +30,10 @@ struct ContentView: View {
         }
         .sheet(isPresented: $library.isAddingLink) {
             AddLinkSheet()
+        }
+        // Things shared from other apps while Stash wasn't running.
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { library.importSharedItems() }
         }
         .alert("Couldn’t Import", isPresented: Binding(
             get: { library.importError != nil },

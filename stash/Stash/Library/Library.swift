@@ -50,7 +50,17 @@ final class Library {
     private(set) var revision = 0
 
     @ObservationIgnored private var storeObserver: NSObjectProtocol?
+    @ObservationIgnored private var shareObserver: NSObjectProtocol?
     @ObservationIgnored private var pendingRefresh: Task<Void, Never>?
+
+    /// Set by `SHARE_EXTENSION` in Config/Stash.xcconfig.
+    #if SHARE_EXTENSION
+    static let sharingEnabled = true
+    #else
+    static let sharingEnabled = false
+    #endif
+    /// Where the share extension leaves things; nil when sharing is off.
+    @ObservationIgnored private let inbox: SharedInbox? = Library.sharingEnabled ? SharedInbox.forAppGroup() : nil
 
     init(context: ModelContext) {
         self.context = context
@@ -58,6 +68,18 @@ final class Library {
         files = FileStore(root: support.appendingPathComponent("Files", isDirectory: true))
         index = SearchIndex(url: support.appendingPathComponent("SearchIndex.sqlite"))
         refreshAfterStoreChange()
+        importSharedItems()
+
+        if inbox != nil {
+            // The share extension signals as it saves, so something shared
+            // while Stash is open appears straight away.
+            ShareSignal.startListening()
+            shareObserver = NotificationCenter.default.addObserver(
+                forName: .stashSharedItemsArrived, object: nil, queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated { self?.importSharedItems() }
+            }
+        }
 
         guard SyncMonitor.isEnabled else { return }
         // Posted when changes arrive in the store from outside this
@@ -248,7 +270,16 @@ final class Library {
         context.insert(category)
         category.parent = parent
         save()
+        publishCategories()
         return category
+    }
+
+    func rename(_ category: ItemCategory, to name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        category.name = trimmed
+        save()
+        publishCategories()
     }
 
     /// Categories inside it go too; the items in them are kept, uncategorized.
@@ -256,6 +287,71 @@ final class Library {
         if case .category(let shown) = sidebar, category.contains(shown) { sidebar = .all }
         context.delete(category)
         save()
+        publishCategories()
+    }
+
+    /// The share extension can't open the library, so it chooses a category
+    /// from a list the app writes out whenever categories change.
+    private func publishCategories() {
+        guard let inbox else { return }
+        let all = (try? context.fetch(FetchDescriptor<ItemCategory>())) ?? []
+        let tree = all.filter { $0.parent == nil }
+            .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+            .flatMap(\.flattened)
+        inbox.writeCategories(tree.map { SharedCategory(id: $0.uuid, path: $0.path) })
+    }
+
+    // MARK: - Shared from other apps
+
+    /// Takes in whatever the share extension has left in the inbox. At
+    /// launch, when the app comes to the front, and when the extension
+    /// signals. Anything that can't be taken in yet stays for next time.
+    func importSharedItems() {
+        guard let inbox else { return }
+        let waiting = inbox.pending()
+        guard !waiting.isEmpty else { return }
+        let categories = (try? context.fetch(FetchDescriptor<ItemCategory>())) ?? []
+
+        for pending in waiting {
+            let entry = pending.entry
+            let item: Item
+            switch entry.kind {
+            case .link:
+                guard let url = entry.url.flatMap(URL.init(string:)) else {
+                    inbox.remove(pending)
+                    continue
+                }
+                item = Item(kind: .link, title: entry.title.isEmpty ? WebAddress.displayHost(of: url) : entry.title)
+                item.urlString = url.absoluteString
+            case .note:
+                item = Item(kind: .note, title: entry.title)
+            case .file:
+                guard let file = pending.file else {
+                    inbox.remove(pending)
+                    continue
+                }
+                item = Item(kind: .document, title: entry.title)
+                guard let path = try? files.importFile(at: file, for: item.uuid) else { continue }
+                item.storedFilePath = path
+                item.contentTypeIdentifier = UTType(filenameExtension: file.pathExtension)?.identifier
+                item.fileData = syncableContents(of: item)
+            }
+            item.body = entry.text
+            item.createdAt = entry.createdAt
+            item.modifiedAt = entry.createdAt
+            context.insert(item)
+            item.category = entry.categoryID.flatMap { id in categories.first { $0.uuid == id } }
+            if !entry.tags.isEmpty { addTags(from: entry.tags.joined(separator: ","), to: item) }
+            save()
+            reindex(item)
+            inbox.remove(pending)
+
+            switch item.kind {
+            case .link: Task { await refreshPage(of: item) }
+            case .document: Task { await extractText(from: item) }
+            case .note: break
+            }
+        }
     }
 
     // MARK: - Links between items
@@ -403,6 +499,7 @@ final class Library {
         guard let items = try? context.fetch(FetchDescriptor<Item>()) else { return }
         index?.replaceAll(with: items.map(entry(for:)))
         files.removeFolders(notBelongingTo: Set(items.map(\.uuid)))
+        publishCategories()
         revision += 1
         runSearch()
     }

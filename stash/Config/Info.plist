@@ -6,6 +6,9 @@
 	     changes, so they're already there when it's next opened. Ignored on
 	     the Mac, and harmless when sync is off. Xcode merges this with the
 	     rest of the Info.plist it generates. -->
+	<!-- Where the share extension leaves things (see SharedInbox). -->
+	<key>StashAppGroup</key>
+	<string>$(APP_GROUP)</string>
 	<!-- Where SyncMonitor checks the iCloud account. -->
 	<key>StashICloudContainer</key>
 	<string>$(ICLOUD_CONTAINER)</string>

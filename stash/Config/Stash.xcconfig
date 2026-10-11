@@ -1,15 +1,15 @@
 // Settings for the Stash app you may want to change.
+//
+// Both features below need Stash signed with your Apple developer team:
+// in Xcode, select each target (Stash, and StashShare for sharing) >
+// Signing & Capabilities, and choose your team under Team.
 
 // ---------------------------------------------------------------------------
 // iCloud sync between your Mac and iPhone
 //
 // Needs a paid Apple Developer Program membership: Apple doesn't let apps
-// signed with a free Apple ID use iCloud. To turn it on:
-//
-//   1. In Xcode, select the Stash target > Signing & Capabilities, and
-//      choose your team under Team.
-//   2. Change NO to YES on the next line.
-//   3. Run it on each device, signed in to the same iCloud account.
+// signed with a free Apple ID use iCloud. Change NO to YES, then run Stash
+// on each device, signed in to the same iCloud account.
 //
 ICLOUD_SYNC = NO
 
@@ -19,21 +19,42 @@ ICLOUD_SYNC = NO
 ICLOUD_CONTAINER = iCloud.com.jpottsx1.stash
 
 // ---------------------------------------------------------------------------
-// Nothing below needs changing. Each setting picks its _YES or _NO value
-// from ICLOUD_SYNC; a _NO value that isn't defined is empty.
+// "Save to Stash" in other apps' share menus
+//
+// Needs an App Group, a folder Stash and its share extension both reach.
+// A paid membership certainly allows that; a free Apple ID may not.
+// Change NO to YES and build again.
+//
+SHARE_EXTENSION = NO
 
-STASH_ENTITLEMENTS_IOS_YES = Config/Stash-iOS.entitlements
-STASH_ENTITLEMENTS_MAC_YES = Config/Stash-macOS.entitlements
-CODE_SIGN_ENTITLEMENTS[sdk=iphoneos*] = $(STASH_ENTITLEMENTS_IOS_$(ICLOUD_SYNC))
-CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*] = $(STASH_ENTITLEMENTS_IOS_$(ICLOUD_SYNC))
-CODE_SIGN_ENTITLEMENTS[sdk=macosx*] = $(STASH_ENTITLEMENTS_MAC_$(ICLOUD_SYNC))
+// The App Group. It must start with "group." and nobody else may be using
+// it; change it along with the bundle identifier.
+APP_GROUP = group.com.jpottsx1.stash
 
-// Without iCloud the Mac app can sign itself to run on this Mac; with it,
-// it needs a certificate from your team.
-STASH_MAC_IDENTITY_NO = -
-STASH_MAC_IDENTITY_YES = Apple Development
-CODE_SIGN_IDENTITY[sdk=macosx*] = $(STASH_MAC_IDENTITY_$(ICLOUD_SYNC))
+// ---------------------------------------------------------------------------
+// Nothing below needs changing. Each setting picks a value by joining the
+// two switches -- STASH_X_<sync>_<share> -- and a combination that isn't
+// defined here is empty.
 
-// Lets the Swift code check `#if ICLOUD_SYNC`.
-STASH_SWIFT_CONDITION_YES = ICLOUD_SYNC
-SWIFT_ACTIVE_COMPILATION_CONDITIONS = $(inherited) $(STASH_SWIFT_CONDITION_$(ICLOUD_SYNC))
+STASH_ENTITLEMENTS_IOS_YES_NO = Config/App-iOS-Sync.entitlements
+STASH_ENTITLEMENTS_IOS_NO_YES = Config/App-iOS-Share.entitlements
+STASH_ENTITLEMENTS_IOS_YES_YES = Config/App-iOS-SyncShare.entitlements
+STASH_ENTITLEMENTS_MAC_YES_NO = Config/App-macOS-Sync.entitlements
+STASH_ENTITLEMENTS_MAC_NO_YES = Config/App-macOS-Share.entitlements
+STASH_ENTITLEMENTS_MAC_YES_YES = Config/App-macOS-SyncShare.entitlements
+CODE_SIGN_ENTITLEMENTS[sdk=iphoneos*] = $(STASH_ENTITLEMENTS_IOS_$(ICLOUD_SYNC)_$(SHARE_EXTENSION))
+CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*] = $(STASH_ENTITLEMENTS_IOS_$(ICLOUD_SYNC)_$(SHARE_EXTENSION))
+CODE_SIGN_ENTITLEMENTS[sdk=macosx*] = $(STASH_ENTITLEMENTS_MAC_$(ICLOUD_SYNC)_$(SHARE_EXTENSION))
+
+// With neither feature the Mac app can sign itself to run on this Mac;
+// with either, it needs a certificate from your team.
+STASH_MAC_IDENTITY_NO_NO = -
+STASH_MAC_IDENTITY_YES_NO = Apple Development
+STASH_MAC_IDENTITY_NO_YES = Apple Development
+STASH_MAC_IDENTITY_YES_YES = Apple Development
+CODE_SIGN_IDENTITY[sdk=macosx*] = $(STASH_MAC_IDENTITY_$(ICLOUD_SYNC)_$(SHARE_EXTENSION))
+
+// Lets the Swift code check `#if ICLOUD_SYNC` and `#if SHARE_EXTENSION`.
+STASH_SWIFT_SYNC_YES = ICLOUD_SYNC
+STASH_SWIFT_SHARE_YES = SHARE_EXTENSION
+SWIFT_ACTIVE_COMPILATION_CONDITIONS = $(inherited) $(STASH_SWIFT_SYNC_$(ICLOUD_SYNC)) $(STASH_SWIFT_SHARE_$(SHARE_EXTENSION))

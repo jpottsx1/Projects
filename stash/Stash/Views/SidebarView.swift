@@ -96,7 +96,7 @@ struct SidebarView: View {
                 library.sidebar = .category(category)
             }
         case .rename(let category):
-            category.name = name
+            library.rename(category, to: name)
         case nil:
             break
         }

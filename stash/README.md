@@ -50,6 +50,35 @@ schema to Production in the [CloudKit Console](https://icloud.developer.apple.co
 Builds run from Xcode use the Development environment, so you can skip this
 until then.
 
+## Saving from other apps
+
+With this on, Stash appears in the share menu of Safari, Photos, Files, Mail
+and most other apps. Share a web page, a file, some pictures or some text,
+add a title, notes, tags and a category if you like, and tap Save. It
+appears in Stash straight away if Stash is open, or the next time you open
+it.
+
+It's **off until you turn it on**, because it needs an App Group: a folder
+Stash and its share extension both reach. A paid Apple Developer Program
+membership allows that. With a free Apple ID it may or may not work; Apple
+doesn't say, so try it and see.
+
+1. In Xcode, select the **Stash** target, then **Signing & Capabilities**,
+   and choose your team. Do the same for the **StashShare** target.
+2. Open `Config/Stash.xcconfig` and change `SHARE_EXTENSION = NO` to
+   `SHARE_EXTENSION = YES`.
+3. Run Stash once on each device.
+
+On a Mac, if Stash doesn't appear in a share menu, turn it on in
+*System Settings › General › Login Items & Extensions › Sharing*. On an
+iPhone, it may be under *More* at the end of the row of apps in the share
+sheet.
+
+If Xcode reports a signing problem about the App Group, open *Signing &
+Capabilities* for each target, find App Groups, and tick
+`group.com.jpottsx1.stash`. If you changed the bundle identifier, change
+`APP_GROUP` in the same file to match.
+
 ## What it does
 
 | | |
@@ -69,6 +98,8 @@ Dropping files or web addresses onto the list adds them.
 
 ```
 Stash.xcodeproj
+Config/                 Stash.xcconfig (the sync and sharing switches),
+                        entitlements, Info.plist additions
 Stash/                  the app (SwiftUI + SwiftData), shared by Mac and iPhone
   StashApp.swift        window, menus
   Model/                Item, Tag, ItemCategory
@@ -77,6 +108,7 @@ Stash/                  the app (SwiftUI + SwiftData), shared by Mac and iPhone
                         FileStore: copies of imported documents
                         TextExtractor: text from PDFs, images, web pages
   Views/
+ShareExtension/         "Save to Stash" in share menus (StashShare target)
 StashCore/              no-interface logic, with tests
                         [[link]] parsing, search syntax, Markdown blocks,
                         tag names, web page text
@@ -93,15 +125,21 @@ StashCore/              no-interface logic, with tests
   When changes arrive from iCloud, `Library` rebuilds the search index,
   merges duplicate tags and categories, and removes files for deleted
   documents.
-- `Config/Stash.xcconfig` holds the sync switch. The entitlements files
-  next to it are only used when sync is on.
+- **Sharing** never touches the library from the share extension: two
+  processes writing to an iCloud-synced database at once is asking for
+  trouble. The extension leaves each thing in an inbox folder in the App
+  Group (`SharedInbox` in StashCore), and the app takes it in at launch,
+  when it comes to the front, or as soon as the extension signals. The
+  app writes its category list into the same folder for the share sheet
+  to offer.
+- `Config/Stash.xcconfig` holds both switches. The entitlements files next
+  to it are chosen from them, and none is used when both are off.
 
 To run the `StashCore` tests, open the `StashCore` folder in Xcode and press
 Cmd-U, or run `swift test` in it.
 
 ## Not done yet
 
-- A share extension, so you can save from Safari or other apps' share menus
 - Suggestions while typing `[[`
 - Full copies of web pages for reading offline (only the text is kept for now)
 - An app icon

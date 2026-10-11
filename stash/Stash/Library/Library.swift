@@ -11,6 +11,8 @@ enum SidebarSelection: Hashable {
     case inbox
     case all
     case favorites
+    /// Items with a reminder, soonest first.
+    case reminders
     case kind(ItemKind)
     case category(ItemCategory)
     case tag(Tag)
@@ -41,13 +43,51 @@ final class Library {
     var sidebar: SidebarSelection? = .all {
         didSet { if sidebar != oldValue { compileSmartFilter() } }
     }
+    /// The one item the detail shows. Choosing one item, from anywhere,
+    /// ends a selection of several.
     var selection: Item? {
         didSet {
+            if selection != nil, !multiSelection.isEmpty { multiSelection = [] }
             // Looking at something reads it.
             if let selection, selection.isUnread, selection != oldValue {
                 selection.isUnread = false
                 save()
             }
+        }
+    }
+    /// Two or more items chosen together, to change at once; empty otherwise.
+    private(set) var multiSelection: Set<Item> = []
+    /// Asking for tags to add to these.
+    var taggingItems: [Item]?
+    /// Choosing a reminder time for these.
+    var remindingItems: [Item]?
+
+    /// What the list shows as selected.
+    var listSelection: Set<Item> {
+        multiSelection.isEmpty ? Set([selection].compactMap { $0 }) : multiSelection
+    }
+
+    /// What menu commands act on: the items chosen together, or the one.
+    var selectedItems: [Item] {
+        multiSelection.isEmpty ? [selection].compactMap { $0 } : Array(multiSelection)
+    }
+
+    /// Takes items out of a selection of several -- they've gone to or
+    /// from the Trash -- leaving one item shown if only one is left.
+    private func deselect(_ items: [Item]) {
+        guard !multiSelection.isEmpty else { return }
+        select(multiSelection.subtracting(items))
+    }
+
+    /// Sets the selection from the list: one item shows it, several can
+    /// be changed together.
+    func select(_ items: Set<Item>) {
+        if items.count > 1 {
+            selection = nil
+            multiSelection = items
+        } else {
+            multiSelection = []
+            selection = items.first
         }
     }
     /// A highlight chosen in the side panel, for the reader to scroll to.
@@ -398,6 +438,17 @@ final class Library {
         runSearch()
     }
 
+    /// Sets (or, with nil, clears) a reminder on each item.
+    func setReminder(_ items: [Item], at date: Date?) {
+        for item in items {
+            item.remindAt = date
+            Reminders.shared.schedule(item)
+        }
+        save()
+        runSearch()
+        if date != nil { Task { await Reminders.shared.requestPermission() } }
+    }
+
     func setLabel(_ items: [Item], _ label: ItemLabel) {
         for item in items { item.label = label }
         save()
@@ -443,6 +494,34 @@ final class Library {
         save()
         arrived(item)
         runSearch()
+    }
+
+    // MARK: - Quick capture
+
+    /// A note jotted from the menu bar: it goes to the Inbox, without
+    /// changing what the window is showing.
+    @discardableResult
+    func captureNote(title: String, text: String) -> Item {
+        let item = Item(kind: .note, title: title)
+        item.body = text
+        context.insert(item)
+        save()
+        reindex(item)
+        markReceived(item)
+        return item
+    }
+
+    /// A link saved from the menu bar or a quick action, likewise.
+    @discardableResult
+    func captureLink(_ url: URL) -> Item {
+        let item = Item(kind: .link, title: WebAddress.displayHost(of: url))
+        item.urlString = url.absoluteString
+        context.insert(item)
+        save()
+        reindex(item)
+        markReceived(item)
+        Task { await refreshPage(of: item) }
+        return item
     }
 
     // MARK: - Smart rules
@@ -554,20 +633,24 @@ final class Library {
     /// Items in the Trash keep everything -- files, tags, links -- until
     /// they're deleted for good, by hand or after `trashDays`.
     func moveToTrash(_ items: [Item]) {
+        deselect(items)
         for item in items where !item.isTrashed {
             if selection == item { selection = nil }
             item.trashedAt = .now
             spotlight.update(item)
         }
+        Reminders.shared.cancel(items)
         save()
         revision += 1
         runSearch()
     }
 
     func restore(_ items: [Item]) {
+        deselect(items)
         for item in items {
             item.trashedAt = nil
             spotlight.update(item)
+            Reminders.shared.schedule(item)
         }
         save()
         revision += 1
@@ -575,6 +658,7 @@ final class Library {
     }
 
     func deleteImmediately(_ items: [Item]) {
+        deselect(items)
         for item in items {
             if selection == item { selection = nil }
             if let path = item.storedFilePath ?? item.archivePath { files.remove(path) }
@@ -582,6 +666,7 @@ final class Library {
             context.delete(item)
         }
         spotlight.remove(items.map(\.uuid))
+        Reminders.shared.cancel(items)
         save()
         revision += 1
         runSearch()
@@ -619,6 +704,11 @@ final class Library {
         }
         didEdit(item)
         save()
+    }
+
+    func addTags(from text: String, to items: [Item]) {
+        for item in items { addTags(from: text, to: item) }
+        runSearch()
     }
 
     func removeTag(_ tag: Tag, from item: Item) {
@@ -810,6 +900,7 @@ final class Library {
         case .inbox: "Inbox"
         case .all: "All Items"
         case .favorites: "Favorites"
+        case .reminders: "Reminders"
         case .kind(let kind): kind.pluralName
         case .category(let category): category.name
         case .tag(let tag): "#" + tag.name
@@ -826,6 +917,9 @@ final class Library {
         var result = items.filter(isInSidebar)
         if !search.isEmpty { result = result.filter(search.matches) }
         if search.isRanked { return search.rank(result) }
+        if sidebar == .reminders {
+            return result.sorted { ($0.remindAt ?? .distantFuture) < ($1.remindAt ?? .distantFuture) }
+        }
         return sort.sorted(result, ascending: sortAscending)
     }
 
@@ -837,6 +931,7 @@ final class Library {
         case .all, .trash, .duplicates: return true
         case .inbox: return item.inInbox
         case .favorites: return item.isFavorite
+        case .reminders: return item.remindAt != nil
         case .kind(let kind): return item.kind == kind
         case .category(let category): return category.contains(item.category)
         case .tag(let tag): return (item.tags ?? []).contains(tag)
@@ -971,6 +1066,7 @@ final class Library {
         guard let items = try? context.fetch(FetchDescriptor<Item>()) else { return }
         index?.replaceAll(with: items.map(entry(for:)))
         spotlight.replaceAll(with: items)
+        Reminders.shared.replaceAll(with: items)
         files.removeFolders(notBelongingTo: Set(items.map(\.uuid)))
         // Documents added before duplicates were looked for, or whose
         // hash hasn't arrived from iCloud yet.

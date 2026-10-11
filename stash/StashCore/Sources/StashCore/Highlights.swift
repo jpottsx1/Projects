@@ -72,6 +72,8 @@ public enum HighlightAnchor: Codable, Equatable {
     /// In an EPUB book: the chapter's path inside the book, and the quote
     /// within the chapter's text.
     case epub(chapter: String, quote: TextQuote)
+    /// In a saved page's clean article: the quote within its text.
+    case article(quote: TextQuote)
 
     public struct PDFPageRects: Codable, Equatable {
         public var page: Int

@@ -1,5 +1,6 @@
 import SwiftUI
 import WebKit
+import StashCore
 #if os(macOS)
 import AppKit
 #else
@@ -16,6 +17,7 @@ struct LinkDetail: View {
     /// Which saved version to show, when there's an article as well as the full page.
     @AppStorage("showArticle") private var showArticle = true
     @AppStorage("articleTextSize") private var articleTextSize = 1.0
+    @State private var article = ArticleController()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -25,8 +27,9 @@ struct LinkDetail: View {
             Divider()
 
             Group {
-                if showArticle, let article = item.article {
-                    ArticleView(html: article.page(textSize: articleTextSize), pageURL: item.url)
+                if showArticle, let saved = item.article {
+                    ArticleView(controller: article, html: saved.page(textSize: articleTextSize), pageURL: item.url)
+                        .onAppear { article.attach(item: item, library: library) }
                 } else if let copyURL {
                     PageCopyView(fileURL: copyURL, pageURL: item.url)
                 } else if library.copyingPages.contains(item.uuid) {
@@ -61,6 +64,13 @@ struct LinkDetail: View {
             .padding()
         }
         .onChange(of: item.body) { library.didEdit(item) }
+        .onChange(of: PDFReader.signature(item.sortedHighlights)) { article.showHighlights() }
+        .onChange(of: library.revealedHighlight) { _, highlight in
+            guard let highlight, highlight.item == item, case .article? = highlight.anchor else { return }
+            showArticle = true
+            article.reveal(highlight)
+            library.revealedHighlight = nil
+        }
         .toolbar {
             if item.article != nil {
                 ToolbarItem {
@@ -73,6 +83,11 @@ struct LinkDetail: View {
                     .help("The article on its own, or the whole page as it was")
                 }
                 if showArticle {
+                    ToolbarItem {
+                        HighlightMenu { color, withNote in
+                            Task { await highlightSelection(color, withNote: withNote) }
+                        }
+                    }
                     ToolbarItem {
                         Menu {
                             Button("Larger Text") { articleTextSize = min(articleTextSize + 0.1, 2.5) }
@@ -90,6 +105,13 @@ struct LinkDetail: View {
         .task(id: library.revision) {
             copyURL = library.localPageCopy(for: item)
         }
+    }
+
+    private func highlightSelection(_ color: HighlightColor, withNote: Bool) async {
+        guard let selected = await article.selection() else { return }
+        let highlight = library.addHighlight(to: item, text: selected.words, anchor: .article(quote: selected.quote),
+                                             position: selected.fraction, color: color)
+        if withNote { library.editingHighlight = highlight }
     }
 
     private var header: some View {
@@ -131,45 +153,6 @@ struct LinkDetail: View {
 
 /// Shows a saved web archive. Links in it open in the browser rather than
 /// replacing the copy.
-/// A clean article, laid out for reading. Links open in the browser.
-#if os(macOS)
-struct ArticleView: NSViewRepresentable {
-    let html: String
-    let pageURL: URL?
-
-    func makeCoordinator() -> PageCopyCoordinator { PageCopyCoordinator() }
-
-    func makeNSView(context: Context) -> WKWebView {
-        let view = PageCopyCoordinator.makeWebView()
-        view.navigationDelegate = context.coordinator
-        context.coordinator.show(html: html, baseURL: pageURL, in: view)
-        return view
-    }
-
-    func updateNSView(_ view: WKWebView, context: Context) {
-        context.coordinator.show(html: html, baseURL: pageURL, in: view)
-    }
-}
-#else
-struct ArticleView: UIViewRepresentable {
-    let html: String
-    let pageURL: URL?
-
-    func makeCoordinator() -> PageCopyCoordinator { PageCopyCoordinator() }
-
-    func makeUIView(context: Context) -> WKWebView {
-        let view = PageCopyCoordinator.makeWebView()
-        view.navigationDelegate = context.coordinator
-        context.coordinator.show(html: html, baseURL: pageURL, in: view)
-        return view
-    }
-
-    func updateUIView(_ view: WKWebView, context: Context) {
-        context.coordinator.show(html: html, baseURL: pageURL, in: view)
-    }
-}
-#endif
-
 #if os(macOS)
 struct PageCopyView: NSViewRepresentable {
     let fileURL: URL
@@ -231,13 +214,87 @@ final class PageCopyCoordinator: NSObject, WKNavigationDelegate {
                   baseURL: baseURL ?? fileURL)
     }
 
-    private var shownHTML: String?
+    func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction) async -> WKNavigationActionPolicy {
+        guard navigationAction.navigationType == .linkActivated, let url = navigationAction.request.url else {
+            return .allow
+        }
+        #if os(macOS)
+        NSWorkspace.shared.open(url)
+        #else
+        _ = await UIApplication.shared.open(url)
+        #endif
+        return .cancel
+    }
+}
 
-    /// Shows an article, unless it's the one already showing.
-    func show(html: String, baseURL: URL?, in view: WKWebView) {
-        guard html != shownHTML else { return }
+/// Runs a clean article's web view: showing it, its highlights, and links.
+@MainActor
+final class ArticleController: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
+    private(set) weak var webView: WKWebView?
+    private weak var item: Item?
+    private weak var library: Library?
+    private var shownHTML: String?
+    private var loaded = false
+    private var revealAfterLoad: UUID?
+
+    func attach(item: Item, library: Library) {
+        self.item = item
+        self.library = library
+    }
+
+    func makeWebView() -> WKWebView {
+        let configuration = WKWebViewConfiguration()
+        configuration.websiteDataStore = .nonPersistent()
+        configuration.userContentController.add(WeakMessageHandler(self), name: "stash")
+        configuration.userContentController.addUserScript(
+            WKUserScript(source: WebHighlights.script, injectionTime: .atDocumentEnd, forMainFrameOnly: true))
+        let view = WKWebView(frame: .zero, configuration: configuration)
+        view.navigationDelegate = self
+        webView = view
+        return view
+    }
+
+    /// Loads the article, unless it's the one already showing.
+    func show(html: String, baseURL: URL?) {
+        guard html != shownHTML, let webView else { return }
         shownHTML = html
-        view.loadHTMLString(html, baseURL: baseURL)
+        loaded = false
+        webView.loadHTMLString(html, baseURL: baseURL)
+    }
+
+    func showHighlights() {
+        guard loaded, let webView, let item else { return }
+        let highlights = item.sortedHighlights.compactMap { highlight -> (Highlight, TextQuote)? in
+            guard case .article(let quote)? = highlight.anchor else { return nil }
+            return (highlight, quote)
+        }
+        Task { await WebHighlights.show(highlights, in: webView) }
+    }
+
+    func reveal(_ highlight: Highlight) {
+        if loaded, let webView {
+            WebHighlights.reveal(highlight.uuid, in: webView)
+        } else {
+            revealAfterLoad = highlight.uuid
+        }
+    }
+
+    func selection() async -> WebHighlights.Selection? {
+        guard let webView else { return nil }
+        return await WebHighlights.selection(in: webView)
+    }
+
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        loaded = true
+        showHighlights()
+        if let id = revealAfterLoad {
+            revealAfterLoad = nil
+            // After the highlights are marked, which is a moment's work.
+            Task {
+                try? await Task.sleep(for: .milliseconds(150))
+                WebHighlights.reveal(id, in: webView)
+            }
+        }
     }
 
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction) async -> WKNavigationActionPolicy {
@@ -251,4 +308,45 @@ final class PageCopyCoordinator: NSObject, WKNavigationDelegate {
         #endif
         return .cancel
     }
+
+    func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+        guard let body = message.body as? [String: Any], body["type"] as? String == "tap",
+              let id = (body["id"] as? String).flatMap(UUID.init(uuidString:)) else { return }
+        library?.editingHighlight = item?.highlights?.first { $0.uuid == id }
+    }
 }
+
+/// A clean article, laid out for reading. Links open in the browser.
+#if os(macOS)
+struct ArticleView: NSViewRepresentable {
+    let controller: ArticleController
+    let html: String
+    let pageURL: URL?
+
+    func makeNSView(context: Context) -> WKWebView {
+        let view = controller.webView ?? controller.makeWebView()
+        controller.show(html: html, baseURL: pageURL)
+        return view
+    }
+
+    func updateNSView(_ view: WKWebView, context: Context) {
+        controller.show(html: html, baseURL: pageURL)
+    }
+}
+#else
+struct ArticleView: UIViewRepresentable {
+    let controller: ArticleController
+    let html: String
+    let pageURL: URL?
+
+    func makeUIView(context: Context) -> WKWebView {
+        let view = controller.webView ?? controller.makeWebView()
+        controller.show(html: html, baseURL: pageURL)
+        return view
+    }
+
+    func updateUIView(_ view: WKWebView, context: Context) {
+        controller.show(html: html, baseURL: pageURL)
+    }
+}
+#endif

@@ -27,11 +27,21 @@ final class StashStore {
             fatalError("Couldn't open the library: \(error)")
         }
         library = Library(context: container.mainContext)
+        // Choosing a reminder's notification opens its item.
+        Reminders.shared.onOpen = { [library] id in
+            if let item = library.items(withIDs: [id]).first { library.show(item) }
+        }
+        Reminders.shared.start()
     }
 }
 
 @main
 struct StashApp: App {
+    #if os(iOS)
+    @UIApplicationDelegateAdaptor(StashAppDelegate.self) private var appDelegate
+    #else
+    @AppStorage("showMenuBarExtra") private var showMenuBarExtra = true
+    #endif
     private let container: ModelContainer
     @State private var library: Library
     @State private var sync = SyncMonitor()
@@ -56,6 +66,17 @@ struct StashApp: App {
             // Import from iPhone or iPad: take a photo or scan a document
             // with the phone, straight into Stash.
             ImportFromDevicesCommands()
+        }
+
+        MenuBarExtra("Stash", systemImage: "tray.and.arrow.down", isInserted: $showMenuBarExtra) {
+            QuickCaptureView()
+                .environment(library)
+                .modelContainer(container)
+        }
+        .menuBarExtraStyle(.window)
+
+        Settings {
+            SettingsView()
         }
         #else
         WindowGroup {
@@ -82,40 +103,45 @@ struct StashCommands: Commands {
                 .keyboardShortcut("i", modifiers: [.command, .shift])
         }
         CommandGroup(replacing: .importExport) {
-            Button("Export Item…") {
-                if let item = library.selection { library.exportRequest = .items([item], name: item.displayTitle) }
+            Button(library.selectedItems.count > 1 ? "Export Items…" : "Export Item…") {
+                let chosen = library.selectedItems
+                let name = chosen.count == 1 ? chosen[0].displayTitle : "\(chosen.count) Items"
+                library.exportRequest = .items(chosen, name: name)
             }
             .keyboardShortcut("e", modifiers: [.command, .shift])
-            .disabled(library.selection == nil)
+            .disabled(library.selectedItems.isEmpty)
             Button("Export Everything…") { library.exportRequest = .everything }
             Divider()
             Button("Restore from Backup…") { library.isRestoring = true }
         }
         CommandMenu("Item") {
-            Button(library.selection?.isFavorite == true ? "Remove from Favorites" : "Add to Favorites") {
-                if let item = library.selection { library.setFavorite([item], !item.isFavorite) }
+            let chosen = library.selectedItems
+            let live = chosen.filter { !$0.isTrashed }
+            let allFavorite = !live.isEmpty && live.allSatisfy(\.isFavorite)
+            Button(allFavorite ? "Remove from Favorites" : "Add to Favorites") {
+                library.setFavorite(live, !allFavorite)
             }
             .keyboardShortcut("d")
-            .disabled(library.selection == nil || library.selection?.isTrashed == true)
-            Button(library.selection?.isUnread == true ? "Mark as Read" : "Mark as Unread") {
-                if let item = library.selection { library.setUnread([item], !item.isUnread) }
+            .disabled(live.isEmpty)
+            let anyUnread = chosen.contains(where: \.isUnread)
+            Button(anyUnread ? "Mark as Read" : "Mark as Unread") {
+                library.setUnread(chosen, !anyUnread)
             }
             .keyboardShortcut("u", modifiers: [.command, .shift])
-            .disabled(library.selection == nil)
-            Button("Done (Take Out of Inbox)") {
-                if let item = library.selection { library.markFiled([item]) }
-            }
-            .disabled(library.selection?.inInbox != true)
+            .disabled(chosen.isEmpty)
+            Button("Done (Take Out of Inbox)") { library.markFiled(chosen) }
+                .disabled(!chosen.contains(where: \.inInbox))
+            Button("Add Tags…") { library.taggingItems = live }
+                .keyboardShortcut("t", modifiers: [.command, .option])
+                .disabled(live.isEmpty)
+            Button("Remind Me…") { library.remindingItems = live }
+                .disabled(live.isEmpty)
             Divider()
-            Button("Move to Trash") {
-                if let item = library.selection { library.moveToTrash([item]) }
-            }
-            .keyboardShortcut(.delete)
-            .disabled(library.selection == nil || library.selection?.isTrashed == true)
-            Button("Put Back") {
-                if let item = library.selection { library.restore([item]) }
-            }
-            .disabled(library.selection?.isTrashed != true)
+            Button("Move to Trash") { library.moveToTrash(live) }
+                .keyboardShortcut(.delete)
+                .disabled(live.isEmpty)
+            Button("Put Back") { library.restore(chosen.filter(\.isTrashed)) }
+                .disabled(!chosen.contains(where: \.isTrashed))
             Divider()
             Button("Smart Rules…") { library.isEditingRules = true }
                 .keyboardShortcut("r", modifiers: [.command, .option])

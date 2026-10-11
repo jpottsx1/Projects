@@ -75,6 +75,17 @@ struct ItemInspector: View {
                 }
             }
 
+            Section("Reminder") {
+                if let date = item.remindAt {
+                    DatePicker("Remind Me", selection: Binding(get: { date }, set: { library.setReminder([item], at: $0) }),
+                               displayedComponents: [.date, .hourAndMinute])
+                    Button(item.isDue ? "Done" : "Clear Reminder") { library.setReminder([item], at: nil) }
+                        .buttonStyle(.borderless)
+                } else {
+                    ReminderMenu(items: [item])
+                }
+            }
+
             Section("Label & Rating") {
                 Picker("Label", selection: Binding(get: { item.label }, set: { library.setLabel([item], $0) })) {
                     ForEach(ItemLabel.allCases) { label in
@@ -93,11 +104,11 @@ struct ItemInspector: View {
                 RatingControl(rating: item.rating) { library.setRating([item], $0) }
             }
 
-            if item.isPDF || item.isEPUB || !(item.highlights ?? []).isEmpty {
+            if item.isPDF || item.isEPUB || item.articleData != nil || !(item.highlights ?? []).isEmpty {
                 Section {
                     let highlights = item.sortedHighlights
                     if highlights.isEmpty {
-                        Text("Select text in the \(item.isEPUB ? "book" : "PDF"), then Highlight.")
+                        Text("Select text in the \(item.isEPUB ? "book" : item.kind == .link ? "article" : "PDF"), then Highlight.")
                             .foregroundStyle(.secondary)
                     }
                     ForEach(highlights) { highlight in

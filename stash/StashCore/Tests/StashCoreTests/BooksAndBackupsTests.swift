@@ -123,6 +123,7 @@ final class TextQuoteTests: XCTestCase {
         let anchors: [HighlightAnchor] = [
             .pdf([.init(page: 2, rects: [.init(x: 1, y: 2, width: 3.5, height: 4)])]),
             .epub(chapter: "OEBPS/one.xhtml", quote: TextQuote(exact: "a", prefix: "b", suffix: "c")),
+            .article(quote: TextQuote(exact: "d")),
         ]
         for anchor in anchors {
             XCTAssertEqual(HighlightAnchor(json: anchor.json), anchor)
@@ -133,6 +134,7 @@ final class TextQuoteTests: XCTestCase {
 
 final class LabelsAndRatingsSearchTests: XCTestCase {
     func testFilters() {
+        XCTAssertEqual(SearchQuery("is:due is:reminder").flags, [.due, .reminder])
         let query = SearchQuery("label:Red label:grey label:none rating:>=4 is:unread is:inbox")
         XCTAssertEqual(query.labels, [.red, .gray, .none])
         XCTAssertEqual(query.minimumRating, 4)
@@ -227,5 +229,34 @@ final class BackupTests: XCTestCase {
             > Second
 
             """)
+    }
+}
+
+final class ReminderDatesTests: XCTestCase {
+    private var calendar: Calendar = {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        return calendar
+    }()
+
+    private func date(_ day: Int, _ hour: Int, _ minute: Int = 0) -> Date {
+        // October 2026: the 11th is a Sunday.
+        calendar.date(from: DateComponents(year: 2026, month: 10, day: day, hour: hour, minute: minute))!
+    }
+
+    func testLaterToday() {
+        XCTAssertEqual(ReminderDates.laterToday(now: date(12, 10, 25), calendar: calendar), date(12, 13))
+        XCTAssertNil(ReminderDates.laterToday(now: date(12, 19, 30), calendar: calendar))
+        XCTAssertNil(ReminderDates.laterToday(now: date(12, 23), calendar: calendar))
+    }
+
+    func testMornings() {
+        let wednesday = date(14, 15)
+        XCTAssertEqual(ReminderDates.tomorrowMorning(now: wednesday, calendar: calendar), date(15, 9))
+        XCTAssertEqual(ReminderDates.thisWeekend(now: wednesday, calendar: calendar), date(17, 9))
+        XCTAssertEqual(ReminderDates.nextWeek(now: wednesday, calendar: calendar), date(19, 9))
+        // On a Saturday, "this weekend" is next Saturday, and on a Monday next week is the next Monday.
+        XCTAssertEqual(ReminderDates.thisWeekend(now: date(17, 8), calendar: calendar), date(24, 9))
+        XCTAssertEqual(ReminderDates.nextWeek(now: date(12, 8), calendar: calendar), date(19, 9))
     }
 }

@@ -64,6 +64,8 @@ struct CompiledSearch {
             case .unread: if !item.isUnread { return false }
             case .read: if item.isUnread { return false }
             case .inbox: if !item.inInbox { return false }
+            case .due: if !item.isDue { return false }
+            case .reminder: if item.remindAt == nil { return false }
             case .untagged: if !(item.tags ?? []).isEmpty { return false }
             case .uncategorized: if item.category != nil { return false }
             }

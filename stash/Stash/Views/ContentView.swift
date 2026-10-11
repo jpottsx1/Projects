@@ -7,6 +7,7 @@ import UniformTypeIdentifiers
 struct ContentView: View {
     @Environment(Library.self) private var library
     @Environment(\.scenePhase) private var scenePhase
+    @State private var tagDraft = ""
 
     var body: some View {
         @Bindable var library = library
@@ -17,7 +18,9 @@ struct ContentView: View {
             ItemListView()
                 .navigationSplitViewColumnWidth(min: 260, ideal: 320)
         } detail: {
-            if let item = library.selection {
+            if library.multiSelection.count > 1 {
+                BulkEditView(items: library.selectedItems)
+            } else if let item = library.selection {
                 ItemDetailView(item: item)
                     .id(item.persistentModelID)
             } else {
@@ -43,6 +46,9 @@ struct ContentView: View {
             if phase == .active { library.importSharedItems() }
         }
         #if os(iOS)
+        .onAppear { QuickActions.performPending() }
+        #endif
+        #if os(iOS)
         .fullScreenCover(isPresented: $library.isScanning) {
             DocumentScanner { pages in
                 library.isScanning = false
@@ -57,6 +63,21 @@ struct ContentView: View {
             return true
         }
         #endif
+        .sheet(item: Binding(get: { library.remindingItems.map(ItemGroup.init) },
+                             set: { library.remindingItems = $0?.items })) { group in
+            ReminderPicker(items: group.items)
+        }
+        .alert("Add Tags", isPresented: Binding(get: { library.taggingItems != nil },
+                                                set: { if !$0 { library.taggingItems = nil } })) {
+            TextField("Tags, separated by commas", text: $tagDraft)
+            Button("Cancel", role: .cancel) { tagDraft = "" }
+            Button("Add") {
+                library.addTags(from: tagDraft, to: library.taggingItems ?? [])
+                tagDraft = ""
+            }
+        } message: {
+            Text("They’re added to \(library.taggingItems?.count ?? 0) items.")
+        }
         .sheet(isPresented: $library.isEditingRules) {
             RulesView()
         }
@@ -175,4 +196,10 @@ private struct BackupPanels: View {
             message = ("Couldn’t Restore", error.localizedDescription)
         }
     }
+}
+
+/// Items to present a sheet about.
+struct ItemGroup: Identifiable {
+    let items: [Item]
+    var id: String { items.map(\.uuid.uuidString).joined() }
 }

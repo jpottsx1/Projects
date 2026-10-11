@@ -4,6 +4,9 @@
 // in Xcode, select each target (Stash, and StashShare for sharing) >
 // Signing & Capabilities, and choose your team under Team.
 
+// The app icon, in Assets.xcassets.
+ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon
+
 // ---------------------------------------------------------------------------
 // iCloud sync between your Mac and iPhone
 //

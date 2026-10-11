@@ -1,0 +1,4 @@
+# StashCore built from the command line
+StashCore/.build/
+StashCore/.swiftpm/
+DerivedData/

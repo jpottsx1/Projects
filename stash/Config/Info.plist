@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- iCloud wakes the iPhone app silently when another device has made
+	     changes, so they're already there when it's next opened. Ignored on
+	     the Mac, and harmless when sync is off. Xcode merges this with the
+	     rest of the Info.plist it generates. -->
+	<!-- Where the share extension leaves things (see SharedInbox). -->
+	<key>StashAppGroup</key>
+	<string>$(APP_GROUP)</string>
+	<!-- Where SyncMonitor checks the iCloud account. -->
+	<key>StashICloudContainer</key>
+	<string>$(ICLOUD_CONTAINER)</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>remote-notification</string>
+	</array>
+</dict>
+</plist>

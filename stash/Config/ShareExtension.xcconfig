@@ -1,0 +1,8 @@
+// The share extension's settings: everything in Stash.xcconfig (change
+// things there, not here), with its own entitlements.
+#include "Stash.xcconfig"
+
+STASH_SHARE_ENTITLEMENTS_YES = Config/ShareExtension.entitlements
+CODE_SIGN_ENTITLEMENTS[sdk=iphoneos*] = $(STASH_SHARE_ENTITLEMENTS_$(SHARE_EXTENSION))
+CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*] = $(STASH_SHARE_ENTITLEMENTS_$(SHARE_EXTENSION))
+CODE_SIGN_ENTITLEMENTS[sdk=macosx*] = $(STASH_SHARE_ENTITLEMENTS_$(SHARE_EXTENSION))

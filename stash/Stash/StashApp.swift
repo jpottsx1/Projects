@@ -11,7 +11,7 @@ final class StashStore {
     let library: Library
 
     private init() {
-        let schema = Schema([Item.self, Tag.self, ItemCategory.self, SmartFilter.self])
+        let schema = Schema([Item.self, Tag.self, ItemCategory.self, SmartFilter.self, Highlight.self])
         // Syncs through the iCloud container named in the entitlements,
         // which only exist when ICLOUD_SYNC is on (Config/Stash.xcconfig).
         // Said explicitly either way: left to itself SwiftData syncs
@@ -76,12 +76,31 @@ struct StashCommands: Commands {
             Button("Import Documents…") { library.isImporting = true }
                 .keyboardShortcut("i", modifiers: [.command, .shift])
         }
+        CommandGroup(replacing: .importExport) {
+            Button("Export Item…") {
+                if let item = library.selection { library.exportRequest = .items([item], name: item.displayTitle) }
+            }
+            .keyboardShortcut("e", modifiers: [.command, .shift])
+            .disabled(library.selection == nil)
+            Button("Export Everything…") { library.exportRequest = .everything }
+            Divider()
+            Button("Restore from Backup…") { library.isRestoring = true }
+        }
         CommandMenu("Item") {
             Button(library.selection?.isFavorite == true ? "Remove from Favorites" : "Add to Favorites") {
                 if let item = library.selection { library.setFavorite([item], !item.isFavorite) }
             }
             .keyboardShortcut("d")
             .disabled(library.selection == nil || library.selection?.isTrashed == true)
+            Button(library.selection?.isUnread == true ? "Mark as Read" : "Mark as Unread") {
+                if let item = library.selection { library.setUnread([item], !item.isUnread) }
+            }
+            .keyboardShortcut("u", modifiers: [.command, .shift])
+            .disabled(library.selection == nil)
+            Button("Done (Take Out of Inbox)") {
+                if let item = library.selection { library.markFiled([item]) }
+            }
+            .disabled(library.selection?.inInbox != true)
             Divider()
             Button("Move to Trash") {
                 if let item = library.selection { library.moveToTrash([item]) }

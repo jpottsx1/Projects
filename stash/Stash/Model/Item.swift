@@ -44,6 +44,16 @@ final class Item {
     /// When it was put in the Trash; nil when it isn't there. Items stay
     /// in the Trash for `Library.trashDays`, then go for good.
     var trashedAt: Date?
+    /// Added from elsewhere -- shared, imported, saved by Shortcuts -- and
+    /// not looked at yet. Selecting an item reads it.
+    var isUnread: Bool = false
+    /// Waiting to be filed: things arriving without a category land here
+    /// until they're given one, or marked done.
+    var inInbox: Bool = false
+    /// An `ItemLabel`'s raw value; 0 for none.
+    var labelRaw: Int = 0
+    /// 0 to 5 stars; 0 for unrated.
+    var rating: Int = 0
 
     // Links
     var urlString: String?
@@ -70,6 +80,9 @@ final class Item {
     /// The file's SHA-256, for finding the same file imported twice. Empty
     /// until worked out (see `Library.fillContentHash`).
     var contentHash: String = ""
+    /// Where reading stopped in a book: "chapter path|fraction scrolled".
+    var readingPosition: String = ""
+    @Relationship(deleteRule: .cascade, inverse: \Highlight.item) var highlights: [Highlight]? = []
 
     /// Words that aren't typed by anyone but should still be searchable:
     /// a page's text, a PDF's text, text read out of an image.
@@ -95,6 +108,19 @@ final class Item {
     var url: URL? { urlString.flatMap(URL.init(string:)) }
 
     var isTrashed: Bool { trashedAt != nil }
+
+    var label: ItemLabel {
+        get { ItemLabel(rawValue: labelRaw) ?? .none }
+        set { labelRaw = newValue.rawValue }
+    }
+
+    /// Highlights in reading order.
+    var sortedHighlights: [Highlight] {
+        (highlights ?? []).sorted { ($0.position, $0.createdAt) < ($1.position, $1.createdAt) }
+    }
+
+    var isPDF: Bool { kind == .document && contentType?.conforms(to: .pdf) == true }
+    var isEPUB: Bool { kind == .document && contentType?.conforms(to: .epub) == true }
 
     /// The same for two copies of one page or one file; nil for notes, and
     /// for documents whose file hasn't been read yet.

@@ -21,6 +21,9 @@ struct SidebarView: View {
         @Bindable var library = library
         List(selection: $library.sidebar) {
             Section("Library") {
+                Label("Inbox", systemImage: "tray.and.arrow.down")
+                    .badge(items.filter { $0.inInbox && !$0.isTrashed }.count)
+                    .tag(SidebarSelection.inbox)
                 Label("All Items", systemImage: "tray.full")
                     .tag(SidebarSelection.all)
                 Label("Favorites", systemImage: "star")
@@ -66,6 +69,10 @@ struct SidebarView: View {
                         .contextMenu {
                             Button("New Category Inside…") { startNaming(.new(parent: category)) }
                             Button("Rename…") { startNaming(.rename(category)) }
+                            Button("Export…") {
+                                let inside = items.filter { category.contains($0.category) && !$0.isTrashed }
+                                library.exportRequest = .items(inside, name: category.name)
+                            }
                             Divider()
                             Button("Delete Category", role: .destructive) { library.delete(category) }
                         }
@@ -97,6 +104,17 @@ struct SidebarView: View {
         }
         .listStyle(.sidebar)
         .navigationTitle("Stash")
+        .toolbar {
+            ToolbarItem {
+                Menu {
+                    Button("Export Everything…") { library.exportRequest = .everything }
+                    Button("Restore from Backup…") { library.isRestoring = true }
+                } label: {
+                    Label("Back Up", systemImage: "externaldrive")
+                }
+                .help("Export or restore the library")
+            }
+        }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if SyncMonitor.isEnabled { SyncStatusView() }
         }

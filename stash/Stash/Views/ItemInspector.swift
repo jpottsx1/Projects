@@ -75,6 +75,39 @@ struct ItemInspector: View {
                 }
             }
 
+            Section("Label & Rating") {
+                Picker("Label", selection: Binding(get: { item.label }, set: { library.setLabel([item], $0) })) {
+                    ForEach(ItemLabel.allCases) { label in
+                        if label == .none {
+                            Text("None").tag(label)
+                        } else {
+                            Label {
+                                Text(label.name)
+                            } icon: {
+                                Image(systemName: "circle.fill").foregroundStyle(label.color)
+                            }
+                            .tag(label)
+                        }
+                    }
+                }
+                RatingControl(rating: item.rating) { library.setRating([item], $0) }
+            }
+
+            if item.isPDF || item.isEPUB || !(item.highlights ?? []).isEmpty {
+                Section {
+                    let highlights = item.sortedHighlights
+                    if highlights.isEmpty {
+                        Text("Select text in the \(item.isEPUB ? "book" : "PDF"), then Highlight.")
+                            .foregroundStyle(.secondary)
+                    }
+                    ForEach(highlights) { highlight in
+                        HighlightRow(highlight: highlight)
+                    }
+                } header: {
+                    Text("Highlights")
+                }
+            }
+
             Section {
                 if seeAlso.isEmpty {
                     Text("Nothing much like this yet.")
@@ -107,7 +140,7 @@ struct ItemInspector: View {
             }
         }
         .formStyle(.grouped)
-        .onChange(of: item.category) { library.didEdit(item) }
+        .onChange(of: item.category) { library.didChangeCategory(of: item) }
         // Worked out a moment after typing stops, not on every keystroke.
         .task(id: item.modifiedAt) {
             if !seeAlso.isEmpty { try? await Task.sleep(for: .seconds(1)) }
@@ -203,5 +236,124 @@ struct ItemPicker: View {
                 && !linked.contains(item.persistentModelID)
                 && (filter.isEmpty || item.title.localizedStandardContains(filter))
         }
+    }
+}
+
+/// Up to five stars; choosing the current rating again clears it.
+struct RatingControl: View {
+    let rating: Int
+    let onChange: (Int) -> Void
+
+    var body: some View {
+        LabeledContent("Rating") {
+            HStack(spacing: 2) {
+                ForEach(1...5, id: \.self) { stars in
+                    Button {
+                        onChange(stars == rating ? 0 : stars)
+                    } label: {
+                        Image(systemName: stars <= rating ? "star.fill" : "star")
+                            .foregroundStyle(stars <= rating ? .orange : .secondary)
+                    }
+                    .buttonStyle(.borderless)
+                    .accessibilityLabel("\(stars) stars")
+                }
+            }
+        }
+        .accessibilityValue("\(rating) stars")
+    }
+}
+
+/// A highlight in the side panel: choosing it scrolls the document there.
+struct HighlightRow: View {
+    @Environment(Library.self) private var library
+    let highlight: Highlight
+
+    var body: some View {
+        Button {
+            library.revealedHighlight = highlight
+        } label: {
+            HStack(alignment: .top, spacing: 8) {
+                RoundedRectangle(cornerRadius: 1.5)
+                    .fill(highlight.color.swatch)
+                    .frame(width: 3)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(highlight.text)
+                        .lineLimit(4)
+                        .foregroundStyle(.primary)
+                    if !highlight.note.isEmpty {
+                        Text(highlight.note)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(3)
+                    }
+                }
+            }
+        }
+        .buttonStyle(.borderless)
+        .contextMenu {
+            Button("Edit Note…") { library.editingHighlight = highlight }
+            Menu("Colour") {
+                ForEach(HighlightColor.allCases, id: \.self) { color in
+                    Button(color.name) { library.update(highlight, color: color) }
+                }
+            }
+            Divider()
+            Button("Delete Highlight", role: .destructive) { library.delete(highlight) }
+        }
+    }
+}
+
+/// Writes the note on a highlight, changes its colour, or deletes it.
+struct HighlightNoteEditor: View {
+    @Environment(Library.self) private var library
+    @Environment(\.dismiss) private var dismiss
+    let highlight: Highlight
+    @State private var note: String
+
+    init(highlight: Highlight) {
+        self.highlight = highlight
+        _note = State(initialValue: highlight.note)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Text(highlight.text)
+                        .italic()
+                        .textSelection(.enabled)
+                    Picker("Colour", selection: Binding(get: { highlight.color },
+                                                       set: { library.update(highlight, color: $0) })) {
+                        ForEach(HighlightColor.allCases, id: \.self) { color in
+                            Text(color.name).tag(color)
+                        }
+                    }
+                }
+                Section("Note") {
+                    TextEditor(text: $note)
+                        .frame(minHeight: 120)
+                }
+                Section {
+                    Button("Delete Highlight", role: .destructive) {
+                        library.delete(highlight)
+                        dismiss()
+                    }
+                }
+            }
+            .formStyle(.grouped)
+            .navigationTitle("Highlight")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") {
+                        library.update(highlight, note: note)
+                        dismiss()
+                    }
+                }
+            }
+        }
+        .frame(minWidth: 380, minHeight: 380)
     }
 }

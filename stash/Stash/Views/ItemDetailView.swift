@@ -20,7 +20,11 @@ struct ItemDetailView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            if item.isTrashed { TrashBanner(item: item) }
+            if item.isTrashed {
+                TrashBanner(item: item)
+            } else if item.inInbox {
+                InboxBanner(item: item)
+            }
             VStack(alignment: .leading, spacing: 8) {
                 TextField("Title", text: $item.title)
                     .font(.title2.bold())
@@ -80,6 +84,33 @@ struct ItemDetailView: View {
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
+    }
+}
+
+/// Says an item is waiting in the Inbox, with ways to file it.
+struct InboxBanner: View {
+    @Environment(Library.self) private var library
+    let item: Item
+    @Query(sort: \ItemCategory.name) private var categories: [ItemCategory]
+
+    var body: some View {
+        HStack {
+            Label("In the Inbox", systemImage: "tray.and.arrow.down")
+                .font(.callout.weight(.medium))
+            Spacer()
+            Menu("File In") {
+                ForEach(categories.filter { $0.parent == nil }.flatMap(\.flattened)) { category in
+                    Button(category.path) { library.file([item], in: category) }
+                }
+            }
+            .fixedSize()
+            .disabled(categories.isEmpty)
+            Button("Done") { library.markFiled([item]) }
+                .help("Take it out of the Inbox without a category")
+        }
+        .padding(.horizontal)
+        .padding(.vertical, 8)
+        .background(.blue.opacity(0.12))
     }
 }
 

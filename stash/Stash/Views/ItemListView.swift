@@ -8,32 +8,16 @@ struct ItemListView: View {
     @State private var savingSearch: String?
     @State private var confirmingEmptyTrash = false
     @State private var confirmingDelete: [Item] = []
+    @Environment(\.horizontalSizeClass) private var sizeClass
 
     var body: some View {
         @Bindable var library = library
         let items = library.visibleItems(from: allItems)
-        List(selection: $library.selection) {
-            ForEach(items) { item in
-                ItemRow(item: item)
-                    .tag(item)
-                    .contextMenu { menu(for: item) }
-                    .swipeActions(edge: .trailing) {
-                        if item.isTrashed {
-                            Button("Delete", role: .destructive) { confirmingDelete = [item] }
-                            Button("Put Back") { library.restore([item]) }
-                                .tint(.blue)
-                        } else {
-                            Button("Trash", role: .destructive) { library.moveToTrash([item]) }
-                        }
-                    }
-                    .swipeActions(edge: .leading) {
-                        if !item.isTrashed {
-                            Button(item.isFavorite ? "Unfavorite" : "Favorite") {
-                                library.setFavorite([item], !item.isFavorite)
-                            }
-                            .tint(.yellow)
-                        }
-                    }
+        Group {
+            if library.showsGrid && sizeClass != .compact {
+                grid(items)
+            } else {
+                list(items)
             }
         }
         .overlay {
@@ -45,6 +29,16 @@ struct ItemListView: View {
             ToolbarItem(placement: .primaryAction) { AddMenu() }
             ToolbarItem {
                 SortMenu()
+            }
+            if sizeClass != .compact {
+                ToolbarItem {
+                    Picker("View", selection: $library.showsGrid) {
+                        Label("List", systemImage: "list.bullet").tag(false)
+                        Label("Grid", systemImage: "square.grid.2x2").tag(true)
+                    }
+                    .pickerStyle(.segmented)
+                    .help("Show as a list or as a grid")
+                }
             }
             if !library.searchText.isEmpty {
                 ToolbarItem {
@@ -91,6 +85,48 @@ struct ItemListView: View {
             Button("Delete", role: .destructive) { library.deleteImmediately(confirmingDelete) }
         } message: {
             Text("This can’t be undone.")
+        }
+    }
+
+    private func list(_ items: [Item]) -> some View {
+        @Bindable var library = library
+        return List(selection: $library.selection) {
+            ForEach(items) { item in
+                ItemRow(item: item)
+                    .tag(item)
+                    .contextMenu { menu(for: item) }
+                    .swipeActions(edge: .trailing) {
+                        if item.isTrashed {
+                            Button("Delete", role: .destructive) { confirmingDelete = [item] }
+                            Button("Put Back") { library.restore([item]) }
+                                .tint(.blue)
+                        } else {
+                            Button("Trash", role: .destructive) { library.moveToTrash([item]) }
+                        }
+                    }
+                    .swipeActions(edge: .leading) {
+                        if !item.isTrashed {
+                            Button(item.isFavorite ? "Unfavorite" : "Favorite") {
+                                library.setFavorite([item], !item.isFavorite)
+                            }
+                            .tint(.yellow)
+                        }
+                    }
+            }
+        }
+    }
+
+    /// Cards with pictures, for a wide window.
+    private func grid(_ items: [Item]) -> some View {
+        ScrollView {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 170, maximum: 240), spacing: 14)], spacing: 14) {
+                ForEach(items) { item in
+                    ItemCard(item: item, isSelected: library.selection == item)
+                        .onTapGesture { library.selection = item }
+                        .contextMenu { menu(for: item) }
+                }
+            }
+            .padding()
         }
     }
 
@@ -188,9 +224,18 @@ struct ItemRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
-            Image(systemName: item.systemImage)
-                .foregroundStyle(.tint)
-                .frame(width: 20)
+            Group {
+                if item.thumbnailData != nil {
+                    ThumbnailImage(item: item)
+                        .frame(width: 40, height: 40)
+                        .clipShape(RoundedRectangle(cornerRadius: 5))
+                        .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(.quaternary))
+                } else {
+                    Image(systemName: item.systemImage)
+                        .foregroundStyle(.tint)
+                        .frame(width: 20)
+                }
+            }
                 .overlay(alignment: .topLeading) {
                     if item.isUnread {
                         Circle()
@@ -218,8 +263,8 @@ struct ItemRow: View {
                             .accessibilityLabel("\(item.label.name) label")
                     }
                 }
-                if !subtitle.isEmpty {
-                    Text(subtitle)
+                if !item.listSubtitle.isEmpty {
+                    Text(item.listSubtitle)
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
@@ -243,22 +288,6 @@ struct ItemRow: View {
         .padding(.vertical, 2)
     }
 
-    private var subtitle: String {
-        switch item.kind {
-        case .note:
-            // The first couple of lines, without heading marks.
-            return item.body
-                .split(separator: "\n", omittingEmptySubsequences: true)
-                .prefix(2)
-                .map { $0.trimmingCharacters(in: CharacterSet(charactersIn: "# ")) }
-                .joined(separator: " ")
-        case .link:
-            if !item.summary.isEmpty { return item.summary }
-            return item.url.map { WebAddress.displayHost(of: $0) } ?? ""
-        case .document:
-            return item.contentType?.localizedDescription ?? ""
-        }
-    }
 }
 
 /// Label and Rating submenus, for an item's context menu.
@@ -302,6 +331,96 @@ extension ItemLabel {
         case .blue: .blue
         case .purple: .purple
         case .gray: .gray
+        }
+    }
+}
+
+extension Item {
+    /// A line or two under the title: a note's opening, a page's summary, a file's type.
+    var listSubtitle: String {
+        switch kind {
+        case .note:
+            // The first couple of lines, without heading marks.
+            return body
+                .split(separator: "\n", omittingEmptySubsequences: true)
+                .prefix(2)
+                .map { $0.trimmingCharacters(in: CharacterSet(charactersIn: "# ")) }
+                .joined(separator: " ")
+        case .link:
+            if !summary.isEmpty { return summary }
+            return url.map { WebAddress.displayHost(of: $0) } ?? ""
+        case .document:
+            return contentType?.localizedDescription ?? ""
+        }
+    }
+}
+
+/// An item as a card in the grid: its picture (or a note's opening), title and details.
+struct ItemCard: View {
+    let item: Item
+    let isSelected: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            preview
+                .frame(height: 130)
+                .frame(maxWidth: .infinity)
+                .background(.quaternary.opacity(0.5))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.quaternary))
+                .overlay(alignment: .topTrailing) { badges.padding(6) }
+                .overlay(alignment: .topLeading) {
+                    if item.isUnread {
+                        Circle().fill(.blue).frame(width: 9, height: 9).padding(7)
+                            .accessibilityLabel("Unread")
+                    }
+                }
+            Text(item.displayTitle)
+                .font(.headline)
+                .lineLimit(2)
+            HStack(spacing: 4) {
+                Image(systemName: item.systemImage)
+                if item.rating > 0 {
+                    Text(String(repeating: "★", count: item.rating)).foregroundStyle(.orange)
+                }
+                Text(item.modifiedAt, format: .dateTime.day().month())
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+        }
+        .padding(8)
+        .background(isSelected ? Color.accentColor.opacity(0.2) : .clear, in: RoundedRectangle(cornerRadius: 12))
+        .contentShape(RoundedRectangle(cornerRadius: 12))
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
+    }
+
+    @ViewBuilder
+    private var preview: some View {
+        if item.thumbnailData != nil {
+            ThumbnailImage(item: item)
+        } else if item.kind == .note, !item.body.isEmpty {
+            Text(item.body.prefix(400))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(10)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        } else {
+            Image(systemName: item.systemImage)
+                .font(.largeTitle)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private var badges: some View {
+        HStack(spacing: 4) {
+            if item.label != .none {
+                Circle().fill(item.label.color).frame(width: 10, height: 10)
+            }
+            if item.isFavorite {
+                Image(systemName: "star.fill").foregroundStyle(.yellow).font(.caption)
+            }
         }
     }
 }

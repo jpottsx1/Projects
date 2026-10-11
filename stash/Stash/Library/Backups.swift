@@ -87,6 +87,11 @@ extension Library {
         if everything {
             manifest.smartFilters = try context.fetch(FetchDescriptor<SmartFilter>())
                 .map { .init(id: $0.uuid, name: $0.name, query: $0.query, createdAt: $0.createdAt) }
+            manifest.rules = try context.fetch(FetchDescriptor<SmartRule>()).map {
+                .init(id: $0.uuid, name: $0.name, query: $0.query, isEnabled: $0.isEnabled, createdAt: $0.createdAt,
+                      category: $0.category?.uuid, tags: $0.tagsToAdd, label: $0.labelRaw, rating: $0.rating,
+                      makesFavorite: $0.makesFavorite, marksRead: $0.marksRead, takesOutOfInbox: $0.takesOutOfInbox)
+            }
         }
 
         var job = ExportJob()
@@ -199,6 +204,23 @@ extension Library {
             filter.uuid = record.id
             filter.createdAt = record.createdAt
             context.insert(filter)
+        }
+
+        let existingRules = Set(try context.fetch(FetchDescriptor<SmartRule>()).map(\.uuid))
+        for record in manifest.rules ?? [] where !existingRules.contains(record.id) {
+            let rule = SmartRule(name: record.name)
+            rule.uuid = record.id
+            rule.query = record.query
+            rule.isEnabled = record.isEnabled
+            rule.createdAt = record.createdAt
+            context.insert(rule)
+            rule.category = record.category.flatMap { categories[$0] }
+            rule.tagsToAdd = record.tags
+            rule.labelRaw = record.label
+            rule.rating = record.rating
+            rule.makesFavorite = record.makesFavorite
+            rule.marksRead = record.marksRead
+            rule.takesOutOfInbox = record.takesOutOfInbox
         }
 
         var added: [Item] = []

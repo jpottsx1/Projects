@@ -86,8 +86,9 @@ Capabilities* for each target, find App Groups, and tick
 |---|---|
 | **Notes** | Written in Markdown, shown as a formatted preview. Ticking a `- [ ]` box in the preview ticks it in the note. |
 | **Documents** | Any file: PDFs and EPUB books open in place, other files show a Quick Look preview. Each is copied into the app, so moving or deleting the original doesn't lose it. Books remember where you stopped reading, on every device. |
+| **Scanning** | On an iPhone or iPad, *Scan Documents* in the + menu photographs paper pages into one PDF. On a Mac, *File › Import from iPhone or iPad* does the same with Continuity Camera. Scans have their words laid invisibly over the pictures, so they can be searched, selected and highlighted. PDFs scanned elsewhere without any text are read the same way for search. |
 | **Highlights** | Select text in a PDF or a book and choose *Highlight* (or a colour, or *Highlight and Add Note*). Highlights are listed in the side panel, where choosing one scrolls to it; tapping one in the document opens its note. Highlights and notes are searchable, and the file itself is left untouched. |
-| **Links** | Paste or type a web address. The page's title and description are fetched, and a full copy of the page (text, pictures and styles) is saved, so you can read it offline exactly as it was. Search covers the page's words, including text the page adds itself once it has loaded. *Refresh* fetches it all again. |
+| **Links** | Paste or type a web address. The page's title and description are fetched, and a full copy of the page (text, pictures and styles) is saved, so you can read it offline exactly as it was. Pages with an article also get a clean copy of just the article, without menus, ads or comments, shown by default (*Article* / *Full Page* above it). Its words are there offline; its pictures load from the web. Links saved before this get one when you choose *Refresh*. Search covers the page's words, including text the page adds itself once it has loaded. *Refresh* fetches it all again. |
 | **Linking items** | Type `[[` in a note and pick from the suggestions (arrows and Return or Tab on a keyboard, or tap one), or type `[[Title]]` in full, or use *Link to Item…* in the side panel for any kind of item. Each item lists what it links to and what links to it. Renaming an item updates the `[[links]]` that point at it. Tapping a link to an item that doesn't exist yet creates it. |
 | **Categories** | One per item, and they can nest. Choosing a category also shows everything in the categories inside it. |
 | **Tags** | As many per item as you like. Type them separated by commas. Tags are single words: "to read" becomes `to-read`. |
@@ -96,6 +97,8 @@ Capabilities* for each target, find App Groups, and tick
 | **Inbox** | Links, documents and things shared from other apps or saved by Shortcuts arrive in the Inbox unless they already have a category. Giving one a category files it; *Done* takes it out without one. |
 | **Unread** | New arrivals have a blue dot until you look at them. *Mark as Unread* puts it back. |
 | **Labels and ratings** | A colour label (as in the Finder) and up to five stars, from an item's menu or its side panel. Sort by either, or search with `label:red` and `rating:4`. |
+| **Smart rules** | *Smart Rules…* (in the sidebar's ⋯ menu, or the Item menu on a Mac) does things to items as they arrive when they match a search: file them, add tags, set a label or rating, star them, mark them read or done. Say, `invoice kind:pdf` → file in Finance and tag `money`. Rules run when an item arrives on that device, and again once its page or document has been read, so they can match words inside it. *Apply to Matching Items Now* runs one over what's already there. |
+| **Thumbnails and grid** | Documents and saved pages show a small picture in the list. Wider windows can show the list as a grid of cards instead (the List/Grid switch above it). |
 | **Favorites** | Star an item from its toolbar, its menu, a swipe, or Cmd-D on a Mac. |
 | **Trash** | Deleted items go to the Trash, where they can be put back, for 30 days. |
 | **Sorting** | By date modified, date created, title or kind, either way round. Search results always come best match first. |
@@ -115,7 +118,7 @@ Config/                 Stash.xcconfig (the sync and sharing switches),
                         entitlements, Info.plist additions
 Stash/                  the app (SwiftUI + SwiftData), shared by Mac and iPhone
   StashApp.swift        window, menus
-  Model/                Item, Tag, ItemCategory, SmartFilter, Highlight
+  Model/                Item, Tag, ItemCategory, SmartFilter, Highlight, SmartRule
   Library/              Library: every change goes through it
                         SearchIndex: SQLite full-text search
                         FileStore: copies of imported documents
@@ -152,6 +155,11 @@ StashCore/              no-interface logic, with tests
   remembered by its words and a little of the text either side
   (`TextQuote`), so it's found again however the chapter is laid out; one in
   a PDF by the rectangles it covers on its page.
+- **Clean articles** are found by a script run in the page while
+  `PageArchiver` copies it (`Article.script`), scoring blocks of text much
+  as Mozilla's Readability does. The same visit takes the thumbnail.
+- **Scans** are built by `ScannedPDF`: each page is the photo, with the
+  words Vision reads from it drawn invisibly on top.
 - **Exports** are ZIP files written straight to disk (`ZipWriter`, ZIP64 for
   very large libraries), with `Stash Backup.json` beside the readable files
   holding everything needed to restore them.

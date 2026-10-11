@@ -12,6 +12,8 @@ public struct BackupManifest: Codable, Equatable {
     public var exportedAt: Date
     public var categories: [Category]
     public var smartFilters: [SmartFilterRecord]
+    /// Nil in exports made before rules existed.
+    public var rules: [RuleRecord]?
     public var items: [ItemRecord]
 
     public init(exportedAt: Date, categories: [Category] = [], smartFilters: [SmartFilterRecord] = [],
@@ -45,6 +47,37 @@ public struct BackupManifest: Codable, Equatable {
             self.name = name
             self.query = query
             self.createdAt = createdAt
+        }
+    }
+
+    public struct RuleRecord: Codable, Equatable {
+        public var id: UUID
+        public var name: String
+        public var query: String
+        public var isEnabled: Bool
+        public var createdAt: Date
+        public var category: UUID?
+        public var tags: String
+        public var label: Int
+        public var rating: Int
+        public var makesFavorite: Bool
+        public var marksRead: Bool
+        public var takesOutOfInbox: Bool
+
+        public init(id: UUID, name: String, query: String, isEnabled: Bool, createdAt: Date, category: UUID?,
+                    tags: String, label: Int, rating: Int, makesFavorite: Bool, marksRead: Bool, takesOutOfInbox: Bool) {
+            self.id = id
+            self.name = name
+            self.query = query
+            self.isEnabled = isEnabled
+            self.createdAt = createdAt
+            self.category = category
+            self.tags = tags
+            self.label = label
+            self.rating = rating
+            self.makesFavorite = makesFavorite
+            self.marksRead = marksRead
+            self.takesOutOfInbox = takesOutOfInbox
         }
     }
 

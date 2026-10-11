@@ -17,6 +17,10 @@ final class PageArchiver: NSObject, WKNavigationDelegate {
         var title: String?
         /// The page's visible text, as shown.
         var text: String
+        /// Its article without the clutter; nil when there isn't one.
+        var article: Article?
+        /// A picture of the top of the page, as JPEG.
+        var thumbnail: Data?
     }
 
     /// Loads `url` and copies it. Nil if it doesn't load within the time
@@ -61,8 +65,11 @@ final class PageArchiver: NSObject, WKNavigationDelegate {
         try? await Task.sleep(for: .seconds(2))
 
         let text = await visibleText()
+        let thumbnail = await snapshot()
+        // Read the article last: finding it marks the page's pictures.
         guard let archive = await webArchive() else { return nil }
-        return Page(archive: archive, title: webView.title, text: text)
+        let article = await article()
+        return Page(archive: archive, title: webView.title, text: text, article: article, thumbnail: thumbnail)
     }
 
     private func visibleText() async -> String {
@@ -71,6 +78,29 @@ final class PageArchiver: NSObject, WKNavigationDelegate {
                 continuation.resume(returning: (result as? String) ?? "")
             }
         }
+    }
+
+    private func article() async -> Article? {
+        guard let found = try? await webView.evaluateJavaScript(Article.script) as? [String: Any],
+              let html = found["html"] as? String, !html.isEmpty else { return nil }
+        return Article(title: (found["title"] as? String) ?? webView.title ?? "",
+                       byline: (found["byline"] as? String) ?? "",
+                       site: (found["site"] as? String) ?? "",
+                       html: html)
+    }
+
+    /// The top of the page, as it looks, for the item's thumbnail.
+    private func snapshot() async -> Data? {
+        let configuration = WKSnapshotConfiguration()
+        configuration.rect = CGRect(x: 0, y: 0, width: 1200, height: 900)
+        configuration.snapshotWidth = 480
+        guard let image = try? await webView.takeSnapshot(configuration: configuration) else { return nil }
+        #if os(macOS)
+        guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return nil }
+        #else
+        guard let cgImage = image.cgImage else { return nil }
+        #endif
+        return Thumbnails.jpeg(cgImage)
     }
 
     private func webArchive() async -> Data? {

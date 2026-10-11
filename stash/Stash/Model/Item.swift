@@ -63,6 +63,12 @@ final class Item {
     /// own storage, for reading offline.
     var archivePath: String?
     var archivedAt: Date?
+    /// The page's article without the clutter (an `Article` as JSON), from
+    /// the same visit as the saved copy. Nil for pages with no article.
+    @Attribute(.externalStorage) var articleData: Data?
+    /// A small JPEG for the list and grid: a document's first page, a
+    /// picture, the top of a saved page.
+    @Attribute(.externalStorage) var thumbnailData: Data?
     /// The copy's contents, which is what iCloud syncs, as with documents'
     /// `fileData`. Nil for copies too large to sync.
     @Attribute(.externalStorage) var archiveData: Data?
@@ -117,6 +123,11 @@ final class Item {
     /// Highlights in reading order.
     var sortedHighlights: [Highlight] {
         (highlights ?? []).sorted { ($0.position, $0.createdAt) < ($1.position, $1.createdAt) }
+    }
+
+    var article: Article? {
+        get { articleData.flatMap { try? JSONDecoder().decode(Article.self, from: $0) } }
+        set { articleData = newValue.flatMap { try? JSONEncoder().encode($0) } }
     }
 
     var isPDF: Bool { kind == .document && contentType?.conforms(to: .pdf) == true }

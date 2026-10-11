@@ -12,6 +12,8 @@ final class ItemCategory {
     var parent: ItemCategory?
     @Relationship(deleteRule: .cascade, inverse: \ItemCategory.parent) var children: [ItemCategory]? = []
     @Relationship(deleteRule: .nullify, inverse: \Item.category) var items: [Item]? = []
+    /// Rules that file items here.
+    @Relationship(deleteRule: .nullify, inverse: \SmartRule.category) var rules: [SmartRule]? = []
 
     init(name: String, parent: ItemCategory? = nil) {
         self.name = name

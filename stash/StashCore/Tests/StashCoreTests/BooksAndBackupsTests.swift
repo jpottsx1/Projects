@@ -167,6 +167,17 @@ final class BackupTests: XCTestCase {
         XCTAssertEqual(manifest.folder(for: nil), "")
     }
 
+    func testOlderBackupsWithoutRulesStillRead() throws {
+        let json = #"{"version":1,"exportedAt":"2026-01-01T00:00:00Z","categories":[],"smartFilters":[],"items":[]}"#
+        let manifest = try BackupManifest.decode(Data(json.utf8))
+        XCTAssertNil(manifest.rules)
+        var withRules = manifest
+        withRules.rules = [.init(id: UUID(), name: "Invoices", query: "invoice kind:pdf", isEnabled: true,
+                                 createdAt: Date(timeIntervalSince1970: 0), category: nil, tags: "money", label: 1,
+                                 rating: -1, makesFavorite: false, marksRead: true, takesOutOfInbox: true)]
+        XCTAssertEqual(try BackupManifest.decode(try withRules.encoded()), withRules)
+    }
+
     func testUniqueNames() {
         var taken: Set<String> = []
         XCTAssertEqual(ExportNaming.unique("Plan", ext: "md", in: "Work", taken: &taken), "Work/Plan.md")

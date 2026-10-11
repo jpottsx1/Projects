@@ -12,6 +12,9 @@
 	<!-- Where SyncMonitor checks the iCloud account. -->
 	<key>StashICloudContainer</key>
 	<string>$(ICLOUD_CONTAINER)</string>
+	<!-- Scanning documents with the iPhone or iPad camera. -->
+	<key>NSCameraUsageDescription</key>
+	<string>Stash uses the camera to scan paper documents into searchable PDFs.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>remote-notification</string>

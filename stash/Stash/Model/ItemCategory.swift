@@ -5,6 +5,9 @@ import SwiftData
 /// Showing a category shows everything in the categories inside it too.
 @Model
 final class ItemCategory {
+    /// Decides which copy survives when two devices made the same category
+    /// before syncing (see `Library.mergeDuplicates`).
+    var uuid: UUID = UUID()
     var name: String = ""
     var parent: ItemCategory?
     @Relationship(deleteRule: .cascade, inverse: \ItemCategory.parent) var children: [ItemCategory]? = []

@@ -5,6 +5,9 @@ import StashCore
 /// Any number per item.
 @Model
 final class Tag {
+    /// Decides which copy survives when two devices made the same tag
+    /// before syncing (see `Library.mergeDuplicates`).
+    var uuid: UUID = UUID()
     var name: String = ""
     var items: [Item]? = []
 

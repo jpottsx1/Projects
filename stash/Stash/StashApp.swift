@@ -5,11 +5,22 @@ import SwiftData
 struct StashApp: App {
     private let container: ModelContainer
     @State private var library: Library
+    @State private var sync = SyncMonitor()
 
     init() {
+        let schema = Schema([Item.self, Tag.self, ItemCategory.self])
+        // Syncs through the iCloud container named in the entitlements,
+        // which only exist when ICLOUD_SYNC is on (Config/Stash.xcconfig).
+        // Said explicitly either way: left to itself SwiftData syncs
+        // whenever it finds an iCloud entitlement.
+        #if ICLOUD_SYNC
+        let configuration = ModelConfiguration(schema: schema, cloudKitDatabase: .automatic)
+        #else
+        let configuration = ModelConfiguration(schema: schema, cloudKitDatabase: .none)
+        #endif
         let container: ModelContainer
         do {
-            container = try ModelContainer(for: Item.self, Tag.self, ItemCategory.self)
+            container = try ModelContainer(for: schema, configurations: configuration)
         } catch {
             fatalError("Couldn't open the library: \(error)")
         }
@@ -24,6 +35,7 @@ struct StashApp: App {
         Window("Stash", id: "main") {
             ContentView()
                 .environment(library)
+                .environment(sync)
         }
         .modelContainer(container)
         .commands { StashCommands(library: library) }
@@ -31,6 +43,7 @@ struct StashApp: App {
         WindowGroup {
             ContentView()
                 .environment(library)
+                .environment(sync)
         }
         .modelContainer(container)
         #endif

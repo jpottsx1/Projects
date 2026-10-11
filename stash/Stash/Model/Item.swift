@@ -49,6 +49,12 @@ final class Item {
     /// Where the file lives inside the app's own storage (see `FileStore`).
     var storedFilePath: String?
     var contentTypeIdentifier: String?
+    /// The file's contents, which is what iCloud syncs: another device
+    /// writes them back out to `storedFilePath` the first time the document
+    /// is opened there. Kept outside the database file and only read when
+    /// asked for, so listing items never loads it. Nil for files too large
+    /// to sync (see `Library.largestSyncedFile`).
+    @Attribute(.externalStorage) var fileData: Data?
 
     /// Words that aren't typed by anyone but should still be searchable:
     /// a page's text, a PDF's text, text read out of an image.

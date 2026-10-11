@@ -15,6 +15,41 @@ The Mac version runs with no setup. To run it on **your own iPhone**, choose the
 Stash target, open *Signing & Capabilities*, pick your Apple ID under
 *Team*, and change the Bundle Identifier if Xcode says it's taken.
 
+## Syncing between Mac and iPhone
+
+Sync goes through your iCloud account and is **off until you turn it on**,
+because Apple only lets apps signed with a paid Apple Developer Program
+membership use iCloud. With a free Apple ID the app works the same, just
+without sync.
+
+To turn it on:
+
+1. In Xcode, select the **Stash** target, then **Signing & Capabilities**,
+   and choose your paid team under **Team**.
+2. Open `Config/Stash.xcconfig` and change `ICLOUD_SYNC = NO` to
+   `ICLOUD_SYNC = YES`.
+3. Run it on your Mac and your iPhone, both signed in to the same iCloud
+   account.
+
+The foot of the sidebar shows whether sync is working. If Xcode reports a
+signing problem about the iCloud container, open *Signing & Capabilities*,
+find the iCloud section, and tick the container `iCloud.com.jpottsx1.stash`.
+If you changed the bundle identifier, change `ICLOUD_CONTAINER` in the same
+file to match.
+
+What syncs: every note, link and document, with their categories, tags and
+links between items. Documents over 100 MB stay on the device they were
+added on. A document from another device shows "Not on This Device Yet"
+until iCloud has downloaded it.
+
+If you made the same tag or category on two devices before they synced,
+the two are merged into one automatically.
+
+Before releasing through TestFlight or the App Store, deploy the CloudKit
+schema to Production in the [CloudKit Console](https://icloud.developer.apple.com).
+Builds run from Xcode use the Development environment, so you can skip this
+until then.
+
 ## What it does
 
 | | |
@@ -51,17 +86,21 @@ StashCore/              no-interface logic, with tests
   sit beside it in `Files/`, one folder per item.
 - **The search index** is a separate SQLite FTS5 database. It's rebuilt from
   the library at every launch, so deleting it loses nothing.
-- **iCloud sync is not on yet.** The data model already follows CloudKit's
-  rules (every field has a default, every relationship is optional, nothing
-  is unique), so switching it on shouldn't need a migration. Documents will
-  need moving into CloudKit assets.
+- **Sync** is SwiftData's built-in CloudKit mirroring, into your private
+  iCloud database. A document's contents are stored on its item (kept
+  outside the database file), which is how files reach other devices.
+  Each device writes them back out to `Files/` when first opened there.
+  When changes arrive from iCloud, `Library` rebuilds the search index,
+  merges duplicate tags and categories, and removes files for deleted
+  documents.
+- `Config/Stash.xcconfig` holds the sync switch. The entitlements files
+  next to it are only used when sync is on.
 
 To run the `StashCore` tests, open the `StashCore` folder in Xcode and press
 Cmd-U, or run `swift test` in it.
 
 ## Not done yet
 
-- iCloud sync between Mac and iPhone
 - A share extension, so you can save from Safari or other apps' share menus
 - Suggestions while typing `[[`
 - Full copies of web pages for reading offline (only the text is kept for now)

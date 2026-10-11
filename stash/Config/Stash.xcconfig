@@ -1,0 +1,39 @@
+// Settings for the Stash app you may want to change.
+
+// ---------------------------------------------------------------------------
+// iCloud sync between your Mac and iPhone
+//
+// Needs a paid Apple Developer Program membership: Apple doesn't let apps
+// signed with a free Apple ID use iCloud. To turn it on:
+//
+//   1. In Xcode, select the Stash target > Signing & Capabilities, and
+//      choose your team under Team.
+//   2. Change NO to YES on the next line.
+//   3. Run it on each device, signed in to the same iCloud account.
+//
+ICLOUD_SYNC = NO
+
+// The iCloud container the library syncs through. It must start with
+// "iCloud." and nobody else may be using it, so if you change the bundle
+// identifier, change this to match.
+ICLOUD_CONTAINER = iCloud.com.jpottsx1.stash
+
+// ---------------------------------------------------------------------------
+// Nothing below needs changing. Each setting picks its _YES or _NO value
+// from ICLOUD_SYNC; a _NO value that isn't defined is empty.
+
+STASH_ENTITLEMENTS_IOS_YES = Config/Stash-iOS.entitlements
+STASH_ENTITLEMENTS_MAC_YES = Config/Stash-macOS.entitlements
+CODE_SIGN_ENTITLEMENTS[sdk=iphoneos*] = $(STASH_ENTITLEMENTS_IOS_$(ICLOUD_SYNC))
+CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*] = $(STASH_ENTITLEMENTS_IOS_$(ICLOUD_SYNC))
+CODE_SIGN_ENTITLEMENTS[sdk=macosx*] = $(STASH_ENTITLEMENTS_MAC_$(ICLOUD_SYNC))
+
+// Without iCloud the Mac app can sign itself to run on this Mac; with it,
+// it needs a certificate from your team.
+STASH_MAC_IDENTITY_NO = -
+STASH_MAC_IDENTITY_YES = Apple Development
+CODE_SIGN_IDENTITY[sdk=macosx*] = $(STASH_MAC_IDENTITY_$(ICLOUD_SYNC))
+
+// Lets the Swift code check `#if ICLOUD_SYNC`.
+STASH_SWIFT_CONDITION_YES = ICLOUD_SYNC
+SWIFT_ACTIVE_COMPILATION_CONDITIONS = $(inherited) $(STASH_SWIFT_CONDITION_$(ICLOUD_SYNC))

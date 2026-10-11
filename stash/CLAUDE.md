@@ -25,8 +25,16 @@ SwiftData, one multiplatform target. Read README.md first.
   index, the files on disk and the links in step. A view that edits an
   item's text calls `library.didEdit(item)`.
 - **Keep the model CloudKit-compatible**: a default on every attribute,
-  every relationship optional, no `@Attribute(.unique)`. Sync is the next
-  big feature, and breaking this means a migration.
+  every relationship optional, no `@Attribute(.unique)`. CloudKit rejects
+  the whole schema if any of these is broken. Add new attributes; never
+  rename or remove one that has synced.
+- **Sync is off by default** (`ICLOUD_SYNC` in `Config/Stash.xcconfig`)
+  because iCloud entitlements need a paid developer team, and the app has
+  to keep building without one. Code that touches CloudKit directly, such as
+  `CKContainer.default()`, goes behind `SyncMonitor.isEnabled` or
+  `#if ICLOUD_SYNC`. Without the entitlement it crashes.
+- Anything deduplicated across devices picks its survivor by `uuid`, so
+  every device makes the same choice.
 - **`[[Title]]` links are read from the note's text, never stored.**
   Hand-made links (`Item.linksTo`) are stored. Backlinks combine both.
 - The search index can always be rebuilt from the library. Never store

@@ -8,9 +8,10 @@ struct DocumentDetail: View {
     @Environment(Library.self) private var library
     @Bindable var item: Item
     @State private var quickLookURL: URL?
+    @State private var fileURL: URL?
+    @State private var hasLooked = false
 
     var body: some View {
-        let fileURL = library.fileURL(for: item)
         VStack(spacing: 0) {
             Group {
                 if let fileURL, item.contentType?.conforms(to: .pdf) == true {
@@ -18,8 +19,12 @@ struct DocumentDetail: View {
                 } else if let fileURL {
                     FileThumbnail(url: fileURL)
                         .padding()
+                } else if !hasLooked {
+                    ProgressView()
                 } else {
-                    ContentUnavailableView("File Missing", systemImage: "exclamationmark.triangle")
+                    ContentUnavailableView(
+                        "Not on This Device Yet", systemImage: "icloud.and.arrow.down",
+                        description: Text("If this was added on another device, it appears once iCloud has downloaded it. Files over 100 MB stay on the device they were added on."))
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -47,6 +52,12 @@ struct DocumentDetail: View {
             .padding()
         }
         .quickLookPreview($quickLookURL)
+        // Looked for again whenever the library changes, which includes the
+        // file's contents arriving from iCloud.
+        .task(id: library.revision) {
+            fileURL = library.localFile(for: item)
+            hasLooked = true
+        }
         .onChange(of: item.body) { library.didEdit(item) }
     }
 }

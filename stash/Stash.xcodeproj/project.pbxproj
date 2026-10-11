@@ -12,6 +12,10 @@
 
 /* Begin PBXFileReference section */
 		5A7A00000000000000000201 /* Stash.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Stash.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		5A7A00000000000000000211 /* Stash.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Stash.xcconfig; sourceTree = "<group>"; };
+		5A7A00000000000000000212 /* Stash-iOS.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "Stash-iOS.entitlements"; sourceTree = "<group>"; };
+		5A7A00000000000000000213 /* Stash-macOS.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "Stash-macOS.entitlements"; sourceTree = "<group>"; };
+		5A7A00000000000000000214 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -38,8 +42,20 @@
 			isa = PBXGroup;
 			children = (
 				5A7A00000000000000000301 /* Stash */,
+				5A7A00000000000000000003 /* Config */,
 				5A7A00000000000000000002 /* Products */,
 			);
+			sourceTree = "<group>";
+		};
+		5A7A00000000000000000003 /* Config */ = {
+			isa = PBXGroup;
+			children = (
+				5A7A00000000000000000211 /* Stash.xcconfig */,
+				5A7A00000000000000000212 /* Stash-iOS.entitlements */,
+				5A7A00000000000000000213 /* Stash-macOS.entitlements */,
+				5A7A00000000000000000214 /* Info.plist */,
+			);
+			path = Config;
 			sourceTree = "<group>";
 		};
 		5A7A00000000000000000002 /* Products */ = {
@@ -216,19 +232,19 @@
 		};
 		5A7A00000000000000000903 /* Debug */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = 5A7A00000000000000000211 /* Stash.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "-";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "";
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_OUTGOING_NETWORK_CONNECTIONS = YES;
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Config/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Stash;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
@@ -259,19 +275,19 @@
 		};
 		5A7A00000000000000000904 /* Release */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = 5A7A00000000000000000211 /* Stash.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "-";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "";
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_OUTGOING_NETWORK_CONNECTIONS = YES;
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Config/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Stash;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;

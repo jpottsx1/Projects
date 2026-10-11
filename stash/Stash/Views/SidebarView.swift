@@ -64,6 +64,9 @@ struct SidebarView: View {
         }
         .listStyle(.sidebar)
         .navigationTitle("Stash")
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if SyncMonitor.isEnabled { SyncStatusView() }
+        }
         .alert(namingTitle, isPresented: Binding(get: { naming != nil }, set: { if !$0 { naming = nil } })) {
             TextField("Name", text: $nameDraft)
             Button("Cancel", role: .cancel) {}

@@ -32,9 +32,31 @@ struct FileStore {
         root.appendingPathComponent(storedPath)
     }
 
+    func exists(_ storedPath: String) -> Bool {
+        FileManager.default.fileExists(atPath: url(for: storedPath).path)
+    }
+
+    /// Writes out a file that arrived from another device.
+    func write(_ data: Data, to storedPath: String) throws {
+        let destination = url(for: storedPath)
+        try FileManager.default.createDirectory(at: destination.deletingLastPathComponent(),
+                                                withIntermediateDirectories: true)
+        try data.write(to: destination, options: .atomic)
+    }
+
     /// Removes the item's whole folder.
     func remove(_ storedPath: String) {
         guard let folder = storedPath.split(separator: "/").first else { return }
         try? FileManager.default.removeItem(at: root.appendingPathComponent(String(folder), isDirectory: true))
+    }
+
+    /// Removes the folders of items that no longer exist -- documents
+    /// deleted on another device.
+    func removeFolders(notBelongingTo ids: Set<UUID>) {
+        let folders = (try? FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)) ?? []
+        for folder in folders {
+            guard let id = UUID(uuidString: folder.lastPathComponent), !ids.contains(id) else { continue }
+            try? FileManager.default.removeItem(at: folder)
+        }
     }
 }

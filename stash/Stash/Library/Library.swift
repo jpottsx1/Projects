@@ -1,3 +1,4 @@
+import CoreData
 import Foundation
 import Observation
 import SwiftData
@@ -19,6 +20,9 @@ enum SidebarSelection: Hashable {
 final class Library {
     /// `[[Title]]` links become `stash://open?title=...` in the preview.
     nonisolated static let linkScheme = "stash"
+    /// Bigger documents stay on the device they were added on: iCloud
+    /// handles them poorly, and every device would have to download them.
+    static let largestSyncedFile = 100 * 1024 * 1024
 
     let context: ModelContext
     let files: FileStore
@@ -45,12 +49,24 @@ final class Library {
     /// so the views showing them redraw.
     private(set) var revision = 0
 
+    @ObservationIgnored private var storeObserver: NSObjectProtocol?
+    @ObservationIgnored private var pendingRefresh: Task<Void, Never>?
+
     init(context: ModelContext) {
         self.context = context
         let support = URL.applicationSupportDirectory.appendingPathComponent("Stash", isDirectory: true)
         files = FileStore(root: support.appendingPathComponent("Files", isDirectory: true))
         index = SearchIndex(url: support.appendingPathComponent("SearchIndex.sqlite"))
-        rebuildIndex()
+        refreshAfterStoreChange()
+
+        // Posted when changes arrive in the store from outside this
+        // context -- in practice, from iCloud. The views update on their
+        // own; the search index, merged tags and files need a hand.
+        storeObserver = NotificationCenter.default.addObserver(
+            forName: .NSPersistentStoreRemoteChange, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.scheduleRefresh() }
+        }
     }
 
     // MARK: - Adding
@@ -80,6 +96,7 @@ final class Library {
                 continue
             }
             item.contentTypeIdentifier = UTType(filenameExtension: url.pathExtension)?.identifier
+            item.fileData = syncableContents(of: item)
             insert(item, select: false)
             last = item
             Task { await extractText(from: item) }
@@ -146,7 +163,7 @@ final class Library {
     }
 
     func extractText(from item: Item) async {
-        guard let url = fileURL(for: item) else { return }
+        guard let url = localFile(for: item) else { return }
         let text = await TextExtractor.text(fromFileAt: url, type: item.contentType)
         guard isAlive(item), !text.isEmpty else { return }
         item.extractedText = text
@@ -154,8 +171,23 @@ final class Library {
         save()
     }
 
-    func fileURL(for item: Item) -> URL? {
-        item.storedFilePath.map(files.url(for:))
+    /// The document's file on this device. One synced from another device
+    /// is written out the first time it's asked for; nil until it has
+    /// finished downloading from iCloud (or if it was too big to sync).
+    func localFile(for item: Item) -> URL? {
+        guard let path = item.storedFilePath else { return nil }
+        if !files.exists(path), let data = item.fileData {
+            try? files.write(data, to: path)
+        }
+        return files.exists(path) ? files.url(for: path) : nil
+    }
+
+    private func syncableContents(of item: Item) -> Data? {
+        guard let path = item.storedFilePath else { return nil }
+        let url = files.url(for: path)
+        let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? .max
+        guard size <= Self.largestSyncedFile else { return nil }
+        return try? Data(contentsOf: url, options: .mappedIfSafe)
     }
 
     func delete(_ items: [Item]) {
@@ -349,17 +381,84 @@ final class Library {
         }
     }
 
+    // MARK: - Changes from iCloud
+
+    /// Changes tend to arrive in bursts; deal with each burst once.
+    private func scheduleRefresh() {
+        pendingRefresh?.cancel()
+        pendingRefresh = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(1))
+            guard !Task.isCancelled else { return }
+            self?.refreshAfterStoreChange()
+        }
+    }
+
+    /// At launch, and after changes arrive from another device.
+    private func refreshAfterStoreChange() {
+        if let selection, !isAlive(selection) { self.selection = nil }
+        mergeDuplicates()
+        // Only tidy files away when the library definitely loaded: an empty
+        // list from a failed fetch would otherwise delete every document.
+        guard let items = try? context.fetch(FetchDescriptor<Item>()) else { return }
+        index?.replaceAll(with: items.map(entry(for:)))
+        files.removeFolders(notBelongingTo: Set(items.map(\.uuid)))
+        revision += 1
+        runSearch()
+    }
+
+    /// Two devices can each make a tag called "work", or a category called
+    /// "Recipes", before they've seen each other's. Once both arrive they're
+    /// folded into one. Every device keeps the copy with the lowest uuid,
+    /// so devices doing this at the same time agree on which one survives.
+    private func mergeDuplicates() {
+        let tags = (try? context.fetch(FetchDescriptor<Tag>())) ?? []
+        for group in Dictionary(grouping: tags, by: \.key).values where group.count > 1 {
+            let ordered = group.sorted { $0.uuid.uuidString < $1.uuid.uuidString }
+            let keeper = ordered[0]
+            for duplicate in ordered.dropFirst() {
+                for item in duplicate.items ?? [] where !(item.tags ?? []).contains(keeper) {
+                    item.tags = (item.tags ?? []) + [keeper]
+                }
+                if sidebar == .tag(duplicate) { sidebar = .tag(keeper) }
+                context.delete(duplicate)
+            }
+        }
+
+        let categories = (try? context.fetch(FetchDescriptor<ItemCategory>())) ?? []
+        mergeDuplicates(among: categories.filter { $0.parent == nil })
+        save()
+    }
+
+    /// Same-named categories side by side become one, holding the items and
+    /// categories of both; then the same one level down.
+    private func mergeDuplicates(among siblings: [ItemCategory]) {
+        var survivors: [ItemCategory] = []
+        for group in Dictionary(grouping: siblings, by: { $0.name.lowercased() }).values {
+            let ordered = group.sorted { $0.uuid.uuidString < $1.uuid.uuidString }
+            let keeper = ordered[0]
+            for duplicate in ordered.dropFirst() {
+                for item in duplicate.items ?? [] { item.category = keeper }
+                let children = duplicate.children ?? []
+                for child in children { child.parent = keeper }
+                // Deleting a category deletes the ones inside it, so make
+                // sure the moved ones are no longer counted as inside.
+                duplicate.children = []
+                if case .category(let shown) = sidebar, shown == duplicate { sidebar = .category(keeper) }
+                context.delete(duplicate)
+            }
+            survivors.append(keeper)
+        }
+        for survivor in survivors {
+            mergeDuplicates(among: survivor.children ?? [])
+        }
+    }
+
     // MARK: - Index
 
     func reindex(_ item: Item) {
         index?.update(entry(for: item))
         revision += 1
         if !query.isEmpty { runSearch() }
-    }
-
-    private func rebuildIndex() {
-        let items = (try? context.fetch(FetchDescriptor<Item>())) ?? []
-        index?.replaceAll(with: items.map(entry(for:)))
     }
 
     private func entry(for item: Item) -> SearchIndex.Entry {

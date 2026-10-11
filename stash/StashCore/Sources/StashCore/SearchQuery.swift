@@ -10,7 +10,8 @@ import Foundation
 /// - `#work`, `-#work` -- only items tagged "work", or only items without it
 /// - `kind:pdf` -- note, link, document, pdf, image, video or audio
 /// - `in:Work`, `in:"Work Stuff"` -- in that category or one inside it
-/// - `is:favorite`, `is:untagged`, `is:uncategorized`
+/// - `is:favorite`, `is:unread`, `is:read`, `is:inbox`, `is:untagged`, `is:uncategorized`
+/// - `label:red` (or any label colour, or `label:none`); `rating:3` -- three stars or more
 /// - `after:2026-03-01`, `before:2026-03-01` -- last changed from that day on,
 ///   or before it; also `today`, `yesterday`, and `7d`, `2w`, `3m`, `1y` ago
 public struct SearchQuery: Equatable {
@@ -43,13 +44,16 @@ public struct SearchQuery: Equatable {
     }
 
     public enum Flag: String, Equatable {
-        case favorite, untagged, uncategorized
+        case favorite, unread, read, inbox, untagged, uncategorized
 
         init?(typed: String) {
             switch typed.lowercased() {
             case "favorite", "favorites", "favourite", "favourites", "starred", "flagged": self = .favorite
+            case "unread", "new": self = .unread
+            case "read": self = .read
+            case "inbox", "unfiled": self = .inbox
             case "untagged": self = .untagged
-            case "uncategorized", "uncategorised", "unfiled": self = .uncategorized
+            case "uncategorized", "uncategorised": self = .uncategorized
             default: return nil
             }
         }
@@ -108,6 +112,10 @@ public struct SearchQuery: Equatable {
     /// Category names, lowercased; any one of these, or a category inside one.
     public private(set) var categories: [String] = []
     public private(set) var flags: [Flag] = []
+    /// Any one of these; `.none` for items without a label.
+    public private(set) var labels: [ItemLabel] = []
+    /// Only items rated this many stars or more.
+    public private(set) var minimumRating: Int?
     public private(set) var after: Day?
     public private(set) var before: Day?
 
@@ -121,7 +129,7 @@ public struct SearchQuery: Equatable {
         var quoted: Bool
     }
 
-    private static let filterKeys: Set<String> = ["kind", "type", "in", "is", "after", "before"]
+    private static let filterKeys: Set<String> = ["kind", "type", "in", "is", "after", "before", "label", "rating"]
 
     public init(_ text: String) {
         var orPending = false
@@ -233,6 +241,13 @@ public struct SearchQuery: Equatable {
         case "is":
             guard let flag = Flag(typed: value) else { return false }
             if !flags.contains(flag) { flags.append(flag) }
+        case "label":
+            guard let label = ItemLabel(typed: value) else { return false }
+            if !labels.contains(label) { labels.append(label) }
+        case "rating", "stars":
+            let digits = value.drop { $0 == ">" || $0 == "=" }
+            guard let stars = Int(digits), (0...5).contains(stars) else { return false }
+            minimumRating = stars
         case "after":
             guard let day = Day(typed: value) else { return false }
             after = day
@@ -248,6 +263,7 @@ public struct SearchQuery: Equatable {
     public var isEmpty: Bool {
         groups.isEmpty && excludedTerms.isEmpty && tags.isEmpty && excludedTags.isEmpty
             && kinds.isEmpty && categories.isEmpty && flags.isEmpty && after == nil && before == nil
+            && labels.isEmpty && minimumRating == nil
     }
 
     /// An SQLite FTS5 `MATCH` expression for the words and phrases, or nil

@@ -13,7 +13,7 @@ import StashCore
 enum TextExtractor {
     static let maxLength = 200_000
 
-    /// Text from a PDF, a text or RTF file, or -- read with the Vision
+    /// Text from a PDF, an EPUB book, a text or RTF file, or -- read with the Vision
     /// framework -- an image. Empty for anything else.
     static func text(fromFileAt url: URL, type: UTType?) async -> String {
         await Task.detached(priority: .utility) {
@@ -24,6 +24,8 @@ enum TextExtractor {
                 text = (try? NSAttributedString(url: url, options: [:], documentAttributes: nil))?.string ?? ""
             } else if type?.conforms(to: .plainText) == true {
                 text = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+            } else if type?.conforms(to: .epub) == true {
+                text = (try? EPUBDocument(url: url))?.text(limit: TextExtractor.maxLength) ?? ""
             } else if type?.conforms(to: .image) == true {
                 text = TextExtractor.recognizeText(inImageAt: url)
             } else {

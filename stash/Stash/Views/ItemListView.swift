@@ -103,6 +103,15 @@ struct ItemListView: View {
             Button(item.isFavorite ? "Remove from Favorites" : "Add to Favorites") {
                 library.setFavorite([item], !item.isFavorite)
             }
+            Button(item.isUnread ? "Mark as Read" : "Mark as Unread") {
+                library.setUnread([item], !item.isUnread)
+            }
+            if item.inInbox {
+                Button("Done (Take Out of Inbox)") { library.markFiled([item]) }
+            }
+            LabelAndRatingMenus(items: [item])
+            Divider()
+            Button("Export…") { library.exportRequest = .items([item], name: item.displayTitle) }
             Divider()
             Button("Move to Trash", role: .destructive) { library.moveToTrash([item]) }
         }
@@ -117,6 +126,9 @@ struct ItemListView: View {
             case .trash:
                 ContentUnavailableView("Trash Is Empty", systemImage: "trash",
                                        description: Text("Items stay here for \(Library.trashDays) days, then are deleted."))
+            case .inbox:
+                ContentUnavailableView("Inbox Is Empty", systemImage: "tray.and.arrow.down",
+                                       description: Text("Pages, files and things shared from other apps wait here until you give them a category."))
             case .favorites:
                 ContentUnavailableView("No Favorites", systemImage: "star",
                                        description: Text("Swipe an item, or use its menu, to add it to Favorites."))
@@ -179,6 +191,15 @@ struct ItemRow: View {
             Image(systemName: item.systemImage)
                 .foregroundStyle(.tint)
                 .frame(width: 20)
+                .overlay(alignment: .topLeading) {
+                    if item.isUnread {
+                        Circle()
+                            .fill(.blue)
+                            .frame(width: 8, height: 8)
+                            .offset(x: -8, y: -2)
+                            .accessibilityLabel("Unread")
+                    }
+                }
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 4) {
                     Text(item.displayTitle)
@@ -190,6 +211,12 @@ struct ItemRow: View {
                             .foregroundStyle(.yellow)
                             .accessibilityLabel("Favorite")
                     }
+                    if item.label != .none {
+                        Circle()
+                            .fill(item.label.color)
+                            .frame(width: 9, height: 9)
+                            .accessibilityLabel("\(item.label.name) label")
+                    }
                 }
                 if !subtitle.isEmpty {
                     Text(subtitle)
@@ -198,6 +225,11 @@ struct ItemRow: View {
                         .lineLimit(2)
                 }
                 HStack(spacing: 6) {
+                    if item.rating > 0 {
+                        Text(String(repeating: "★", count: item.rating))
+                            .foregroundStyle(.orange)
+                            .accessibilityLabel("\(item.rating) stars")
+                    }
                     Text(item.modifiedAt, format: .dateTime.day().month().year())
                     ForEach(item.sortedTags) { tag in
                         Text("#" + tag.name)
@@ -225,6 +257,51 @@ struct ItemRow: View {
             return item.url.map { WebAddress.displayHost(of: $0) } ?? ""
         case .document:
             return item.contentType?.localizedDescription ?? ""
+        }
+    }
+}
+
+/// Label and Rating submenus, for an item's context menu.
+struct LabelAndRatingMenus: View {
+    @Environment(Library.self) private var library
+    let items: [Item]
+
+    var body: some View {
+        Menu("Label") {
+            ForEach(ItemLabel.allCases) { label in
+                Button {
+                    library.setLabel(items, label)
+                } label: {
+                    if label == .none {
+                        Text("None")
+                    } else {
+                        Label(label.name, systemImage: items.allSatisfy { $0.label == label } ? "checkmark.circle.fill" : "circle.fill")
+                    }
+                }
+                .tint(label.color)
+            }
+        }
+        Menu("Rating") {
+            ForEach(0...5, id: \.self) { stars in
+                Button(stars == 0 ? "None" : String(repeating: "★", count: stars)) {
+                    library.setRating(items, stars)
+                }
+            }
+        }
+    }
+}
+
+extension ItemLabel {
+    var color: Color {
+        switch self {
+        case .none: .clear
+        case .red: .red
+        case .orange: .orange
+        case .yellow: .yellow
+        case .green: .green
+        case .blue: .blue
+        case .purple: .purple
+        case .gray: .gray
         }
     }
 }

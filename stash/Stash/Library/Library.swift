@@ -7,6 +7,7 @@ import StashCore
 
 /// What the sidebar is showing.
 enum SidebarSelection: Hashable {
+    case inbox
     case all
     case favorites
     case kind(ItemKind)
@@ -39,8 +40,23 @@ final class Library {
     var sidebar: SidebarSelection? = .all {
         didSet { if sidebar != oldValue { compileSmartFilter() } }
     }
-    var selection: Item?
+    var selection: Item? {
+        didSet {
+            // Looking at something reads it.
+            if let selection, selection.isUnread, selection != oldValue {
+                selection.isUnread = false
+                save()
+            }
+        }
+    }
+    /// A highlight chosen in the side panel, for the reader to scroll to.
+    var revealedHighlight: Highlight?
+    /// The highlight whose note is being written.
+    var editingHighlight: Highlight?
     var isAddingLink = false
+    /// What's to be exported; the window does the exporting.
+    var exportRequest: ExportRequest?
+    var isRestoring = false
     var isImporting = false
     var importError: String?
 
@@ -125,6 +141,7 @@ final class Library {
     func addLink(_ url: URL) -> Item {
         let item = Item(kind: .link, title: WebAddress.displayHost(of: url))
         item.urlString = url.absoluteString
+        item.isUnread = true
         insert(item)
         Task { await refreshPage(of: item) }
         return item
@@ -142,6 +159,7 @@ final class Library {
             }
             item.contentTypeIdentifier = UTType(filenameExtension: url.pathExtension)?.identifier
             item.fileData = syncableContents(of: item)
+            item.isUnread = true
             insert(item, select: false)
             last = item
             Task {
@@ -177,6 +195,11 @@ final class Library {
             sidebar = .all
         default:
             break
+        }
+        // Pages and files arriving with nowhere to go wait in the Inbox;
+        // notes written here don't need filing.
+        if item.category == nil, item.kind != .note || sidebar == .inbox {
+            item.inInbox = true
         }
         if !query.isEmpty { searchText = "" }
         save()
@@ -284,12 +307,95 @@ final class Library {
         return files.exists(path) ? files.url(for: path) : nil
     }
 
-    private func syncableContents(of item: Item) -> Data? {
+    func syncableContents(of item: Item) -> Data? {
         guard let path = item.storedFilePath else { return nil }
         let url = files.url(for: path)
         let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? .max
         guard size <= Self.largestSyncedFile else { return nil }
         return try? Data(contentsOf: url, options: .mappedIfSafe)
+    }
+
+    // MARK: - Marking
+
+    func setUnread(_ items: [Item], _ unread: Bool) {
+        for item in items { item.isUnread = unread }
+        save()
+        runSearch()
+    }
+
+    func setLabel(_ items: [Item], _ label: ItemLabel) {
+        for item in items { item.label = label }
+        save()
+        runSearch()
+    }
+
+    func setRating(_ items: [Item], _ rating: Int) {
+        for item in items { item.rating = max(0, min(5, rating)) }
+        save()
+        runSearch()
+    }
+
+    /// Files items in a category, which takes them out of the Inbox.
+    func file(_ items: [Item], in category: ItemCategory?) {
+        for item in items {
+            item.category = category
+            item.inInbox = false
+            reindex(item)
+        }
+        save()
+        runSearch()
+    }
+
+    /// Takes items out of the Inbox where they are.
+    func markFiled(_ items: [Item]) {
+        for item in items { item.inInbox = false }
+        save()
+        runSearch()
+    }
+
+    /// After the side panel changes an item's category itself.
+    func didChangeCategory(of item: Item) {
+        if item.category != nil { item.inInbox = false }
+        didEdit(item)
+        save()
+    }
+
+    /// Something that came from outside the app, through Shortcuts: new,
+    /// and waiting to be filed.
+    func markReceived(_ item: Item) {
+        item.isUnread = true
+        if item.category == nil { item.inInbox = true }
+        save()
+        runSearch()
+    }
+
+    // MARK: - Highlights
+
+    @discardableResult
+    func addHighlight(to item: Item, text: String, anchor: HighlightAnchor, position: Double,
+                      color: HighlightColor = .yellow) -> Highlight {
+        let highlight = Highlight(text: text, anchor: anchor, position: position, color: color)
+        context.insert(highlight)
+        highlight.item = item
+        didEdit(item)
+        save()
+        return highlight
+    }
+
+    func update(_ highlight: Highlight, note: String? = nil, color: HighlightColor? = nil) {
+        if let note { highlight.note = note }
+        if let color { highlight.color = color }
+        if let item = highlight.item { didEdit(item) }
+        save()
+    }
+
+    func delete(_ highlight: Highlight) {
+        let item = highlight.item
+        if revealedHighlight == highlight { revealedHighlight = nil }
+        if editingHighlight == highlight { editingHighlight = nil }
+        context.delete(highlight)
+        save()
+        if let item { didEdit(item) }
     }
 
     // MARK: - Favourites and the Trash
@@ -416,7 +522,7 @@ final class Library {
 
     /// The share extension can't open the library, so it chooses a category
     /// from a list the app writes out whenever categories change.
-    private func publishCategories() {
+    func publishCategories() {
         guard let inbox else { return }
         let all = (try? context.fetch(FetchDescriptor<ItemCategory>())) ?? []
         let tree = all.filter { $0.parent == nil }
@@ -463,8 +569,10 @@ final class Library {
             item.body = entry.text
             item.createdAt = entry.createdAt
             item.modifiedAt = entry.createdAt
+            item.isUnread = true
             context.insert(item)
             item.category = entry.categoryID.flatMap { id in categories.first { $0.uuid == id } }
+            item.inInbox = item.category == nil
             if !entry.tags.isEmpty { addTags(from: entry.tags.joined(separator: ","), to: item) }
             save()
             reindex(item)
@@ -552,6 +660,7 @@ final class Library {
 
     var sidebarTitle: String {
         switch sidebar ?? .all {
+        case .inbox: "Inbox"
         case .all: "All Items"
         case .favorites: "Favorites"
         case .kind(let kind): kind.pluralName
@@ -579,6 +688,7 @@ final class Library {
         guard !item.isTrashed else { return false }
         switch selection {
         case .all, .trash, .duplicates: return true
+        case .inbox: return item.inInbox
         case .favorites: return item.isFavorite
         case .kind(let kind): return item.kind == kind
         case .category(let category): return category.contains(item.category)
@@ -705,7 +815,7 @@ final class Library {
     }
 
     /// At launch, and after changes arrive from another device.
-    private func refreshAfterStoreChange() {
+    func refreshAfterStoreChange() {
         if let selection, !isAlive(selection) { self.selection = nil }
         mergeDuplicates()
         deleteOldTrash()
@@ -785,10 +895,16 @@ final class Library {
 
     private func entry(for item: Item) -> SearchIndex.Entry {
         let fileName = item.storedFilePath.map { URL(fileURLWithPath: $0).lastPathComponent } ?? ""
+        let highlights = item.sortedHighlights
+        // Highlights and their notes are your own words about it, so they
+        // count with the body; the rest of the document's text counts least.
+        let body = ([item.body, item.summary] + highlights.flatMap { [$0.text, $0.note] })
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n")
         return SearchIndex.Entry(
             id: item.uuid,
             title: item.title,
-            body: item.summary.isEmpty ? item.body : item.body + "\n" + item.summary,
+            body: body,
             tags: item.sortedTags.map(\.name).joined(separator: " "),
             extra: [item.urlString ?? "", fileName, item.extractedText].joined(separator: "\n"))
     }
@@ -807,7 +923,7 @@ final class Library {
 
     // MARK: - Saving
 
-    private func save() {
+    func save() {
         try? context.save()
     }
 

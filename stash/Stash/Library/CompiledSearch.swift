@@ -61,10 +61,15 @@ struct CompiledSearch {
         for flag in query.flags {
             switch flag {
             case .favorite: if !item.isFavorite { return false }
+            case .unread: if !item.isUnread { return false }
+            case .read: if item.isUnread { return false }
+            case .inbox: if !item.inInbox { return false }
             case .untagged: if !(item.tags ?? []).isEmpty { return false }
             case .uncategorized: if item.category != nil { return false }
             }
         }
+        if !query.labels.isEmpty, !query.labels.contains(item.label) { return false }
+        if let minimum = query.minimumRating, item.rating < minimum { return false }
         if let after, item.modifiedAt < after { return false }
         if let before, item.modifiedAt >= before { return false }
 
@@ -105,7 +110,7 @@ extension SearchQuery.Kind {
 
 /// How the list is ordered when it isn't showing search results best first.
 enum ItemSort: String, CaseIterable, Identifiable {
-    case modified, created, title, kind
+    case modified, created, title, kind, rating, label
 
     var id: String { rawValue }
 
@@ -115,16 +120,20 @@ enum ItemSort: String, CaseIterable, Identifiable {
         case .created: "Date Created"
         case .title: "Title"
         case .kind: "Kind"
+        case .rating: "Rating"
+        case .label: "Label"
         }
     }
 
     /// Newest first for dates, A to Z otherwise.
-    var naturallyAscending: Bool { self == .title || self == .kind }
+    var naturallyAscending: Bool { self == .title || self == .kind || self == .label }
 
     func ascendingName(_ ascending: Bool) -> String {
         switch self {
         case .modified, .created: ascending ? "Oldest First" : "Newest First"
         case .title, .kind: ascending ? "A to Z" : "Z to A"
+        case .rating: ascending ? "Lowest First" : "Highest First"
+        case .label: ascending ? "Red First" : "Gray First"
         }
     }
 
@@ -134,6 +143,17 @@ enum ItemSort: String, CaseIterable, Identifiable {
         case .modified: ordered = { $0.modifiedAt < $1.modifiedAt }
         case .created: ordered = { $0.createdAt < $1.createdAt }
         case .title: ordered = { $0.displayTitle.localizedStandardCompare($1.displayTitle) == .orderedAscending }
+        case .rating:
+            ordered = { a, b in
+                a.rating != b.rating ? a.rating < b.rating : a.modifiedAt < b.modifiedAt
+            }
+        case .label:
+            // Unlabelled items after every colour, whichever way round.
+            let rank = { (item: Item) in item.labelRaw == 0 ? (ascending ? Int.max : Int.min) : item.labelRaw }
+            ordered = { a, b in
+                rank(a) != rank(b) ? rank(a) < rank(b)
+                    : a.displayTitle.localizedStandardCompare(b.displayTitle) == .orderedAscending
+            }
         case .kind:
             ordered = { a, b in
                 let first = Self.kindName(a), second = Self.kindName(b)

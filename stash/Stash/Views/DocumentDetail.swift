@@ -14,8 +14,10 @@ struct DocumentDetail: View {
     var body: some View {
         VStack(spacing: 0) {
             Group {
-                if let fileURL, item.contentType?.conforms(to: .pdf) == true {
-                    PDFKitView(url: fileURL)
+                if let fileURL, item.isPDF {
+                    PDFReader(item: item, url: fileURL)
+                } else if let fileURL, item.isEPUB {
+                    EPUBReader(item: item, url: fileURL)
                 } else if let fileURL {
                     FileThumbnail(url: fileURL)
                         .padding()
@@ -94,35 +96,3 @@ struct FileThumbnail: View {
         }
     }
 }
-
-#if os(macOS)
-struct PDFKitView: NSViewRepresentable {
-    let url: URL
-
-    func makeNSView(context: Context) -> PDFView {
-        let view = PDFView()
-        view.autoScales = true
-        view.document = PDFDocument(url: url)
-        return view
-    }
-
-    func updateNSView(_ view: PDFView, context: Context) {
-        if view.document?.documentURL != url { view.document = PDFDocument(url: url) }
-    }
-}
-#else
-struct PDFKitView: UIViewRepresentable {
-    let url: URL
-
-    func makeUIView(context: Context) -> PDFView {
-        let view = PDFView()
-        view.autoScales = true
-        view.document = PDFDocument(url: url)
-        return view
-    }
-
-    func updateUIView(_ view: PDFView, context: Context) {
-        if view.document?.documentURL != url { view.document = PDFDocument(url: url) }
-    }
-}
-#endif

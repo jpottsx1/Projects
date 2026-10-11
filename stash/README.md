@@ -85,18 +85,23 @@ Capabilities* for each target, find App Groups, and tick
 | | |
 |---|---|
 | **Notes** | Written in Markdown, shown as a formatted preview. Ticking a `- [ ]` box in the preview ticks it in the note. |
-| **Documents** | Any file: PDFs open in place, other files show a Quick Look preview. Each is copied into the app, so moving or deleting the original doesn't lose it. |
+| **Documents** | Any file: PDFs and EPUB books open in place, other files show a Quick Look preview. Each is copied into the app, so moving or deleting the original doesn't lose it. Books remember where you stopped reading, on every device. |
+| **Highlights** | Select text in a PDF or a book and choose *Highlight* (or a colour, or *Highlight and Add Note*). Highlights are listed in the side panel, where choosing one scrolls to it; tapping one in the document opens its note. Highlights and notes are searchable, and the file itself is left untouched. |
 | **Links** | Paste or type a web address. The page's title and description are fetched, and a full copy of the page (text, pictures and styles) is saved, so you can read it offline exactly as it was. Search covers the page's words, including text the page adds itself once it has loaded. *Refresh* fetches it all again. |
 | **Linking items** | Type `[[` in a note and pick from the suggestions (arrows and Return or Tab on a keyboard, or tap one), or type `[[Title]]` in full, or use *Link to Item…* in the side panel for any kind of item. Each item lists what it links to and what links to it. Renaming an item updates the `[[links]]` that point at it. Tapping a link to an item that doesn't exist yet creates it. |
 | **Categories** | One per item, and they can nest. Choosing a category also shows everything in the categories inside it. |
 | **Tags** | As many per item as you like. Type them separated by commas. Tags are single words: "to read" becomes `to-read`. |
-| **Search** | Searches titles, text, tags, web page text, PDF text, and text found in images. Results are ranked, with title matches first. Use `"quotes"` for an exact phrase, `OR` for either word, `-word` to leave items out, `#tag` (or `-#tag`) for tags, `kind:pdf` (note, link, document, pdf, image, video, audio), `in:Category`, `is:favorite`, `is:untagged`, and `after:`/`before:` with a date (`2026-03-01`) or a time ago (`today`, `7d`, `2w`, `3m`, `1y`). |
+| **Search** | Searches titles, text, tags, web page text, PDF text, and text found in images. Results are ranked, with title matches first. Use `"quotes"` for an exact phrase, `OR` for either word, `-word` to leave items out, `#tag` (or `-#tag`) for tags, `kind:pdf` (note, link, document, pdf, image, video, audio), `in:Category`, `is:favorite`, `is:unread`, `is:inbox`, `is:untagged`, `label:red`, `rating:3` (three stars or more), and `after:`/`before:` with a date (`2026-03-01`) or a time ago (`today`, `7d`, `2w`, `3m`, `1y`). |
 | **Smart filters** | Save any search in the sidebar (the button beside the search field, or *New Smart Filter*). It shows whatever matches now. |
+| **Inbox** | Links, documents and things shared from other apps or saved by Shortcuts arrive in the Inbox unless they already have a category. Giving one a category files it; *Done* takes it out without one. |
+| **Unread** | New arrivals have a blue dot until you look at them. *Mark as Unread* puts it back. |
+| **Labels and ratings** | A colour label (as in the Finder) and up to five stars, from an item's menu or its side panel. Sort by either, or search with `label:red` and `rating:4`. |
 | **Favorites** | Star an item from its toolbar, its menu, a swipe, or Cmd-D on a Mac. |
 | **Trash** | Deleted items go to the Trash, where they can be put back, for 30 days. |
 | **Sorting** | By date modified, date created, title or kind, either way round. Search results always come best match first. |
 | **See Also** | The side panel lists items most like the one you're looking at, from the words they share, and suggests a category for an uncategorized item from where those are. |
 | **Duplicates** | Pages saved twice (however their addresses are written) and files imported twice are listed under *Duplicates* in the sidebar, and in each copy's side panel. |
+| **Export and backup** | Export an item, a category or everything (*File › Export*, or the sidebar's backup menu) as a ZIP file: a folder per category, notes and links as Markdown, documents as they were, saved pages as web archives, readable without Stash. *Restore from Backup* adds back anything in an export that isn't already in the library, with its categories, tags, links, highlights and smart filters. |
 | **Shortcuts and Spotlight** | Add Note, Save Link, Find Items and Open Item actions in Shortcuts and Siri. Items appear in the system's Spotlight search, and open in Stash. |
 
 New items go into whatever category or tag the sidebar is showing.
@@ -110,7 +115,7 @@ Config/                 Stash.xcconfig (the sync and sharing switches),
                         entitlements, Info.plist additions
 Stash/                  the app (SwiftUI + SwiftData), shared by Mac and iPhone
   StashApp.swift        window, menus
-  Model/                Item, Tag, ItemCategory, SmartFilter
+  Model/                Item, Tag, ItemCategory, SmartFilter, Highlight
   Library/              Library: every change goes through it
                         SearchIndex: SQLite full-text search
                         FileStore: copies of imported documents
@@ -120,7 +125,8 @@ Stash/                  the app (SwiftUI + SwiftData), shared by Mac and iPhone
 ShareExtension/         "Save to Stash" in share menus (StashShare target)
 StashCore/              no-interface logic, with tests
                         [[link]] parsing, search syntax, Markdown blocks,
-                        tag names, web page text
+                        tag names, web page text, ZIP files, EPUB books,
+                        highlight anchors, the backup format
 ```
 
 - **Data** is kept with SwiftData in the app's own storage. Imported files
@@ -141,6 +147,14 @@ StashCore/              no-interface logic, with tests
   browser view nobody sees (`PageArchiver`), so pages that build
   themselves with JavaScript are copied as shown. They sit in `Files/`
   beside documents and sync the same way, up to the same size limit.
+- **Books** are read straight from the EPUB file: `EPUBReader` serves its
+  chapters to a web view from inside the ZIP. A highlight in a book is
+  remembered by its words and a little of the text either side
+  (`TextQuote`), so it's found again however the chapter is laid out; one in
+  a PDF by the rectangles it covers on its page.
+- **Exports** are ZIP files written straight to disk (`ZipWriter`, ZIP64 for
+  very large libraries), with `Stash Backup.json` beside the readable files
+  holding everything needed to restore them.
 - **Sharing** never touches the library from the share extension: two
   processes writing to an iCloud-synced database at once is asking for
   trouble. The extension leaves each thing in an inbox folder in the App

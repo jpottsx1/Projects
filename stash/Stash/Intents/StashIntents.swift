@@ -64,7 +64,9 @@ struct AddNoteIntent: AppIntent {
 
     @MainActor
     func perform() async throws -> some IntentResult & ReturnsValue<ItemEntity> {
-        let item = StashStore.shared.library.newNote(titled: noteTitle, text: text)
+        let library = StashStore.shared.library
+        let item = library.newNote(titled: noteTitle, text: text)
+        library.markReceived(item)
         return .result(value: ItemEntity(item))
     }
 }
@@ -85,7 +87,9 @@ struct SaveLinkIntent: AppIntent {
         guard let web = WebAddress.url(from: url.absoluteString) else {
             throw $url.needsValueError("That isn’t a web address. Which page should be saved?")
         }
-        let item = StashStore.shared.library.addLink(web)
+        let library = StashStore.shared.library
+        let item = library.addLink(web)
+        library.markReceived(item)
         return .result(value: ItemEntity(item))
     }
 }

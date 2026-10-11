@@ -1,5 +1,8 @@
 import Foundation
 import WebKit
+#if os(iOS)
+import UIKit
+#endif
 
 /// Makes a full copy of a web page -- its text, pictures and styles -- as
 /// a Safari web archive, by loading it in a browser view nobody sees.
@@ -25,6 +28,7 @@ final class PageArchiver: NSObject, WKNavigationDelegate {
 
     private let webView: WKWebView
     private var loading: CheckedContinuation<Bool, Never>?
+    private var timeout: Task<Void, Never>?
 
     override init() {
         let configuration = WKWebViewConfiguration()
@@ -37,12 +41,15 @@ final class PageArchiver: NSObject, WKNavigationDelegate {
     }
 
     private func run(_ url: URL) async -> Page? {
-        let loaded = await withCheckedContinuation { continuation in
+        attachOffscreen()
+        defer { webView.removeFromSuperview() }
+
+        let loaded: Bool = await withCheckedContinuation { continuation in
             loading = continuation
             webView.load(URLRequest(url: url, timeoutInterval: 30))
-            Task {
+            timeout = Task { [weak self] in
                 try? await Task.sleep(for: .seconds(45))
-                self.finishLoading(false)
+                self?.finishLoading(false)
             }
         }
         guard loaded else {
@@ -77,8 +84,28 @@ final class PageArchiver: NSObject, WKNavigationDelegate {
     /// Resumes whoever is waiting for the load, once: a load can both fail
     /// and time out.
     private func finishLoading(_ succeeded: Bool) {
+        timeout?.cancel()
+        timeout = nil
         loading?.resume(returning: succeeded)
         loading = nil
+    }
+
+    /// iOS slows a web view that isn't in a window -- timers stall, lazy
+    /// pictures never load -- so while copying it sits in the window,
+    /// all but transparent and letting touches through. It keeps its full
+    /// size, so the page lays itself out as it would on screen. A Mac
+    /// loads it fine as it is.
+    private func attachOffscreen() {
+        #if os(iOS)
+        let window = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap(\.windows)
+            .first { $0.isKeyWindow }
+        guard let window else { return }
+        webView.alpha = 0.01
+        webView.isUserInteractionEnabled = false
+        window.addSubview(webView)
+        #endif
     }
 
     // MARK: - WKNavigationDelegate

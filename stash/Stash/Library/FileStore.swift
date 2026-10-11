@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 /// Imported documents are copied into the app's own folder, one subfolder
@@ -42,6 +43,20 @@ struct FileStore {
         try FileManager.default.createDirectory(at: destination.deletingLastPathComponent(),
                                                 withIntermediateDirectories: true)
         try data.write(to: destination, options: .atomic)
+    }
+
+    /// The file's SHA-256 as hex, read a piece at a time so a large file
+    /// isn't loaded whole. Slow for big files: call it off the main thread.
+    static func sha256(of url: URL) -> String? {
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
+        defer { try? handle.close() }
+        var hasher = SHA256()
+        while true {
+            guard let chunk = try? handle.read(upToCount: 4 * 1024 * 1024) else { return nil }
+            if chunk.isEmpty { break }
+            hasher.update(data: chunk)
+        }
+        return hasher.finalize().map { String(format: "%02x", $0) }.joined()
     }
 
     /// Removes the item's whole folder.

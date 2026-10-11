@@ -8,6 +8,7 @@ struct ItemInspector: View {
     @Bindable var item: Item
     @Query(sort: \ItemCategory.name) private var categories: [ItemCategory]
     @State private var isPickingLink = false
+    @State private var seeAlso: [Item] = []
 
     var body: some View {
         Form {
@@ -19,6 +20,15 @@ struct ItemInspector: View {
                     }
                 }
                 .labelsHidden()
+                if item.category == nil, let suggested = suggestedCategory {
+                    Button {
+                        item.category = suggested
+                    } label: {
+                        Label("File in “\(suggested.path)”", systemImage: "folder.badge.plus")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Where most items like this one are")
+                }
             }
 
             Section {
@@ -65,6 +75,31 @@ struct ItemInspector: View {
                 }
             }
 
+            Section {
+                if seeAlso.isEmpty {
+                    Text("Nothing much like this yet.")
+                        .foregroundStyle(.secondary)
+                }
+                ForEach(seeAlso) { other in
+                    row(for: other)
+                }
+            } header: {
+                Text("See Also")
+            } footer: {
+                if !seeAlso.isEmpty {
+                    Text("Items that share this one’s most telling words.")
+                }
+            }
+
+            let copies = library.duplicates(of: item)
+            if !copies.isEmpty {
+                Section("Also Saved As") {
+                    ForEach(copies) { other in
+                        row(for: other, note: other.createdAt.formatted(date: .abbreviated, time: .omitted))
+                    }
+                }
+            }
+
             Section("Info") {
                 LabeledContent("Kind", value: item.kind.rawValue.capitalized)
                 LabeledContent("Created", value: item.createdAt.formatted(date: .abbreviated, time: .shortened))
@@ -73,6 +108,12 @@ struct ItemInspector: View {
         }
         .formStyle(.grouped)
         .onChange(of: item.category) { library.didEdit(item) }
+        // Worked out a moment after typing stops, not on every keystroke.
+        .task(id: item.modifiedAt) {
+            if !seeAlso.isEmpty { try? await Task.sleep(for: .seconds(1)) }
+            guard !Task.isCancelled else { return }
+            seeAlso = library.related(to: item)
+        }
         .sheet(isPresented: $isPickingLink) {
             ItemPicker(excluding: item) { other in library.link(item, to: other) }
         }
@@ -98,8 +139,14 @@ struct ItemInspector: View {
         categories.filter { $0.parent == nil }.flatMap(\.flattened)
     }
 
+    /// The category most of the See Also items are in.
+    private var suggestedCategory: ItemCategory? {
+        let counts = Dictionary(grouping: seeAlso.compactMap(\.category), by: \.persistentModelID)
+        return counts.values.max { $0.count < $1.count }?.first
+    }
+
     private var handLinks: [Item] {
-        (item.linksTo ?? []).sorted { $0.displayTitle.localizedStandardCompare($1.displayTitle) == .orderedAscending }
+        (item.linksTo ?? []).filter { !$0.isTrashed }.sorted { $0.displayTitle.localizedStandardCompare($1.displayTitle) == .orderedAscending }
     }
 
     /// `[[Titles]]` written in the note that aren't also hand-made links.
@@ -112,7 +159,7 @@ struct ItemInspector: View {
     /// Hand-made links to this item, and notes that name it in a `[[link]]`.
     private var backlinks: [Item] {
         var seen = Set<PersistentIdentifier>()
-        return ((item.linkedFrom ?? []) + library.notesLinking(to: item))
+        return ((item.linkedFrom ?? []).filter { !$0.isTrashed } + library.notesLinking(to: item))
             .filter { seen.insert($0.persistentModelID).inserted }
             .sorted { $0.displayTitle.localizedStandardCompare($1.displayTitle) == .orderedAscending }
     }
@@ -152,6 +199,7 @@ struct ItemPicker: View {
         let linked = Set((excluding.linksTo ?? []).map(\.persistentModelID))
         return items.filter { item in
             item != excluding
+                && !item.isTrashed
                 && !linked.contains(item.persistentModelID)
                 && (filter.isEmpty || item.title.localizedStandardContains(filter))
         }

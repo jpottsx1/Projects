@@ -1,14 +1,17 @@
 import SwiftUI
 import SwiftData
 
-@main
-struct StashApp: App {
-    private let container: ModelContainer
-    @State private var library: Library
-    @State private var sync = SyncMonitor()
+/// The library, made once. Shortcuts can start the app without showing it,
+/// so it can't wait for the window to be made.
+@MainActor
+final class StashStore {
+    static let shared = StashStore()
 
-    init() {
-        let schema = Schema([Item.self, Tag.self, ItemCategory.self])
+    let container: ModelContainer
+    let library: Library
+
+    private init() {
+        let schema = Schema([Item.self, Tag.self, ItemCategory.self, SmartFilter.self])
         // Syncs through the iCloud container named in the entitlements,
         // which only exist when ICLOUD_SYNC is on (Config/Stash.xcconfig).
         // Said explicitly either way: left to itself SwiftData syncs
@@ -18,14 +21,24 @@ struct StashApp: App {
         #else
         let configuration = ModelConfiguration(schema: schema, cloudKitDatabase: .none)
         #endif
-        let container: ModelContainer
         do {
             container = try ModelContainer(for: schema, configurations: configuration)
         } catch {
             fatalError("Couldn't open the library: \(error)")
         }
-        self.container = container
-        _library = State(initialValue: Library(context: container.mainContext))
+        library = Library(context: container.mainContext)
+    }
+}
+
+@main
+struct StashApp: App {
+    private let container: ModelContainer
+    @State private var library: Library
+    @State private var sync = SyncMonitor()
+
+    init() {
+        container = StashStore.shared.container
+        _library = State(initialValue: StashStore.shared.library)
     }
 
     var body: some Scene {
@@ -62,6 +75,23 @@ struct StashCommands: Commands {
                 .keyboardShortcut("l", modifiers: [.command, .shift])
             Button("Import Documents…") { library.isImporting = true }
                 .keyboardShortcut("i", modifiers: [.command, .shift])
+        }
+        CommandMenu("Item") {
+            Button(library.selection?.isFavorite == true ? "Remove from Favorites" : "Add to Favorites") {
+                if let item = library.selection { library.setFavorite([item], !item.isFavorite) }
+            }
+            .keyboardShortcut("d")
+            .disabled(library.selection == nil || library.selection?.isTrashed == true)
+            Divider()
+            Button("Move to Trash") {
+                if let item = library.selection { library.moveToTrash([item]) }
+            }
+            .keyboardShortcut(.delete)
+            .disabled(library.selection == nil || library.selection?.isTrashed == true)
+            Button("Put Back") {
+                if let item = library.selection { library.restore([item]) }
+            }
+            .disabled(library.selection?.isTrashed != true)
         }
     }
 }

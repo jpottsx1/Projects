@@ -90,7 +90,14 @@ Capabilities* for each target, find App Groups, and tick
 | **Linking items** | Type `[[` in a note and pick from the suggestions (arrows and Return or Tab on a keyboard, or tap one), or type `[[Title]]` in full, or use *Link to Item…* in the side panel for any kind of item. Each item lists what it links to and what links to it. Renaming an item updates the `[[links]]` that point at it. Tapping a link to an item that doesn't exist yet creates it. |
 | **Categories** | One per item, and they can nest. Choosing a category also shows everything in the categories inside it. |
 | **Tags** | As many per item as you like. Type them separated by commas. Tags are single words: "to read" becomes `to-read`. |
-| **Search** | Searches titles, text, tags, web page text, PDF text, and text found in images. Results are ranked, with title matches first. Use `"quotes"` for an exact phrase and `#tag` to only show items with that tag. |
+| **Search** | Searches titles, text, tags, web page text, PDF text, and text found in images. Results are ranked, with title matches first. Use `"quotes"` for an exact phrase, `OR` for either word, `-word` to leave items out, `#tag` (or `-#tag`) for tags, `kind:pdf` (note, link, document, pdf, image, video, audio), `in:Category`, `is:favorite`, `is:untagged`, and `after:`/`before:` with a date (`2026-03-01`) or a time ago (`today`, `7d`, `2w`, `3m`, `1y`). |
+| **Smart filters** | Save any search in the sidebar (the button beside the search field, or *New Smart Filter*). It shows whatever matches now. |
+| **Favorites** | Star an item from its toolbar, its menu, a swipe, or Cmd-D on a Mac. |
+| **Trash** | Deleted items go to the Trash, where they can be put back, for 30 days. |
+| **Sorting** | By date modified, date created, title or kind, either way round. Search results always come best match first. |
+| **See Also** | The side panel lists items most like the one you're looking at, from the words they share, and suggests a category for an uncategorized item from where those are. |
+| **Duplicates** | Pages saved twice (however their addresses are written) and files imported twice are listed under *Duplicates* in the sidebar, and in each copy's side panel. |
+| **Shortcuts and Spotlight** | Add Note, Save Link, Find Items and Open Item actions in Shortcuts and Siri. Items appear in the system's Spotlight search, and open in Stash. |
 
 New items go into whatever category or tag the sidebar is showing.
 Dropping files or web addresses onto the list adds them.
@@ -103,11 +110,12 @@ Config/                 Stash.xcconfig (the sync and sharing switches),
                         entitlements, Info.plist additions
 Stash/                  the app (SwiftUI + SwiftData), shared by Mac and iPhone
   StashApp.swift        window, menus
-  Model/                Item, Tag, ItemCategory
+  Model/                Item, Tag, ItemCategory, SmartFilter
   Library/              Library: every change goes through it
                         SearchIndex: SQLite full-text search
                         FileStore: copies of imported documents
                         TextExtractor: text from PDFs, images, web pages
+  Intents/              Shortcuts actions (App Intents)
   Views/
 ShareExtension/         "Save to Stash" in share menus (StashShare target)
 StashCore/              no-interface logic, with tests
@@ -118,7 +126,10 @@ StashCore/              no-interface logic, with tests
 - **Data** is kept with SwiftData in the app's own storage. Imported files
   sit beside it in `Files/`, one folder per item.
 - **The search index** is a separate SQLite FTS5 database. It's rebuilt from
-  the library at every launch, so deleting it loses nothing.
+  the library at every launch, so deleting it loses nothing. *See Also*
+  uses it too: it picks the item's rarest frequent words (`Keywords` in
+  StashCore) and searches for any of them. Spotlight's copy
+  (`SpotlightIndex`) is rebuilt the same way.
 - **Sync** is SwiftData's built-in CloudKit mirroring, into your private
   iCloud database. A document's contents are stored on its item (kept
   outside the database file), which is how files reach other devices.

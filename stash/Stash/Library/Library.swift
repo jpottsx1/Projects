@@ -8,9 +8,14 @@ import StashCore
 /// What the sidebar is showing.
 enum SidebarSelection: Hashable {
     case all
+    case favorites
     case kind(ItemKind)
     case category(ItemCategory)
     case tag(Tag)
+    case smartFilter(SmartFilter)
+    /// Pages saved more than once, and files imported more than once.
+    case duplicates
+    case trash
 }
 
 /// The library and the window's state. Every change to items goes through
@@ -23,12 +28,17 @@ final class Library {
     /// Bigger documents stay on the device they were added on: iCloud
     /// handles them poorly, and every device would have to download them.
     static let largestSyncedFile = 100 * 1024 * 1024
+    /// How long items stay in the Trash before they go for good.
+    static let trashDays = 30
 
     let context: ModelContext
     let files: FileStore
     private let index: SearchIndex?
+    @ObservationIgnored private let spotlight = SpotlightIndex()
 
-    var sidebar: SidebarSelection? = .all
+    var sidebar: SidebarSelection? = .all {
+        didSet { if sidebar != oldValue { compileSmartFilter() } }
+    }
     var selection: Item?
     var isAddingLink = false
     var isImporting = false
@@ -43,8 +53,17 @@ final class Library {
             runSearch()
         }
     }
-    /// Ids from the full-text index, best match first; nil when no words are being searched for.
-    private(set) var searchHits: [UUID]?
+    /// What's typed in the search field, worked out.
+    private(set) var search = CompiledSearch.none
+    /// The smart filter the sidebar is showing, worked out.
+    private var smartFilterSearch: CompiledSearch?
+
+    var sort: ItemSort = ItemSort(rawValue: UserDefaults.standard.string(forKey: "sort") ?? "") ?? .modified {
+        didSet { UserDefaults.standard.set(sort.rawValue, forKey: "sort") }
+    }
+    var sortAscending: Bool = UserDefaults.standard.bool(forKey: "sortAscending") {
+        didSet { UserDefaults.standard.set(sortAscending, forKey: "sortAscending") }
+    }
     /// Goes up whenever something that links or backlinks depend on changes,
     /// so the views showing them redraw.
     private(set) var revision = 0
@@ -95,17 +114,20 @@ final class Library {
     // MARK: - Adding
 
     @discardableResult
-    func newNote(titled title: String = "") -> Item {
+    func newNote(titled title: String = "", text: String = "") -> Item {
         let item = Item(kind: .note, title: title)
+        item.body = text
         insert(item)
         return item
     }
 
-    func addLink(_ url: URL) {
+    @discardableResult
+    func addLink(_ url: URL) -> Item {
         let item = Item(kind: .link, title: WebAddress.displayHost(of: url))
         item.urlString = url.absoluteString
         insert(item)
         Task { await refreshPage(of: item) }
+        return item
     }
 
     func importFiles(_ urls: [URL]) {
@@ -122,7 +144,10 @@ final class Library {
             item.fileData = syncableContents(of: item)
             insert(item, select: false)
             last = item
-            Task { await extractText(from: item) }
+            Task {
+                await fillContentHash(of: item)
+                await extractText(from: item)
+            }
         }
         if let last { selection = last }
     }
@@ -144,7 +169,11 @@ final class Library {
             item.category = category
         case .tag(let tag):
             item.tags = [tag]
+        case .favorites:
+            item.isFavorite = true
         case .kind(let kind) where kind != item.kind:
+            sidebar = .all
+        case .smartFilter, .duplicates, .trash:
             sidebar = .all
         default:
             break
@@ -263,16 +292,61 @@ final class Library {
         return try? Data(contentsOf: url, options: .mappedIfSafe)
     }
 
-    func delete(_ items: [Item]) {
+    // MARK: - Favourites and the Trash
+
+    func setFavorite(_ items: [Item], _ favorite: Bool) {
+        for item in items { item.isFavorite = favorite }
+        save()
+        runSearch()
+    }
+
+    /// Items in the Trash keep everything -- files, tags, links -- until
+    /// they're deleted for good, by hand or after `trashDays`.
+    func moveToTrash(_ items: [Item]) {
+        for item in items where !item.isTrashed {
+            if selection == item { selection = nil }
+            item.trashedAt = .now
+            spotlight.update(item)
+        }
+        save()
+        revision += 1
+        runSearch()
+    }
+
+    func restore(_ items: [Item]) {
+        for item in items {
+            item.trashedAt = nil
+            spotlight.update(item)
+        }
+        save()
+        revision += 1
+        runSearch()
+    }
+
+    func deleteImmediately(_ items: [Item]) {
         for item in items {
             if selection == item { selection = nil }
             if let path = item.storedFilePath ?? item.archivePath { files.remove(path) }
             index?.remove(item.uuid)
             context.delete(item)
         }
+        spotlight.remove(items.map(\.uuid))
         save()
         revision += 1
         runSearch()
+    }
+
+    func emptyTrash() {
+        let trashed = (try? context.fetch(FetchDescriptor<Item>(predicate: #Predicate { $0.trashedAt != nil }))) ?? []
+        deleteImmediately(trashed)
+    }
+
+    /// Every device does this, and they all agree on what's old enough.
+    private func deleteOldTrash() {
+        guard let cutoff = Calendar.current.date(byAdding: .day, value: -Self.trashDays, to: .now) else { return }
+        let trashed = (try? context.fetch(FetchDescriptor<Item>(predicate: #Predicate { $0.trashedAt != nil }))) ?? []
+        let old = trashed.filter { ($0.trashedAt ?? .now) < cutoff }
+        if !old.isEmpty { deleteImmediately(old) }
     }
 
     // MARK: - Tags
@@ -398,7 +472,11 @@ final class Library {
 
             switch item.kind {
             case .link: Task { await refreshPage(of: item) }
-            case .document: Task { await extractText(from: item) }
+            case .document:
+                Task {
+                    await fillContentHash(of: item)
+                    await extractText(from: item)
+                }
             case .note: break
             }
         }
@@ -427,7 +505,9 @@ final class Library {
         guard !trimmed.isEmpty else { return nil }
         let key = WikiLinks.key(trimmed)
         let descriptor = FetchDescriptor<Item>(predicate: #Predicate { $0.title.localizedStandardContains(trimmed) })
-        return (try? context.fetch(descriptor))?.first { WikiLinks.key($0.title) == key }
+        let named = ((try? context.fetch(descriptor)) ?? []).filter { WikiLinks.key($0.title) == key }
+        // One in the Trash is only the answer when there's nothing else.
+        return named.first { !$0.isTrashed } ?? named.first
     }
 
     /// Follows a link tapped in a note's preview, making the note if it doesn't exist yet.
@@ -443,7 +523,7 @@ final class Library {
     /// Notes whose text has a `[[link]]` to `item`.
     func notesLinking(to item: Item) -> [Item] {
         _ = revision
-        return notesLinking(toTitle: item.title).filter { $0 != item }
+        return notesLinking(toTitle: item.title).filter { $0 != item && !$0.isTrashed }
     }
 
     private func notesLinking(toTitle title: String) -> [Item] {
@@ -473,59 +553,143 @@ final class Library {
     var sidebarTitle: String {
         switch sidebar ?? .all {
         case .all: "All Items"
+        case .favorites: "Favorites"
         case .kind(let kind): kind.pluralName
         case .category(let category): category.name
         case .tag(let tag): "#" + tag.name
+        case .smartFilter(let filter): filter.name
+        case .duplicates: "Duplicates"
+        case .trash: "Trash"
         }
     }
 
-    /// `items` narrowed to the sidebar selection and the search, best match
-    /// first while searching.
+    /// `items` narrowed to the sidebar selection and the search: best match
+    /// first while searching by word, otherwise in the chosen order.
     func visibleItems(from items: [Item]) -> [Item] {
+        if sidebar == .duplicates { return duplicates(among: items).flatMap { $0 } }
         var result = items.filter(isInSidebar)
-        let search = SearchQuery(query)
-        if !search.tags.isEmpty {
-            result = result.filter { item in search.tags.allSatisfy { item.hasTag(key: $0) } }
-        }
-        guard search.ftsExpression != nil else { return result }
-
-        if let hits = searchHits {
-            var rank: [UUID: Int] = [:]
-            for (position, id) in hits.enumerated() where rank[id] == nil { rank[id] = position }
-            return result
-                .filter { rank[$0.uuid] != nil }
-                .sorted { rank[$0.uuid, default: .max] < rank[$1.uuid, default: .max] }
-        }
-
-        // No index (it failed to open): a plain, unranked text match.
-        let words = search.terms.map { term -> String in
-            switch term {
-            case .word(let text), .phrase(let text): return text
-            }
-        }
-        return result.filter { item in
-            words.allSatisfy { word in
-                [item.title, item.body, item.summary, item.extractedText]
-                    .contains { $0.localizedStandardContains(word) }
-            }
-        }
+        if !search.isEmpty { result = result.filter(search.matches) }
+        if search.isRanked { return search.rank(result) }
+        return sort.sorted(result, ascending: sortAscending)
     }
 
     private func isInSidebar(_ item: Item) -> Bool {
-        switch sidebar ?? .all {
-        case .all: true
-        case .kind(let kind): item.kind == kind
-        case .category(let category): category.contains(item.category)
-        case .tag(let tag): (item.tags ?? []).contains(tag)
+        let selection = sidebar ?? .all
+        if selection == .trash { return item.isTrashed }
+        guard !item.isTrashed else { return false }
+        switch selection {
+        case .all, .trash, .duplicates: return true
+        case .favorites: return item.isFavorite
+        case .kind(let kind): return item.kind == kind
+        case .category(let category): return category.contains(item.category)
+        case .tag(let tag): return (item.tags ?? []).contains(tag)
+        case .smartFilter: return smartFilterSearch?.matches(item) ?? true
         }
     }
 
+    /// Items saved more than once, grouped, each group oldest first.
+    func duplicates(among items: [Item]) -> [[Item]] {
+        let keyed = items.filter { !$0.isTrashed && $0.duplicateKey != nil }
+        return Dictionary(grouping: keyed) { $0.duplicateKey! }.values
+            .filter { $0.count > 1 }
+            .map { $0.sorted { ($0.createdAt, $0.uuid.uuidString) < ($1.createdAt, $1.uuid.uuidString) } }
+            .sorted { $0[0].displayTitle.localizedStandardCompare($1[0].displayTitle) == .orderedAscending }
+    }
+
+    /// Other copies of the same page or file.
+    func duplicates(of item: Item) -> [Item] {
+        _ = revision
+        guard let key = item.duplicateKey else { return [] }
+        let kind = item.kindRaw
+        let sameKind = (try? context.fetch(FetchDescriptor<Item>(predicate: #Predicate { $0.kindRaw == kind }))) ?? []
+        return sameKind.filter { $0 != item && !$0.isTrashed && $0.duplicateKey == key }
+    }
+
     private func runSearch() {
-        if let expression = SearchQuery(query).ftsExpression, let index {
-            searchHits = index.search(expression)
+        search = CompiledSearch(SearchQuery(query), index: index)
+        compileSmartFilter()
+    }
+
+    private func compileSmartFilter() {
+        if case .smartFilter(let filter) = sidebar {
+            smartFilterSearch = CompiledSearch(SearchQuery(filter.query), index: index)
         } else {
-            searchHits = nil
+            smartFilterSearch = nil
         }
+    }
+
+    // MARK: - Smart filters
+
+    @discardableResult
+    func newSmartFilter(named name: String, query: String) -> SmartFilter? {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let filter = SmartFilter(name: trimmed, query: query.trimmingCharacters(in: .whitespacesAndNewlines))
+        context.insert(filter)
+        save()
+        return filter
+    }
+
+    func update(_ filter: SmartFilter, name: String, query: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty { filter.name = trimmed }
+        filter.query = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        save()
+        compileSmartFilter()
+    }
+
+    func delete(_ filter: SmartFilter) {
+        if sidebar == .smartFilter(filter) { sidebar = .all }
+        context.delete(filter)
+        save()
+    }
+
+    // MARK: - See Also
+
+    /// Items most like this one: those sharing the words that say most
+    /// about it, best first. Uses the index, so nothing without one.
+    func related(to item: Item, limit: Int = 8) -> [Item] {
+        guard let index else { return [] }
+        let tags = item.sortedTags.map(\.name).joined(separator: " ")
+        // The title and tags say most about what it is.
+        let text = [item.title, item.title, item.title, tags, tags, item.body, item.summary, item.extractedText]
+            .joined(separator: "\n")
+        let words = Keywords.best(
+            Keywords.counts(in: text),
+            documentFrequency: { word in SearchQuery.anyWord([word]).map { index.count(matching: $0) } ?? 0 },
+            documentCount: index.count())
+        guard let expression = SearchQuery.anyWord(words) else { return [] }
+        let ids = index.search(expression, limit: limit * 3).filter { $0 != item.uuid }
+        guard !ids.isEmpty else { return [] }
+        let found = (try? context.fetch(FetchDescriptor<Item>(predicate: #Predicate { ids.contains($0.uuid) }))) ?? []
+        let byID = Dictionary(found.map { ($0.uuid, $0) }, uniquingKeysWith: { first, _ in first })
+        return ids.compactMap { byID[$0] }.filter { !$0.isTrashed }.prefix(limit).map { $0 }
+    }
+
+    // MARK: - Shortcuts and Spotlight
+
+    func items(withIDs ids: [UUID]) -> [Item] {
+        let found = (try? context.fetch(FetchDescriptor<Item>(predicate: #Predicate { ids.contains($0.uuid) }))) ?? []
+        let byID = Dictionary(found.map { ($0.uuid, $0) }, uniquingKeysWith: { first, _ in first })
+        return ids.compactMap { byID[$0] }
+    }
+
+    /// Items matching search text, as typed in the search field, best first.
+    func find(_ text: String, limit: Int = 50) -> [Item] {
+        let compiled = CompiledSearch(SearchQuery(text), index: index)
+        let all = (try? context.fetch(FetchDescriptor<Item>(sortBy: [SortDescriptor(\.modifiedAt, order: .reverse)]))) ?? []
+        return Array(compiled.rank(all.filter { !$0.isTrashed && compiled.matches($0) }).prefix(limit))
+    }
+
+    /// Shows an item opened from Spotlight or Shortcuts.
+    func show(_ item: Item) {
+        if item.isTrashed {
+            sidebar = .trash
+        } else if !isInSidebar(item) {
+            sidebar = .all
+        }
+        if !query.isEmpty { searchText = "" }
+        selection = item
     }
 
     // MARK: - Changes from iCloud
@@ -544,11 +708,20 @@ final class Library {
     private func refreshAfterStoreChange() {
         if let selection, !isAlive(selection) { self.selection = nil }
         mergeDuplicates()
+        deleteOldTrash()
         // Only tidy files away when the library definitely loaded: an empty
         // list from a failed fetch would otherwise delete every document.
         guard let items = try? context.fetch(FetchDescriptor<Item>()) else { return }
         index?.replaceAll(with: items.map(entry(for:)))
+        spotlight.replaceAll(with: items)
         files.removeFolders(notBelongingTo: Set(items.map(\.uuid)))
+        // Documents added before duplicates were looked for, or whose
+        // hash hasn't arrived from iCloud yet.
+        for item in items where item.kind == .document && item.contentHash.isEmpty {
+            if let path = item.storedFilePath, files.exists(path) {
+                Task { await fillContentHash(of: item) }
+            }
+        }
         publishCategories()
         revision += 1
         runSearch()
@@ -605,6 +778,7 @@ final class Library {
 
     func reindex(_ item: Item) {
         index?.update(entry(for: item))
+        spotlight.update(item)
         revision += 1
         if !query.isEmpty { runSearch() }
     }
@@ -617,6 +791,18 @@ final class Library {
             body: item.summary.isEmpty ? item.body : item.body + "\n" + item.summary,
             tags: item.sortedTags.map(\.name).joined(separator: " "),
             extra: [item.urlString ?? "", fileName, item.extractedText].joined(separator: "\n"))
+    }
+
+    /// Works out a document's hash, for finding duplicates, if it hasn't been yet.
+    func fillContentHash(of item: Item) async {
+        guard item.kind == .document, item.contentHash.isEmpty,
+              let path = item.storedFilePath, files.exists(path) else { return }
+        let url = files.url(for: path)
+        let hash = await Task.detached(priority: .utility) { FileStore.sha256(of: url) }.value
+        guard let hash, isAlive(item) else { return }
+        item.contentHash = hash
+        save()
+        revision += 1
     }
 
     // MARK: - Saving

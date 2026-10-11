@@ -1,3 +1,4 @@
+import CoreSpotlight
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -30,6 +31,12 @@ struct ContentView: View {
         }
         .sheet(isPresented: $library.isAddingLink) {
             AddLinkSheet()
+        }
+        // An item chosen in Spotlight.
+        .onContinueUserActivity(CSSearchableItemActionType) { activity in
+            guard let id = (activity.userInfo?[CSSearchableItemActivityIdentifier] as? String).flatMap(UUID.init(uuidString:)),
+                  let item = library.items(withIDs: [id]).first else { return }
+            library.show(item)
         }
         // Things shared from other apps while Stash wasn't running.
         .onChange(of: scenePhase) { _, phase in

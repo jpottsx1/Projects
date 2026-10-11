@@ -189,3 +189,57 @@ final class SharedInboxTests: XCTestCase {
         XCTAssertEqual(inbox.categories(), categories)
     }
 }
+
+final class WikiLinkCompletionTests: XCTestCase {
+    /// The context with the cursor where "|" is written in `marked`.
+    private func context(_ marked: String) -> WikiLinkCompletion.Context? {
+        let cursorOffset = marked.distance(from: marked.startIndex, to: marked.firstIndex(of: "|")!)
+        var text = marked
+        text.remove(at: text.firstIndex(of: "|")!)
+        return WikiLinkCompletion.context(in: text, cursor: text.index(text.startIndex, offsetBy: cursorOffset))
+    }
+
+    func testFindsTheUnfinishedLink() {
+        XCTAssertEqual(context("See [[shop|")?.query, "shop")
+        XCTAssertEqual(context("See [[|")?.query, "")
+        XCTAssertEqual(context("[[two words| after")?.query, "two words")
+    }
+
+    func testNoContextOutsideALink() {
+        XCTAssertNil(context("plain text|"))
+        XCTAssertNil(context("[[done]] then|"))
+        XCTAssertNil(context("[[line\nbreak|"))
+        XCTAssertNil(context("[single|"))
+    }
+
+    func testCompletingReplacesTheQueryAndPlacesTheCursor() {
+        let text = "See [[sho and more"
+        let cursor = text.index(text.startIndex, offsetBy: 9)  // after "sho"
+        let found = WikiLinkCompletion.context(in: text, cursor: cursor)!
+        let done = WikiLinkCompletion.complete(text, context: found, with: "Shopping List")
+        XCTAssertEqual(done.text, "See [[Shopping List]] and more")
+        XCTAssertEqual(String(done.text[..<done.cursor]), "See [[Shopping List]]")
+    }
+
+    func testCompletingReusesClosingBrackets() {
+        let text = "[[sh]]"
+        let found = WikiLinkCompletion.context(in: text, cursor: text.index(text.startIndex, offsetBy: 4))!
+        XCTAssertEqual(WikiLinkCompletion.complete(text, context: found, with: "Shop").text, "[[Shop]]")
+    }
+
+    func testEditPoint() {
+        func offset(_ old: String, _ new: String) -> Int {
+            new.distance(from: new.startIndex, to: WikiLinkCompletion.editPoint(from: old, to: new))
+        }
+        XCTAssertEqual(offset("abc", "abXc"), 3)   // typed X after b
+        XCTAssertEqual(offset("a[", "a[["), 3)     // a repeated character
+        XCTAssertEqual(offset("abc", "ac"), 1)     // deleted b
+        XCTAssertEqual(offset("", "x"), 1)
+    }
+
+    func testRanking() {
+        let titles = ["Weekly Shop", "Shopping List", "Bishop", "Notes", "shopping list"]
+        XCTAssertEqual(WikiLinkCompletion.rank(titles, for: "shop"), ["Shopping List", "Weekly Shop", "Bishop"])
+        XCTAssertEqual(WikiLinkCompletion.rank(titles, for: "", limit: 2), ["Weekly Shop", "Shopping List"])
+    }
+}

@@ -1,12 +1,20 @@
 import SwiftUI
+import SwiftData
 import StashCore
 
 /// Markdown, either as text to edit or as a formatted preview. In the
-/// preview `[[links]]` can be followed and task boxes ticked.
+/// preview `[[links]]` can be followed and task boxes ticked; while editing,
+/// typing `[[` suggests items to link to.
 struct NoteEditor: View {
     @Environment(Library.self) private var library
     @Bindable var item: Item
     @State private var isPreviewing: Bool
+
+    /// Most recently edited first, which is the order suggestions keep.
+    @Query(sort: \Item.modifiedAt, order: .reverse) private var allItems: [Item]
+    @State private var completion: WikiLinkCompletion.Context?
+    @State private var highlighted = 0
+    @State private var moveCursorTo: String.Index?
 
     init(item: Item) {
         self.item = item
@@ -29,14 +37,34 @@ struct NoteEditor: View {
                     return .handled
                 })
             } else {
-                TextEditor(text: $item.body)
-                    .font(.system(.body, design: .monospaced))
-                    .scrollContentBackground(.hidden)
-                    .padding(.horizontal, 10)
-                    .padding(.top, 6)
+                NoteTextEditor(text: $item.body, moveCursorTo: $moveCursorTo) { cursor in
+                    updateCompletion(at: cursor)
+                }
+                .font(.system(.body, design: .monospaced))
+                .scrollContentBackground(.hidden)
+                .padding(.horizontal, 10)
+                .padding(.top, 6)
+                .onKeyPress(.downArrow) { moveHighlight(by: 1) }
+                .onKeyPress(.upArrow) { moveHighlight(by: -1) }
+                .onKeyPress(.return) { acceptHighlighted() }
+                .onKeyPress(.tab) { acceptHighlighted() }
+                .onKeyPress(.escape) {
+                    guard completion != nil else { return .ignored }
+                    completion = nil
+                    return .handled
+                }
+                .safeAreaInset(edge: .bottom, spacing: 0) {
+                    let choices = self.choices
+                    if !choices.isEmpty {
+                        LinkSuggestions(choices: choices, highlighted: min(highlighted, choices.count - 1)) { choice in
+                            accept(choice)
+                        }
+                    }
+                }
             }
         }
         .onChange(of: item.body) { library.didEdit(item) }
+        .onChange(of: isPreviewing) { completion = nil }
         .toolbar {
             ToolbarItem {
                 Picker("Mode", selection: $isPreviewing) {
@@ -47,6 +75,53 @@ struct NoteEditor: View {
                 .fixedSize()
             }
         }
+    }
+
+    // MARK: - Suggesting links
+
+    /// What to offer for the link being typed: items whose titles match,
+    /// then -- if none is called exactly that -- a new note by that name.
+    private var choices: [LinkChoice] {
+        guard let completion else { return [] }
+        let candidates = allItems.filter { $0 != item && !$0.title.isEmpty }
+        let byKey = Dictionary(candidates.map { (WikiLinks.key($0.title), $0) }, uniquingKeysWith: { first, _ in first })
+        var result = WikiLinkCompletion.rank(candidates.map(\.title), for: completion.query, limit: 6)
+            .compactMap { byKey[WikiLinks.key($0)].map(LinkChoice.existing) }
+        let typed = completion.query.trimmingCharacters(in: .whitespaces)
+        if !typed.isEmpty, byKey[WikiLinks.key(typed)] == nil {
+            result.append(.new(typed))
+        }
+        return result
+    }
+
+    private func updateCompletion(at cursor: String.Index) {
+        let found = WikiLinkCompletion.context(in: item.body, cursor: cursor)
+        if found?.query != completion?.query { highlighted = 0 }
+        completion = found
+    }
+
+    private func moveHighlight(by step: Int) -> KeyPress.Result {
+        let count = choices.count
+        guard count > 0 else { return .ignored }
+        highlighted = (min(highlighted, count - 1) + step + count) % count
+        return .handled
+    }
+
+    private func acceptHighlighted() -> KeyPress.Result {
+        let choices = self.choices
+        guard !choices.isEmpty else { return .ignored }
+        accept(choices[min(highlighted, choices.count - 1)])
+        return .handled
+    }
+
+    /// Writes the link in. A new note isn't made here: following the link
+    /// in the preview makes it, as for any link to a missing item.
+    private func accept(_ choice: LinkChoice) {
+        guard let completion else { return }
+        let done = WikiLinkCompletion.complete(item.body, context: completion, with: choice.title)
+        item.body = done.text
+        moveCursorTo = done.cursor
+        self.completion = nil
     }
 }
 

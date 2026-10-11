@@ -60,7 +60,7 @@ final class Library {
     static let sharingEnabled = false
     #endif
     /// Where the share extension leaves things; nil when sharing is off.
-    @ObservationIgnored private let inbox: SharedInbox? = Library.sharingEnabled ? SharedInbox.forAppGroup() : nil
+    private let inbox: SharedInbox? = Library.sharingEnabled ? SharedInbox.forAppGroup() : nil
 
     init(context: ModelContext) {
         self.context = context

@@ -43,9 +43,9 @@ final class ShareModel {
     var tagsText = ""
     var categoryID: UUID?
 
-    @ObservationIgnored private let context: NSExtensionContext?
-    @ObservationIgnored private let inbox: SharedInbox?
-    @ObservationIgnored private let staging = FileManager.default.temporaryDirectory
+    private let context: NSExtensionContext?
+    private let inbox: SharedInbox?
+    private let staging = FileManager.default.temporaryDirectory
         .appendingPathComponent("StashShare-\(UUID().uuidString)", isDirectory: true)
 
     init(context: NSExtensionContext?) {
@@ -142,7 +142,7 @@ final class ShareModel {
     /// file's address -- the way Photos shares.
     private func loadFile(from provider: NSItemProvider) async -> URL? {
         guard let type = provider.registeredTypeIdentifiers
-            .compactMap { UTType($0) }
+            .compactMap({ UTType($0) })
             .first(where: { $0.conforms(to: .data) && !$0.conforms(to: .plainText) }) else { return nil }
         return await withCheckedContinuation { continuation in
             _ = provider.loadFileRepresentation(forTypeIdentifier: type.identifier) { url, _ in

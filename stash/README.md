@@ -86,7 +86,7 @@ Capabilities* for each target, find App Groups, and tick
 | **Notes** | Written in Markdown, shown as a formatted preview. Ticking a `- [ ]` box in the preview ticks it in the note. |
 | **Documents** | Any file: PDFs open in place, other files show a Quick Look preview. Each is copied into the app, so moving or deleting the original doesn't lose it. |
 | **Links** | Paste or type a web address. The page's title and description are fetched, and its text is kept so searching finds it. |
-| **Linking items** | Type `[[Title]]` in a note, or use *Link to Item…* in the side panel for any kind of item. Each item lists what it links to and what links to it. Renaming an item updates the `[[links]]` that point at it. Tapping a link to an item that doesn't exist yet creates it. |
+| **Linking items** | Type `[[` in a note and pick from the suggestions (arrows and Return or Tab on a keyboard, or tap one), or type `[[Title]]` in full, or use *Link to Item…* in the side panel for any kind of item. Each item lists what it links to and what links to it. Renaming an item updates the `[[links]]` that point at it. Tapping a link to an item that doesn't exist yet creates it. |
 | **Categories** | One per item, and they can nest. Choosing a category also shows everything in the categories inside it. |
 | **Tags** | As many per item as you like. Type them separated by commas. Tags are single words: "to read" becomes `to-read`. |
 | **Search** | Searches titles, text, tags, web page text, PDF text, and text found in images. Results are ranked, with title matches first. Use `"quotes"` for an exact phrase and `#tag` to only show items with that tag. |
@@ -140,6 +140,5 @@ Cmd-U, or run `swift test` in it.
 
 ## Not done yet
 
-- Suggestions while typing `[[`
 - Full copies of web pages for reading offline (only the text is kept for now)
 - An app icon

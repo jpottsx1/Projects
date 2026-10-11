@@ -83,7 +83,7 @@ struct NoteEditor: View {
     /// then -- if none is called exactly that -- a new note by that name.
     private var choices: [LinkChoice] {
         guard let completion else { return [] }
-        let candidates = allItems.filter { $0 != item && !$0.title.isEmpty }
+        let candidates = allItems.filter { $0 != item && !$0.title.isEmpty && !$0.isTrashed }
         let byKey = Dictionary(candidates.map { (WikiLinks.key($0.title), $0) }, uniquingKeysWith: { first, _ in first })
         var result = WikiLinkCompletion.rank(candidates.map(\.title), for: completion.query, limit: 6)
             .compactMap { byKey[WikiLinks.key($0)].map(LinkChoice.existing) }

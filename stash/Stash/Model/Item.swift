@@ -1,6 +1,7 @@
 import Foundation
 import SwiftData
 import UniformTypeIdentifiers
+import StashCore
 
 enum ItemKind: String, Codable, CaseIterable, Identifiable {
     case note, document, link
@@ -39,6 +40,10 @@ final class Item {
     var body: String = ""
     var createdAt: Date = Date()
     var modifiedAt: Date = Date()
+    var isFavorite: Bool = false
+    /// When it was put in the Trash; nil when it isn't there. Items stay
+    /// in the Trash for `Library.trashDays`, then go for good.
+    var trashedAt: Date?
 
     // Links
     var urlString: String?
@@ -62,6 +67,9 @@ final class Item {
     /// asked for, so listing items never loads it. Nil for files too large
     /// to sync (see `Library.largestSyncedFile`).
     @Attribute(.externalStorage) var fileData: Data?
+    /// The file's SHA-256, for finding the same file imported twice. Empty
+    /// until worked out (see `Library.fillContentHash`).
+    var contentHash: String = ""
 
     /// Words that aren't typed by anyone but should still be searchable:
     /// a page's text, a PDF's text, text read out of an image.
@@ -85,6 +93,18 @@ final class Item {
     }
 
     var url: URL? { urlString.flatMap(URL.init(string:)) }
+
+    var isTrashed: Bool { trashedAt != nil }
+
+    /// The same for two copies of one page or one file; nil for notes, and
+    /// for documents whose file hasn't been read yet.
+    var duplicateKey: String? {
+        switch kind {
+        case .link: url.map { "link " + WebAddress.duplicateKey(for: $0) }
+        case .document: contentHash.isEmpty ? nil : "file " + contentHash
+        case .note: nil
+        }
+    }
 
     var contentType: UTType? { contentTypeIdentifier.flatMap { UTType($0) } }
 

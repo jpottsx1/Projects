@@ -46,7 +46,8 @@ final class SearchQueryTests: XCTestCase {
 
     func testNothingTypedCanBreakTheExpression() {
         XCTAssertEqual(SearchQuery(#"a"b"#).ftsExpression, #""a"* "b""#)
-        XCTAssertEqual(SearchQuery("AND OR NOT").ftsExpression, #""AND"* "OR"* "NOT"*"#)
+        XCTAssertEqual(SearchQuery("AND OR NOT").ftsExpression, #"("AND"* OR "NOT"*)"#)
+        XCTAssertEqual(SearchQuery(#"OR "OR" OR"#).ftsExpression, #""OR""#)
         XCTAssertNil(SearchQuery("- * ()").ftsExpression)
     }
 
@@ -54,6 +55,59 @@ final class SearchQueryTests: XCTestCase {
         let query = SearchQuery("#ideas")
         XCTAssertNil(query.ftsExpression)
         XCTAssertFalse(query.isEmpty)
+    }
+
+    func testOrBindsTighterThanSpaces() {
+        let query = SearchQuery(#"2026 budget OR "cash flow" OR forecast"#)
+        XCTAssertEqual(query.groups, [[.word("2026")], [.word("budget"), .phrase("cash flow"), .word("forecast")]])
+        XCTAssertEqual(query.ftsExpression, #""2026"* ("budget"* OR "cash flow" OR "forecast"*)"#)
+        // Half typed: a trailing OR waits for its next word.
+        XCTAssertEqual(SearchQuery("budget OR").ftsExpression, #""budget"*"#)
+    }
+
+    func testExclusions() {
+        let query = SearchQuery(#"budget -draft -"old copy" -#archive -"#)
+        XCTAssertEqual(query.ftsExpression, #""budget"*"#)
+        XCTAssertEqual(query.excludedExpression, #""draft"* OR "old copy""#)
+        XCTAssertEqual(query.excludedTags, ["archive"])
+        // Only exclusions: still a search, with nothing to match first.
+        let only = SearchQuery("-draft")
+        XCTAssertNil(only.ftsExpression)
+        XCTAssertFalse(only.isEmpty)
+    }
+
+    func testFilters() {
+        let query = SearchQuery(#"kind:PDF type:photos in:"Work Stuff" in:home is:favourite after:2026-03-01 before:2w taxes"#)
+        XCTAssertEqual(query.kinds, [.pdf, .image])
+        XCTAssertEqual(query.categories, ["work stuff", "home"])
+        XCTAssertEqual(query.flags, [.favorite])
+        XCTAssertEqual(query.after, .date(year: 2026, month: 3, day: 1))
+        XCTAssertEqual(query.before, .ago(14, .day))
+        XCTAssertEqual(query.ftsExpression, #""taxes"*"#)
+    }
+
+    func testUnknownFiltersAreWords() {
+        let query = SearchQuery("kind:spreadsheet https://example.com after:soon")
+        XCTAssertTrue(query.kinds.isEmpty)
+        XCTAssertNil(query.after)
+        XCTAssertEqual(query.terms, [.word("kind:spreadsheet"), .word("https://example.com"), .word("after:soon")])
+    }
+
+    func testDays() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        let now = calendar.date(from: DateComponents(year: 2026, month: 10, day: 11, hour: 15))!
+        let day = { (y: Int, m: Int, d: Int) in calendar.date(from: DateComponents(year: y, month: m, day: d))! }
+        XCTAssertEqual(SearchQuery("after:today").after?.start(now: now, calendar: calendar), day(2026, 10, 11))
+        XCTAssertEqual(SearchQuery("after:yesterday").after?.start(now: now, calendar: calendar), day(2026, 10, 10))
+        XCTAssertEqual(SearchQuery("after:1w").after?.start(now: now, calendar: calendar), day(2026, 10, 4))
+        XCTAssertEqual(SearchQuery("after:3m").after?.start(now: now, calendar: calendar), day(2026, 7, 11))
+        XCTAssertEqual(SearchQuery("after:2026-02-01").after?.start(now: now, calendar: calendar), day(2026, 2, 1))
+    }
+
+    func testAnyWord() {
+        XCTAssertEqual(SearchQuery.anyWord(["budget", "-", #"say "hi""#]), #""budget" OR "say ""hi""""#)
+        XCTAssertNil(SearchQuery.anyWord([]))
     }
 
     func testColumnPhrase() {
@@ -241,5 +295,41 @@ final class WikiLinkCompletionTests: XCTestCase {
         let titles = ["Weekly Shop", "Shopping List", "Bishop", "Notes", "shopping list"]
         XCTAssertEqual(WikiLinkCompletion.rank(titles, for: "shop"), ["Shopping List", "Weekly Shop", "Bishop"])
         XCTAssertEqual(WikiLinkCompletion.rank(titles, for: "", limit: 2), ["Weekly Shop", "Shopping List"])
+    }
+}
+
+final class KeywordsTests: XCTestCase {
+    func testCountsSkipShortCommonAndNumericWords() {
+        let counts = Keywords.counts(in: "The garden: tomatoes, Tomatoes and 2026 beans. It is a garden of beans!")
+        XCTAssertEqual(counts, ["garden": 2, "tomatoes": 2, "beans": 2])
+    }
+
+    func testBestPrefersFrequentWordsOtherItemsRarelyHave() {
+        let counts = ["sourdough": 4, "starter": 2, "recipe": 6, "unique": 9]
+        let frequency = ["sourdough": 3, "starter": 4, "recipe": 40, "unique": 1]
+        let best = Keywords.best(counts, documentFrequency: { frequency[$0] ?? 0 }, documentCount: 50, limit: 2)
+        // "unique" is in no other item, "recipe" in most of them.
+        XCTAssertEqual(best, ["sourdough", "starter"])
+    }
+
+    func testNothingToCompareWithAlone() {
+        XCTAssertEqual(Keywords.best(["word": 3], documentFrequency: { _ in 1 }, documentCount: 1), [])
+    }
+}
+
+final class DuplicateKeyTests: XCTestCase {
+    private func key(_ text: String) -> String { WebAddress.duplicateKey(for: URL(string: text)!) }
+
+    func testSamePageDifferentlyWritten() {
+        XCTAssertEqual(key("https://www.Example.com/a/b/?utm_source=x&id=2&fbclid=y#intro"),
+                       key("http://example.com/a/b?id=2"))
+        XCTAssertEqual(key("https://example.com/"), key("https://example.com"))
+    }
+
+    func testDifferentPagesStayApart() {
+        XCTAssertNotEqual(key("https://example.com/a?id=1"), key("https://example.com/a?id=2"))
+        XCTAssertNotEqual(key("https://example.com/a"), key("https://example.com/b"))
+        XCTAssertNotEqual(key("https://mail.example.com/#/inbox"), key("https://mail.example.com/#/sent"))
+        XCTAssertNotEqual(key("https://example.com:8080/"), key("https://example.com/"))
     }
 }

@@ -20,6 +20,7 @@ struct ItemDetailView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
+            if item.isTrashed { TrashBanner(item: item) }
             VStack(alignment: .leading, spacing: 8) {
                 TextField("Title", text: $item.title)
                     .font(.title2.bold())
@@ -60,6 +61,16 @@ struct ItemDetailView: View {
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button {
+                    library.setFavorite([item], !item.isFavorite)
+                } label: {
+                    Label(item.isFavorite ? "Remove from Favorites" : "Add to Favorites",
+                          systemImage: item.isFavorite ? "star.fill" : "star")
+                }
+                .disabled(item.isTrashed)
+                .help(item.isFavorite ? "Remove from Favorites" : "Add to Favorites")
+            }
+            ToolbarItem(placement: .primaryAction) {
+                Button {
                     showInspector.toggle()
                 } label: {
                     Label("Category & Links", systemImage: "sidebar.right")
@@ -69,6 +80,35 @@ struct ItemDetailView: View {
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
+    }
+}
+
+/// Says an item is in the Trash, with a way to put it back.
+struct TrashBanner: View {
+    @Environment(Library.self) private var library
+    let item: Item
+
+    var body: some View {
+        HStack {
+            Label("In the Trash", systemImage: "trash")
+                .font(.callout.weight(.medium))
+            if let days = daysLeft {
+                Text(days == 1 ? "Deleted tomorrow" : "Deleted in \(days) days")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button("Put Back") { library.restore([item]) }
+        }
+        .padding(.horizontal)
+        .padding(.vertical, 8)
+        .background(.orange.opacity(0.15))
+    }
+
+    private var daysLeft: Int? {
+        guard let trashedAt = item.trashedAt,
+              let end = Calendar.current.date(byAdding: .day, value: Library.trashDays, to: trashedAt) else { return nil }
+        return max(1, Calendar.current.dateComponents([.day], from: .now, to: end).day ?? 0)
     }
 }
 

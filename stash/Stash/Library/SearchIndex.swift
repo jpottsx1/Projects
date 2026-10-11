@@ -84,6 +84,18 @@ final class SearchIndex {
         return ids
     }
 
+    /// How many items match an FTS5 expression; every item when nil.
+    func count(matching expression: String? = nil) -> Int {
+        var total = 0
+        let read: (OpaquePointer) -> Void = { total = Int(sqlite3_column_int64($0, 0)) }
+        if let expression {
+            run("SELECT count(*) FROM entries WHERE entries MATCH ?", [expression], row: read)
+        } else {
+            run("SELECT count(*) FROM entries", [], row: read)
+        }
+        return total
+    }
+
     // MARK: - SQLite
 
     private func insert(_ entry: Entry) {

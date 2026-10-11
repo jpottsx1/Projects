@@ -6,6 +6,9 @@ struct SidebarView: View {
     @Query(filter: #Predicate<ItemCategory> { $0.parent == nil }, sort: \ItemCategory.name)
     private var rootCategories: [ItemCategory]
     @Query(sort: \Tag.name) private var tags: [Tag]
+    @Query(sort: \SmartFilter.name) private var smartFilters: [SmartFilter]
+    @Query private var items: [Item]
+    @State private var editingFilter: FilterEditing?
 
     private enum Naming {
         case new(parent: ItemCategory?)
@@ -20,10 +23,40 @@ struct SidebarView: View {
             Section("Library") {
                 Label("All Items", systemImage: "tray.full")
                     .tag(SidebarSelection.all)
+                Label("Favorites", systemImage: "star")
+                    .tag(SidebarSelection.favorites)
                 ForEach(ItemKind.allCases) { kind in
                     Label(kind.pluralName, systemImage: kind.systemImage)
                         .tag(SidebarSelection.kind(kind))
                 }
+                let duplicateCount = library.duplicates(among: items).count
+                if duplicateCount > 0 || library.sidebar == .duplicates {
+                    Label("Duplicates", systemImage: "square.on.square")
+                        .badge(duplicateCount)
+                        .tag(SidebarSelection.duplicates)
+                }
+                Label("Trash", systemImage: "trash")
+                    .tag(SidebarSelection.trash)
+            }
+
+            Section("Smart Filters") {
+                ForEach(smartFilters) { filter in
+                    Label(filter.name, systemImage: "line.3.horizontal.decrease.circle")
+                        .tag(SidebarSelection.smartFilter(filter))
+                        .help(filter.query)
+                        .contextMenu {
+                            Button("Edit…") { editingFilter = FilterEditing(filter: filter) }
+                            Divider()
+                            Button("Delete Smart Filter", role: .destructive) { library.delete(filter) }
+                        }
+                }
+                Button {
+                    editingFilter = FilterEditing(filter: nil)
+                } label: {
+                    Label("New Smart Filter", systemImage: "plus")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
             }
 
             Section("Categories") {
@@ -54,7 +87,7 @@ struct SidebarView: View {
                 }
                 ForEach(tags) { tag in
                     Label(tag.name, systemImage: "number")
-                        .badge(tag.items?.count ?? 0)
+                        .badge((tag.items ?? []).filter { !$0.isTrashed }.count)
                         .tag(SidebarSelection.tag(tag))
                         .contextMenu {
                             Button("Delete Tag", role: .destructive) { library.delete(tag) }
@@ -66,6 +99,9 @@ struct SidebarView: View {
         .navigationTitle("Stash")
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if SyncMonitor.isEnabled { SyncStatusView() }
+        }
+        .sheet(item: $editingFilter) { editing in
+            SmartFilterEditor(filter: editing.filter)
         }
         .alert(namingTitle, isPresented: Binding(get: { naming != nil }, set: { if !$0 { naming = nil } })) {
             TextField("Name", text: $nameDraft)
@@ -102,4 +138,9 @@ struct SidebarView: View {
         }
         naming = nil
     }
+}
+
+private struct FilterEditing: Identifiable {
+    let filter: SmartFilter?
+    let id = UUID()
 }

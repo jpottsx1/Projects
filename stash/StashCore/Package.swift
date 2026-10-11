@@ -7,7 +7,9 @@ import PackageDescription
 // without launching the app.
 let package = Package(
     name: "StashCore",
-    platforms: [.macOS(.v14), .iOS(.v17)],
+    // Written as strings: these tools versions have no named constants for
+    // them. Keep them in step with the app's deployment targets.
+    platforms: [.macOS("26.0"), .iOS("17.5")],
     products: [
         .library(name: "StashCore", targets: ["StashCore"]),
     ],

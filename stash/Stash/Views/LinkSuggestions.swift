@@ -3,19 +3,19 @@ import StashCore
 
 /// A text editor that says where its cursor is, so `[[` can be completed.
 ///
-/// From iOS 18 and macOS 15 the system editor reports its selection, and
-/// can be told where to put the cursor after a suggestion is inserted.
-/// Before that it says neither, so the cursor is taken to be wherever the
-/// text last changed -- right while typing; after a suggestion is
-/// inserted, the cursor may land elsewhere.
+/// From iOS 18 (and on every macOS Stash runs on) the system editor
+/// reports its selection, and can be told where to put the cursor after a
+/// suggestion is inserted. On iOS 17.5 it says neither, so the cursor is
+/// taken to be wherever the text last changed -- right while typing; after
+/// a suggestion is inserted, the cursor may land elsewhere.
 struct NoteTextEditor: View {
     @Binding var text: String
-    /// Set to move the cursor (honoured from iOS 18 / macOS 15); cleared once done.
+    /// Set to move the cursor (honoured from iOS 18, and on the Mac); cleared once done.
     @Binding var moveCursorTo: String.Index?
     var onCursorMoved: (String.Index) -> Void
 
     var body: some View {
-        if #available(iOS 18, macOS 15, *) {
+        if #available(iOS 18, *) {
             SelectionReportingEditor(text: $text, moveCursorTo: $moveCursorTo, onCursorMoved: onCursorMoved)
         } else {
             TextEditor(text: $text)
@@ -26,7 +26,7 @@ struct NoteTextEditor: View {
     }
 }
 
-@available(iOS 18, macOS 15, *)
+@available(iOS 18, *)
 private struct SelectionReportingEditor: View {
     @Binding var text: String
     @Binding var moveCursorTo: String.Index?

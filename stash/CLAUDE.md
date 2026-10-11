@@ -5,6 +5,8 @@ SwiftData, one multiplatform target. Read README.md first.
 
 ## Building
 
+- Deployment targets: **macOS 26, iOS 17.5** (both targets and
+  `StashCore/Package.swift`; keep the three in step). Building needs Xcode 26.
 - `Stash.xcodeproj` uses **Xcode 16 file-system-synchronized groups**:
   any file put under `Stash/` is part of the app, so adding a Swift file
   doesn't require editing the project file.

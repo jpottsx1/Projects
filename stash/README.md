@@ -7,7 +7,8 @@ text.
 
 ## Running it
 
-1. Open `Stash.xcodeproj` in **Xcode 16 or later**.
+1. Open `Stash.xcodeproj` in **Xcode 26 or later**. It runs on macOS 26
+   and later, and iOS 17.5 and later.
 2. In the toolbar, choose where to run it: **My Mac**, or an iPhone simulator.
 3. Press **Cmd-R**.
 

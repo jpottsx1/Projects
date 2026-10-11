@@ -1,4 +1,5 @@
 import CoreData
+import CoreGraphics
 import Foundation
 import Observation
 import SwiftData
@@ -57,6 +58,8 @@ final class Library {
     /// What's to be exported; the window does the exporting.
     var exportRequest: ExportRequest?
     var isRestoring = false
+    var isEditingRules = false
+    var isScanning = false
     var isImporting = false
     var importError: String?
 
@@ -80,6 +83,10 @@ final class Library {
     var sortAscending: Bool = UserDefaults.standard.bool(forKey: "sortAscending") {
         didSet { UserDefaults.standard.set(sortAscending, forKey: "sortAscending") }
     }
+    /// Rows or cards, where there's room for cards (not on an iPhone).
+    var showsGrid: Bool = UserDefaults.standard.bool(forKey: "showsGrid") {
+        didSet { UserDefaults.standard.set(showsGrid, forKey: "showsGrid") }
+    }
     /// Goes up whenever something that links or backlinks depend on changes,
     /// so the views showing them redraw.
     private(set) var revision = 0
@@ -87,6 +94,12 @@ final class Library {
     @ObservationIgnored private var storeObserver: NSObjectProtocol?
     @ObservationIgnored private var shareObserver: NSObjectProtocol?
     @ObservationIgnored private var pendingRefresh: Task<Void, Never>?
+    /// Documents Quick Look has been asked for a thumbnail of this session,
+    /// so files it can't picture aren't asked about after every sync.
+    @ObservationIgnored private var thumbnailsTried: Set<UUID> = []
+    /// Items that arrived this session and haven't been read yet: rules run
+    /// on them again once their page or document text is in.
+    @ObservationIgnored private var awaitingRules: Set<UUID> = []
 
     /// Set by `SHARE_EXTENSION` in Config/Stash.xcconfig.
     #if SHARE_EXTENSION
@@ -143,6 +156,7 @@ final class Library {
         item.urlString = url.absoluteString
         item.isUnread = true
         insert(item)
+        arrived(item)
         Task { await refreshPage(of: item) }
         return item
     }
@@ -161,13 +175,67 @@ final class Library {
             item.fileData = syncableContents(of: item)
             item.isUnread = true
             insert(item, select: false)
+            arrived(item)
             last = item
             Task {
                 await fillContentHash(of: item)
+                await fillThumbnail(of: item)
                 await extractText(from: item)
             }
         }
         if let last { selection = last }
+    }
+
+    /// Pages from the document camera, as one searchable PDF.
+    func addScan(_ pages: [CGImage]) async {
+        guard !pages.isEmpty, let pdf = await ScannedPDF.make(pages: pages) else {
+            importError = "The scan couldn’t be made into a PDF."
+            return
+        }
+        let name = "Scan " + Date.now.formatted(.dateTime.year().month().day().hour().minute())
+            .replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ":", with: ".")
+        let folder = URL.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let file = folder.appendingPathComponent(name + ".pdf")
+        do {
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            try pdf.write(to: file)
+        } catch {
+            importError = error.localizedDescription
+            return
+        }
+        importFiles([file])
+        try? FileManager.default.removeItem(at: folder)
+    }
+
+    /// Things handed over by another device: on a Mac, *File › Import from
+    /// iPhone or iPad* (Continuity Camera) gives a scanned PDF or a photo.
+    func importProviders(_ providers: [NSItemProvider]) async {
+        for provider in providers {
+            guard let type = [UTType.pdf, .image].first(where: { provider.hasItemConformingToTypeIdentifier($0.identifier) }) else {
+                continue
+            }
+            let folder = URL.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+            let copied: URL? = await withCheckedContinuation { continuation in
+                _ = provider.loadFileRepresentation(forTypeIdentifier: type.identifier) { url, _ in
+                    // The file is gone once this returns, so copy it now.
+                    guard let url else { return continuation.resume(returning: nil) }
+                    let ext = url.pathExtension.isEmpty ? (type.preferredFilenameExtension ?? "") : url.pathExtension
+                    let name = type == .pdf ? "Scan" : "Photo"
+                    let destination = folder.appendingPathComponent(name).appendingPathExtension(ext)
+                    do {
+                        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+                        try FileManager.default.copyItem(at: url, to: destination)
+                        continuation.resume(returning: destination)
+                    } catch {
+                        continuation.resume(returning: nil)
+                    }
+                }
+            }
+            if let copied {
+                importFiles([copied])
+                try? FileManager.default.removeItem(at: folder)
+            }
+        }
     }
 
     /// Whatever was dropped on the list: files are imported, web addresses saved as links.
@@ -240,6 +308,7 @@ final class Library {
         }
         guard isAlive(item) else { return }
         await savePageCopy(of: item)
+        finishedReading(item)
     }
 
     /// Links whose page is being copied right now, for the views to show it.
@@ -260,6 +329,9 @@ final class Library {
         item.archivePath = path
         item.archivedAt = .now
         item.archiveData = page.archive.count <= Self.largestSyncedFile ? page.archive : nil
+        // A page that no longer has an article keeps the one it had.
+        if let article = page.article { item.article = article }
+        if let thumbnail = page.thumbnail { item.thumbnailData = thumbnail }
         if let title = page.title, !title.isEmpty, !Self.hasOwnTitle(item, url: url) {
             item.title = title
         }
@@ -290,10 +362,13 @@ final class Library {
     func extractText(from item: Item) async {
         guard let url = localFile(for: item) else { return }
         let text = await TextExtractor.text(fromFileAt: url, type: item.contentType)
-        guard isAlive(item), !text.isEmpty else { return }
-        item.extractedText = text
-        reindex(item)
-        save()
+        guard isAlive(item) else { return }
+        if !text.isEmpty {
+            item.extractedText = text
+            reindex(item)
+            save()
+        }
+        finishedReading(item)
     }
 
     /// The document's file on this device. One synced from another device
@@ -366,7 +441,77 @@ final class Library {
         item.isUnread = true
         if item.category == nil { item.inInbox = true }
         save()
+        arrived(item)
         runSearch()
+    }
+
+    // MARK: - Smart rules
+
+    /// Runs the rules on something that has just come in.
+    private func arrived(_ item: Item) {
+        awaitingRules.insert(item.uuid)
+        applyRules(to: item)
+    }
+
+    /// Runs the rules again on an item that arrived this session, now its
+    /// page or document has been read.
+    private func finishedReading(_ item: Item) {
+        guard awaitingRules.remove(item.uuid) != nil, isAlive(item) else { return }
+        applyRules(to: item)
+    }
+
+    private func enabledRules() -> [SmartRule] {
+        let rules = (try? context.fetch(FetchDescriptor<SmartRule>(predicate: #Predicate { $0.isEnabled }))) ?? []
+        return rules.sorted { ($0.createdAt, $0.uuid.uuidString) < ($1.createdAt, $1.uuid.uuidString) }
+    }
+
+    private func applyRules(to item: Item) {
+        guard !item.isTrashed else { return }
+        for rule in enabledRules() where CompiledSearch(SearchQuery(rule.query), index: index).matches(item) {
+            apply(rule, to: item)
+        }
+    }
+
+    /// Runs one rule over everything already in the library that matches
+    /// it, and says how many that was.
+    @discardableResult
+    func apply(_ rule: SmartRule, toExisting: Bool) -> Int {
+        let search = CompiledSearch(SearchQuery(rule.query), index: index)
+        let items = ((try? context.fetch(FetchDescriptor<Item>())) ?? []).filter { !$0.isTrashed && search.matches($0) }
+        for item in items { apply(rule, to: item) }
+        save()
+        runSearch()
+        return items.count
+    }
+
+    private func apply(_ rule: SmartRule, to item: Item) {
+        if let category = rule.category {
+            item.category = category
+            item.inInbox = false
+        }
+        if !rule.tagsToAdd.trimmingCharacters(in: .whitespaces).isEmpty {
+            addTags(from: rule.tagsToAdd, to: item)
+        }
+        if rule.labelRaw >= 0, let label = ItemLabel(rawValue: rule.labelRaw) { item.label = label }
+        if rule.rating >= 0 { item.rating = min(rule.rating, 5) }
+        if rule.makesFavorite { item.isFavorite = true }
+        if rule.marksRead { item.isUnread = false }
+        if rule.takesOutOfInbox { item.inInbox = false }
+        reindex(item)
+        save()
+    }
+
+    @discardableResult
+    func newRule() -> SmartRule {
+        let rule = SmartRule(name: "New Rule")
+        context.insert(rule)
+        save()
+        return rule
+    }
+
+    func delete(_ rule: SmartRule) {
+        context.delete(rule)
+        save()
     }
 
     // MARK: - Highlights
@@ -576,6 +721,7 @@ final class Library {
             if !entry.tags.isEmpty { addTags(from: entry.tags.joined(separator: ","), to: item) }
             save()
             reindex(item)
+            arrived(item)
             inbox.remove(pending)
 
             switch item.kind {
@@ -583,6 +729,7 @@ final class Library {
             case .document:
                 Task {
                     await fillContentHash(of: item)
+                    await fillThumbnail(of: item)
                     await extractText(from: item)
                 }
             case .note: break
@@ -827,9 +974,17 @@ final class Library {
         files.removeFolders(notBelongingTo: Set(items.map(\.uuid)))
         // Documents added before duplicates were looked for, or whose
         // hash hasn't arrived from iCloud yet.
-        for item in items where item.kind == .document && item.contentHash.isEmpty {
-            if let path = item.storedFilePath, files.exists(path) {
-                Task { await fillContentHash(of: item) }
+        let unfinished = items.filter { item in
+            item.kind == .document && (item.contentHash.isEmpty || item.thumbnailData == nil)
+                && item.storedFilePath.map(files.exists) == true
+        }
+        if !unfinished.isEmpty {
+            // One at a time: there may be hundreds, and Quick Look is slow.
+            Task {
+                for item in unfinished {
+                    await fillContentHash(of: item)
+                    await fillThumbnail(of: item)
+                }
             }
         }
         publishCategories()
@@ -869,6 +1024,7 @@ final class Library {
             let keeper = ordered[0]
             for duplicate in ordered.dropFirst() {
                 for item in duplicate.items ?? [] { item.category = keeper }
+                for rule in duplicate.rules ?? [] { rule.category = keeper }
                 let children = duplicate.children ?? []
                 for child in children { child.parent = keeper }
                 // Deleting a category deletes the ones inside it, so make
@@ -907,6 +1063,15 @@ final class Library {
             body: body,
             tags: item.sortedTags.map(\.name).joined(separator: " "),
             extra: [item.urlString ?? "", fileName, item.extractedText].joined(separator: "\n"))
+    }
+
+    /// Makes a document's thumbnail, if it hasn't one yet.
+    func fillThumbnail(of item: Item) async {
+        guard item.kind == .document, item.thumbnailData == nil, thumbnailsTried.insert(item.uuid).inserted,
+              let path = item.storedFilePath, files.exists(path) else { return }
+        guard let data = await Thumbnails.make(forFileAt: files.url(for: path)), isAlive(item) else { return }
+        item.thumbnailData = data
+        save()
     }
 
     /// Works out a document's hash, for finding duplicates, if it hasn't been yet.

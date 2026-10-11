@@ -13,6 +13,9 @@ struct LinkDetail: View {
     @Bindable var item: Item
     @State private var isRefreshing = false
     @State private var copyURL: URL?
+    /// Which saved version to show, when there's an article as well as the full page.
+    @AppStorage("showArticle") private var showArticle = true
+    @AppStorage("articleTextSize") private var articleTextSize = 1.0
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -22,7 +25,9 @@ struct LinkDetail: View {
             Divider()
 
             Group {
-                if let copyURL {
+                if showArticle, let article = item.article {
+                    ArticleView(html: article.page(textSize: articleTextSize), pageURL: item.url)
+                } else if let copyURL {
                     PageCopyView(fileURL: copyURL, pageURL: item.url)
                 } else if library.copyingPages.contains(item.uuid) {
                     ProgressView("Saving a copy of the page…")
@@ -56,6 +61,30 @@ struct LinkDetail: View {
             .padding()
         }
         .onChange(of: item.body) { library.didEdit(item) }
+        .toolbar {
+            if item.article != nil {
+                ToolbarItem {
+                    Picker("Show", selection: $showArticle) {
+                        Text("Article").tag(true)
+                        Text("Full Page").tag(false)
+                    }
+                    .pickerStyle(.segmented)
+                    .fixedSize()
+                    .help("The article on its own, or the whole page as it was")
+                }
+                if showArticle {
+                    ToolbarItem {
+                        Menu {
+                            Button("Larger Text") { articleTextSize = min(articleTextSize + 0.1, 2.5) }
+                            Button("Smaller Text") { articleTextSize = max(articleTextSize - 0.1, 0.6) }
+                            Button("Actual Size") { articleTextSize = 1 }
+                        } label: {
+                            Label("Text Size", systemImage: "textformat.size")
+                        }
+                    }
+                }
+            }
+        }
         // Looked for again whenever the library changes: that includes a
         // copy being saved, or arriving from iCloud.
         .task(id: library.revision) {
@@ -102,6 +131,45 @@ struct LinkDetail: View {
 
 /// Shows a saved web archive. Links in it open in the browser rather than
 /// replacing the copy.
+/// A clean article, laid out for reading. Links open in the browser.
+#if os(macOS)
+struct ArticleView: NSViewRepresentable {
+    let html: String
+    let pageURL: URL?
+
+    func makeCoordinator() -> PageCopyCoordinator { PageCopyCoordinator() }
+
+    func makeNSView(context: Context) -> WKWebView {
+        let view = PageCopyCoordinator.makeWebView()
+        view.navigationDelegate = context.coordinator
+        context.coordinator.show(html: html, baseURL: pageURL, in: view)
+        return view
+    }
+
+    func updateNSView(_ view: WKWebView, context: Context) {
+        context.coordinator.show(html: html, baseURL: pageURL, in: view)
+    }
+}
+#else
+struct ArticleView: UIViewRepresentable {
+    let html: String
+    let pageURL: URL?
+
+    func makeCoordinator() -> PageCopyCoordinator { PageCopyCoordinator() }
+
+    func makeUIView(context: Context) -> WKWebView {
+        let view = PageCopyCoordinator.makeWebView()
+        view.navigationDelegate = context.coordinator
+        context.coordinator.show(html: html, baseURL: pageURL, in: view)
+        return view
+    }
+
+    func updateUIView(_ view: WKWebView, context: Context) {
+        context.coordinator.show(html: html, baseURL: pageURL, in: view)
+    }
+}
+#endif
+
 #if os(macOS)
 struct PageCopyView: NSViewRepresentable {
     let fileURL: URL
@@ -161,6 +229,15 @@ final class PageCopyCoordinator: NSObject, WKNavigationDelegate {
         shownDate = modified
         view.load(data, mimeType: "application/x-webarchive", characterEncodingName: "utf-8",
                   baseURL: baseURL ?? fileURL)
+    }
+
+    private var shownHTML: String?
+
+    /// Shows an article, unless it's the one already showing.
+    func show(html: String, baseURL: URL?, in view: WKWebView) {
+        guard html != shownHTML else { return }
+        shownHTML = html
+        view.loadHTMLString(html, baseURL: baseURL)
     }
 
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction) async -> WKNavigationActionPolicy {

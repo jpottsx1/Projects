@@ -42,6 +42,24 @@ struct ContentView: View {
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { library.importSharedItems() }
         }
+        #if os(iOS)
+        .fullScreenCover(isPresented: $library.isScanning) {
+            DocumentScanner { pages in
+                library.isScanning = false
+                Task { await library.addScan(pages) }
+            }
+            .ignoresSafeArea()
+        }
+        #else
+        // File › Import from iPhone or iPad: Continuity Camera's scans and photos.
+        .importsItemProviders([.pdf, .image]) { providers in
+            Task { await library.importProviders(providers) }
+            return true
+        }
+        #endif
+        .sheet(isPresented: $library.isEditingRules) {
+            RulesView()
+        }
         .sheet(item: $library.editingHighlight) { highlight in
             HighlightNoteEditor(highlight: highlight)
         }
@@ -74,6 +92,13 @@ struct AddMenu: View {
             Button { library.isImporting = true } label: {
                 Label("Import Documents…", systemImage: "doc.badge.plus")
             }
+            #if os(iOS)
+            if DocumentScanner.isAvailable {
+                Button { library.isScanning = true } label: {
+                    Label("Scan Documents", systemImage: "doc.viewfinder")
+                }
+            }
+            #endif
         } label: {
             Label("Add", systemImage: "plus")
         }

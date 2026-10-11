@@ -19,7 +19,7 @@ enum TextExtractor {
         await Task.detached(priority: .utility) {
             let text: String
             if type?.conforms(to: .pdf) == true {
-                text = PDFDocument(url: url)?.string ?? ""
+                text = TextExtractor.pdfText(at: url)
             } else if type?.conforms(to: .rtf) == true {
                 text = (try? NSAttributedString(url: url, options: [:], documentAttributes: nil))?.string ?? ""
             } else if type?.conforms(to: .plainText) == true {
@@ -33,6 +33,32 @@ enum TextExtractor {
             }
             return String(text.prefix(TextExtractor.maxLength))
         }.value
+    }
+
+    /// A PDF's text; for a scan with no text in it, the words read from
+    /// its pages' pictures (the first 50 pages).
+    private static func pdfText(at url: URL) -> String {
+        guard let document = PDFDocument(url: url) else { return "" }
+        let text = document.string ?? ""
+        // A couple of characters a page is a scan's page numbers at most.
+        guard text.trimmingCharacters(in: .whitespacesAndNewlines).count < 2 * max(document.pageCount, 1) else {
+            return text
+        }
+        var read: [String] = []
+        for index in 0..<min(document.pageCount, 50) {
+            guard let page = document.page(at: index) else { continue }
+            let bounds = page.bounds(for: .mediaBox)
+            let scale = 2000 / max(bounds.width, bounds.height, 1)
+            let size = CGSize(width: bounds.width * scale, height: bounds.height * scale)
+            #if canImport(UIKit)
+            guard let image = page.thumbnail(of: size, for: .mediaBox).cgImage else { continue }
+            #else
+            guard let image = page.thumbnail(of: size, for: .mediaBox).cgImage(forProposedRect: nil, context: nil, hints: nil) else { continue }
+            #endif
+            read.append(ScannedPDF.recognizedLines(in: image).map(\.text).joined(separator: "\n"))
+        }
+        let recognized = read.joined(separator: "\n\n")
+        return recognized.count > text.count ? recognized : text
     }
 
     private static func recognizeText(inImageAt url: URL) -> String {

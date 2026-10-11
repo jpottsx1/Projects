@@ -107,12 +107,14 @@ struct SidebarView: View {
         .toolbar {
             ToolbarItem {
                 Menu {
+                    Button("Smart Rules…") { library.isEditingRules = true }
+                    Divider()
                     Button("Export Everything…") { library.exportRequest = .everything }
                     Button("Restore from Backup…") { library.isRestoring = true }
                 } label: {
-                    Label("Back Up", systemImage: "externaldrive")
+                    Label("More", systemImage: "ellipsis.circle")
                 }
-                .help("Export or restore the library")
+                .help("Smart rules, export and restore")
             }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {

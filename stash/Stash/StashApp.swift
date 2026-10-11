@@ -11,7 +11,7 @@ final class StashStore {
     let library: Library
 
     private init() {
-        let schema = Schema([Item.self, Tag.self, ItemCategory.self, SmartFilter.self, Highlight.self])
+        let schema = Schema([Item.self, Tag.self, ItemCategory.self, SmartFilter.self, Highlight.self, SmartRule.self])
         // Syncs through the iCloud container named in the entitlements,
         // which only exist when ICLOUD_SYNC is on (Config/Stash.xcconfig).
         // Said explicitly either way: left to itself SwiftData syncs
@@ -51,7 +51,12 @@ struct StashApp: App {
                 .environment(sync)
         }
         .modelContainer(container)
-        .commands { StashCommands(library: library) }
+        .commands {
+            StashCommands(library: library)
+            // Import from iPhone or iPad: take a photo or scan a document
+            // with the phone, straight into Stash.
+            ImportFromDevicesCommands()
+        }
         #else
         WindowGroup {
             ContentView()
@@ -111,6 +116,9 @@ struct StashCommands: Commands {
                 if let item = library.selection { library.restore([item]) }
             }
             .disabled(library.selection?.isTrashed != true)
+            Divider()
+            Button("Smart Rules…") { library.isEditingRules = true }
+                .keyboardShortcut("r", modifiers: [.command, .option])
         }
     }
 }

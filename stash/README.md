@@ -131,7 +131,9 @@ Capabilities* for each target, find App Groups, and tick
 | **See Also** | The side panel lists items most like the one you're looking at, from the words they share, and suggests a category for an uncategorized item from where those are. |
 | **Duplicates** | Pages saved twice (however their addresses are written) and files imported twice are listed under *Duplicates* in the sidebar, and in each copy's side panel. |
 | **Export and backup** | Export an item, a category or everything (*File › Export*, or the sidebar's backup menu) as a ZIP file: a folder per category, notes and links as Markdown, documents as they were, saved pages as web archives, readable without Stash. *Restore from Backup* adds back anything in an export that isn't already in the library, with its categories, tags, links, highlights and smart filters. |
-| **Shortcuts and Spotlight** | Add Note, Save Link, Find Items and Open Item actions in Shortcuts and Siri. Items appear in the system's Spotlight search, and open in Stash. |
+| **Shortcuts and Spotlight** | In Shortcuts and Siri: Add Note, Save Link, Find Items, Open Item, Open Today's Note, Add to Today's Note, Record Voice Note, Read Later, Get Read Later Queue, Add to List, Get Items in List, Set Field, Get Field, Subscribe to Feed, Check Feeds and Ask Your Library (which answers aloud in Siri). Items appear in the system's Spotlight search, and open in Stash. |
+| **Board** | The fourth view beside list, grid and columns: items as cards in columns, by label, by top-level category or by one of your choice fields. Drag a card to another column to give it that label, category or value. |
+| **Batch rename and convert** | *Rename…* on several items at once: find and replace (with regular expressions if you like), add text before or after, or new titles from a pattern (`{title}`, a counter `{n}`, `{date}` or `{date:d MMM yyyy}`, `{kind}`), previewed before anything changes; `[[links]]` follow. *Convert To* makes a PDF, Markdown or plain-text document of notes and links, filed and tagged like them and linked from them. |
 
 New items go into whatever category or tag the sidebar is showing.
 Dropping files or web addresses onto the list adds them.
@@ -225,6 +227,14 @@ StashCore/              no-interface logic, with tests
   temporary folder emptied on relocking. Text written before an item was
   locked can linger in the database file's free space, and in iCloud's
   history, until it's overwritten.
+- **A big library**: the search index keeps a signature of what each
+  entry was made from (`SearchIndex.sync`), so launching and taking in
+  changes from iCloud only index what's changed, and Spotlight is only
+  sent those. The sidebar's badges are counted by the store, once per save.
+  To try Stash with 10,000 made-up items, launch the test library with
+  `-StashGenerateItems 10000` (with `-StashResetTestLibrary YES`, or it adds
+  another 10,000), or choose *Add 10,000 Test Items* from its ⋯ menu; timings
+  go to the log under the `performance` category.
 - **Ask Your Library** searches the index for the question's telling words,
   takes the best passage of each of the top five items (`LibraryQuestion`
   in StashCore), and has the on-device model answer from those alone,

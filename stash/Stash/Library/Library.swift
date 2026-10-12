@@ -12,6 +12,14 @@ import SwiftData
 import UniformTypeIdentifiers
 import StashCore
 
+/// The counts beside the sidebar's places.
+struct SidebarCounts: Equatable {
+    var inbox = 0
+    var due = 0
+    var readLater = 0
+    var duplicates = 0
+}
+
 /// What the sidebar is showing.
 enum SidebarSelection: Hashable {
     case inbox
@@ -207,6 +215,7 @@ final class Library {
         importSharedItems()
         openIndexedFolders()
         startCheckingFeeds()
+        if Self.requestedTestItems > 0 { generateTestItems(Self.requestedTestItems) }
 
         if inbox != nil {
             // The share extension signals as it saves, so something shared
@@ -449,6 +458,8 @@ final class Library {
     var isAskingLibrary = false
     /// Items waiting for a new list to be named, from a menu.
     var newListItems: [Item]?
+    /// Items being renamed together.
+    var renamingItems: [Item]?
 
     /// Items that link or are linked to, and the links between them (as
     /// pairs of indices): hand-made links and `[[links]]` in notes.
@@ -1643,6 +1654,8 @@ final class Library {
 
     /// At launch, and after changes arrive from another device.
     func refreshAfterStoreChange() {
+        let started = ContinuousClock.now
+        defer { Self.performanceLog.info("Refreshed after a store change in \(ContinuousClock.now - started)") }
         if let selection, !isAlive(selection) { self.selection = nil }
         mergeDuplicates()
         deleteOldTrash()
@@ -1650,8 +1663,15 @@ final class Library {
         // Only tidy files away when the library definitely loaded: an empty
         // list from a failed fetch would otherwise delete every document.
         guard let items = try? context.fetch(FetchDescriptor<Item>()) else { return }
-        index?.replaceAll(with: items.map(entry(for:)))
-        spotlight.replaceAll(with: items)
+        // Only what's changed since the index last saw it is indexed again.
+        let byID = Dictionary(items.map { ($0.uuid, $0) }, uniquingKeysWith: { first, _ in first })
+        let changes = index?.sync(byID.mapValues(Self.indexSignature)) { id in byID[id].map(entry(for:)) }
+        if spotlight.needsRebuild || changes == nil {
+            spotlight.replaceAll(with: items)
+        } else if let changes {
+            for id in changes.changed { if let item = byID[id] { spotlight.update(item) } }
+            spotlight.remove(changes.removed)
+        }
         Reminders.shared.replaceAll(with: items)
         files.removeFolders(notBelongingTo: Set(items.map(\.uuid)))
         // Documents added before duplicates were looked for, or whose
@@ -1725,7 +1745,7 @@ final class Library {
     // MARK: - Index
 
     func reindex(_ item: Item) {
-        index?.update(entry(for: item))
+        index?.update(entry(for: item), signature: Self.indexSignature(item))
         spotlight.update(item)
         revision += 1
         if !query.isEmpty { runSearch() }
@@ -1784,7 +1804,48 @@ final class Library {
 
     func save() {
         try? context.save()
+        storeVersion += 1
         scheduleWidgetUpdate()
+    }
+
+    /// Goes up with every save, so counts worked out from the store (the
+    /// sidebar's badges) know when to work themselves out again.
+    var storeVersion = 0
+    @ObservationIgnored private var cachedCounts: (version: Int, counts: SidebarCounts)?
+
+    /// The sidebar's badges: counted by the store, not by loading every item,
+    /// and only again after something's been saved.
+    func sidebarCounts() -> SidebarCounts {
+        if let cachedCounts, cachedCounts.version == storeVersion { return cachedCounts.counts }
+        let now = Date.now
+        func count(_ predicate: Predicate<Item>) -> Int {
+            (try? context.fetchCount(FetchDescriptor<Item>(predicate: predicate))) ?? 0
+        }
+        let note = ItemKind.note.rawValue
+        let candidates = (try? context.fetch(FetchDescriptor<Item>(predicate: #Predicate {
+            $0.kindRaw != note && $0.trashedAt == nil
+        }))) ?? []
+        let counts = SidebarCounts(
+            inbox: count(#Predicate { $0.inInbox && $0.trashedAt == nil }),
+            // Few items have reminders: those are checked one by one.
+            due: ((try? context.fetch(FetchDescriptor<Item>(predicate: #Predicate { $0.trashedAt == nil && $0.remindAt != nil }))) ?? [])
+                .filter { ($0.remindAt ?? .distantFuture) <= now }.count,
+            readLater: count(#Predicate { $0.trashedAt == nil && $0.readLaterAt != nil && $0.readingProgress < 0.98 }),
+            duplicates: duplicates(among: candidates).count)
+        cachedCounts = (storeVersion, counts)
+        return counts
+    }
+
+    /// What the index's entry for an item is made from, cheaply: when it
+    /// changes, the entry is made again. Lengths stand in for long text.
+    static func indexSignature(_ item: Item) -> String {
+        [String(item.modifiedAt.timeIntervalSince1970), item.isLocked ? "locked" : "", item.title,
+         String(item.body.utf16.count), String(item.summary.utf16.count), String(item.extractedText.utf16.count),
+         item.urlString ?? "", item.sortedTags.map(\.name).joined(separator: ","),
+         String((item.highlights ?? []).reduce(0) { $0 + $1.text.utf16.count + $1.note.utf16.count }),
+         String(item.customFields.utf16.count),
+         String((item.attachments ?? []).reduce(0) { $0 + $1.recognizedText.utf16.count })]
+            .joined(separator: "|")
     }
 
     // MARK: - Widgets

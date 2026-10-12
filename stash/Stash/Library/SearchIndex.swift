@@ -3,8 +3,10 @@ import SQLite3
 
 /// Full-text search over every item, using SQLite's FTS5 (built into the
 /// system SQLite on macOS and iOS). Kept beside the library rather than in
-/// it: it holds nothing that can't be rebuilt from the items, and it is
-/// rebuilt at every launch, so it can never drift out of step for long.
+/// it: it holds nothing that can't be rebuilt from the items. At launch and
+/// after changes from iCloud it's brought into step with them (`sync`):
+/// each entry keeps a signature of what it was made from, so only items
+/// that have changed are indexed again.
 ///
 /// Ranked with BM25, weighting a match in the title most, then tags, then
 /// the text itself, then extracted text (page and PDF contents) least.
@@ -38,7 +40,11 @@ final class SearchIndex {
                 id UNINDEXED, title, body, tags, extra,
                 tokenize = 'porter unicode61 remove_diacritics 2')
             """)
-        guard created else {
+        // Each entry's signature, and its row in `entries` (whose id column
+        // isn't indexed, so finding a row by id means reading every one).
+        let stamped = execute(
+            "CREATE TABLE IF NOT EXISTS stamps (id TEXT PRIMARY KEY, signature TEXT NOT NULL, row INTEGER NOT NULL)")
+        guard created, stamped else {
             sqlite3_close(db)
             db = nil  // deinit still runs; closing twice would be a crash
             return nil
@@ -49,22 +55,45 @@ final class SearchIndex {
         sqlite3_close(db)
     }
 
-    func replaceAll(with entries: [Entry]) {
+    /// Brings the index into step with the items: `wanted` is each item's
+    /// signature, and `entry` makes the entry for one that's new or has
+    /// changed. Gives what was indexed again, and what was taken out.
+    @discardableResult
+    func sync(_ wanted: [UUID: String], entry: (UUID) -> Entry?) -> (changed: [UUID], removed: [UUID]) {
+        let have = signatures()
         execute("BEGIN")
-        execute("DELETE FROM entries")
-        for entry in entries { insert(entry) }
-        execute("COMMIT")
+        defer { execute("COMMIT") }
+        // Nothing signed (a new index, or one from before signatures): start again.
+        if have.isEmpty {
+            execute("DELETE FROM entries")
+            execute("DELETE FROM stamps")
+            for (id, signature) in wanted {
+                guard let made = entry(id) else { continue }
+                stamp(id, signature, row: insert(made))
+            }
+            return (Array(wanted.keys), [])
+        }
+        let removed = have.keys.filter { wanted[$0] == nil }
+        for id in removed { removeRow(of: id) }
+        var changed: [UUID] = []
+        for (id, signature) in wanted where have[id] != signature {
+            guard let made = entry(id) else { continue }
+            removeRow(of: id)
+            stamp(id, signature, row: insert(made))
+            changed.append(id)
+        }
+        return (changed, Array(removed))
     }
 
-    func update(_ entry: Entry) {
+    func update(_ entry: Entry, signature: String) {
         execute("BEGIN")
-        remove(entry.id)
-        insert(entry)
+        removeRow(of: entry.id)
+        stamp(entry.id, signature, row: insert(entry))
         execute("COMMIT")
     }
 
     func remove(_ id: UUID) {
-        run("DELETE FROM entries WHERE id = ?", [id.uuidString])
+        removeRow(of: id)
     }
 
     /// Item ids matching an FTS5 expression (see `SearchQuery.ftsExpression`),
@@ -98,9 +127,39 @@ final class SearchIndex {
 
     // MARK: - SQLite
 
-    private func insert(_ entry: Entry) {
+    private func signatures() -> [UUID: String] {
+        var result: [UUID: String] = [:]
+        run("SELECT id, signature FROM stamps", []) { statement in
+            guard let text = sqlite3_column_text(statement, 0), let id = UUID(uuidString: String(cString: text)),
+                  let signature = sqlite3_column_text(statement, 1) else { return }
+            result[id] = String(cString: signature)
+        }
+        return result
+    }
+
+    private func stamp(_ id: UUID, _ signature: String, row: Int64) {
+        run("INSERT OR REPLACE INTO stamps (id, signature, row) VALUES (?, ?, ?)", [id.uuidString, signature, String(row)])
+    }
+
+    /// Takes an item's entry out: by its row when that's known, else by
+    /// reading every entry for its id.
+    private func removeRow(of id: UUID) {
+        var row: Int64?
+        run("SELECT row FROM stamps WHERE id = ?", [id.uuidString]) { row = sqlite3_column_int64($0, 0) }
+        if let row {
+            run("DELETE FROM entries WHERE rowid = CAST(? AS INTEGER)", [String(row)])
+            run("DELETE FROM stamps WHERE id = ?", [id.uuidString])
+        } else {
+            run("DELETE FROM entries WHERE id = ?", [id.uuidString])
+        }
+    }
+
+    /// Adds an entry and gives its row.
+    @discardableResult
+    private func insert(_ entry: Entry) -> Int64 {
         run("INSERT INTO entries (id, title, body, tags, extra) VALUES (?, ?, ?, ?, ?)",
             [entry.id.uuidString, entry.title, entry.body, entry.tags, entry.extra])
+        return sqlite3_last_insert_rowid(db)
     }
 
     @discardableResult

@@ -4,6 +4,12 @@ import StashCore
 
 /// Lists, your own fields, and the reading queue.
 extension Library {
+    /// Everything in a category or one inside it, not in the Trash.
+    func items(in category: ItemCategory) -> [Item] {
+        let all = (try? context.fetch(FetchDescriptor<Item>(predicate: #Predicate { $0.trashedAt == nil }))) ?? []
+        return all.filter { category.contains($0.category) }
+    }
+
     // MARK: - Lists
 
     func itemLists() -> [ItemList] {

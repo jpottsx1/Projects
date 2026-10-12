@@ -239,6 +239,16 @@ struct StashCommands: Commands {
                 Button("Save as Template") { library.saveAsTemplate(notes[0]) }
                     .disabled(notes.count != 1)
             }
+            Button(chosen.count > 1 ? "Rename Items…" : "Rename…") { library.renamingItems = live }
+                .disabled(live.isEmpty)
+            Menu("Convert To") {
+                ForEach(ConversionFormat.allCases) { format in
+                    Button("\(format.name) Document") {
+                        Task { await library.convert(live.filter(Library.canConvert), to: format) }
+                    }
+                }
+            }
+            .disabled(!live.contains(where: Library.canConvert))
             Button("Make Note from Highlights") { if let item = chosen.first { library.makeHighlightsNote(for: item) } }
                 .disabled(chosen.count != 1 || (chosen.first?.highlights ?? []).isEmpty)
             Divider()

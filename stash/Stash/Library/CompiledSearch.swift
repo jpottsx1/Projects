@@ -128,7 +128,7 @@ extension SearchQuery.Kind {
 }
 
 enum ItemLayout: String, CaseIterable {
-    case list, grid, table
+    case list, grid, table, board
 }
 
 /// How the list is ordered when it isn't showing search results best first.

@@ -3,7 +3,7 @@ import Foundation
 import StashCore
 
 /// Stash in the Shortcuts app, Siri and Spotlight's actions: add a note,
-/// save a link, find items, open one. Each runs in the app itself, against
+/// save a link, find items, open one (more in `MoreIntents`). Each runs in the app itself, against
 /// the same `Library` the window uses.
 
 struct ItemEntity: AppEntity {
@@ -151,6 +151,24 @@ struct StashShortcuts: AppShortcutsProvider {
         AppShortcut(intent: OpenItemIntent(), phrases: [
             "Open \(\.$item) in \(.applicationName)",
         ], shortTitle: "Open Item", systemImageName: "doc.text.magnifyingglass")
+        AppShortcut(intent: OpenTodaysNoteIntent(), phrases: [
+            "Open today’s note in \(.applicationName)",
+            "Today in \(.applicationName)",
+        ], shortTitle: "Today’s Note", systemImageName: "calendar")
+        AppShortcut(intent: AddToTodaysNoteIntent(), phrases: [
+            "Add to today’s note in \(.applicationName)",
+        ], shortTitle: "Add to Today", systemImageName: "calendar.badge.plus")
+        AppShortcut(intent: RecordVoiceNoteIntent(), phrases: [
+            "Record a voice note in \(.applicationName)",
+            "New \(.applicationName) voice note",
+        ], shortTitle: "Voice Note", systemImageName: "mic")
+        AppShortcut(intent: GetReadingQueueIntent(), phrases: [
+            "What’s in my \(.applicationName) reading queue",
+        ], shortTitle: "Read Later", systemImageName: "book")
+        AppShortcut(intent: AskLibraryIntent(), phrases: [
+            "Ask \(.applicationName)",
+            "Ask my \(.applicationName) library",
+        ], shortTitle: "Ask Your Library", systemImageName: "sparkles")
     }
 }
 

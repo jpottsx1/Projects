@@ -20,8 +20,18 @@ final class SpotlightIndex {
     /// Spotlight only needs enough to find an item by.
     private static let textLimit = 20_000
 
+    /// Bumped when what's put in Spotlight changes, so it's all sent again once.
+    private static let version = 2
+
+    /// Whether Spotlight's copy predates what's indexed now (or this is the
+    /// first launch), so it needs everything; otherwise it's kept up by updates.
+    var needsRebuild: Bool {
+        UserDefaults.standard.integer(forKey: "spotlightIndexVersion") != Self.version
+    }
+
     func replaceAll(with items: [Item]) {
         guard isEnabled else { return }
+        UserDefaults.standard.set(Self.version, forKey: "spotlightIndexVersion")
         waiting = [:]
         flush?.cancel()
         let searchable = items.filter { !$0.isTrashed && !$0.isLocked }.map(Self.searchable)

@@ -85,13 +85,18 @@ extension Manifest.Track {
     /// upwards would risk clipping the thing you are auditioning, and not
     /// matching at all would mean the louder version wins on loudness alone --
     /// which it reliably does, whatever else is true of it.
+    ///
+    /// Two versions on one path keep the larger cut rather than trapping. The
+    /// tool once wrote a dotted name's A and B to the same file ("Pt. 1" made
+    /// both "...Pt.mp3"), and `uniqueKeysWithValues` on that manifest took
+    /// DiscoTags down the moment the track was opened (2026-10-12).
     func matchGains(using estimator: KeyPath<Manifest.Variant, Double?>) -> [String: Float] {
         let levels = variants.compactMap { $0[keyPath: estimator] }
         guard levels.count == variants.count, let quietest = levels.min() else {
-            return Dictionary(uniqueKeysWithValues: variants.map { ($0.id, Float(0)) })
+            return Dictionary(variants.map { ($0.id, Float(0)) }, uniquingKeysWith: min)
         }
-        return Dictionary(uniqueKeysWithValues: variants.map {
+        return Dictionary(variants.map {
             ($0.id, Float(quietest - ($0[keyPath: estimator] ?? quietest)))
-        })
+        }, uniquingKeysWith: min)
     }
 }

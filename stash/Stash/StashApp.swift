@@ -17,7 +17,7 @@ final class StashStore {
         || ProcessInfo.processInfo.environment["STASH_TEST_LIBRARY"] != nil
 
     private init() {
-        let schema = Schema([Item.self, Tag.self, ItemCategory.self, SmartFilter.self, Highlight.self, SmartRule.self, NoteVersion.self, NoteAttachment.self, Feed.self, IndexedFolder.self])
+        let schema = Schema([Item.self, Tag.self, ItemCategory.self, SmartFilter.self, Highlight.self, SmartRule.self, NoteVersion.self, NoteAttachment.self, Feed.self, IndexedFolder.self, Vault.self])
         // Syncs through the iCloud container named in the entitlements,
         // which only exist when ICLOUD_SYNC is on (Config/Stash.xcconfig).
         // Said explicitly either way: left to itself SwiftData syncs
@@ -105,6 +105,13 @@ struct StashApp: App {
         .modelContainer(container)
         .defaultSize(width: 860, height: 680)
 
+        Window("Ask Your Library", id: "ask") {
+            AskLibraryView(showsDone: false)
+                .environment(library)
+                .modelContainer(container)
+        }
+        .defaultSize(width: 560, height: 640)
+
         Window("Link Graph", id: "graph") {
             LinkGraphView()
                 .environment(library)
@@ -118,6 +125,9 @@ struct StashApp: App {
                 .environment(sync)
         }
         .modelContainer(container)
+        .backgroundTask(.appRefresh(FeedRefresh.identifier)) {
+            await FeedRefresh.run()
+        }
         #endif
     }
 }
@@ -205,6 +215,12 @@ struct StashCommands: Commands {
                 .disabled(live.isEmpty)
             Button("Remind Me…") { library.remindingItems = live }
                 .disabled(live.isEmpty)
+            let allLocked = !live.isEmpty && live.allSatisfy(\.isLocked)
+            Button(allLocked ? "Remove Lock…" : "Lock") {
+                if allLocked { Task { await library.removeLock(from: live) } } else { library.lock(live) }
+            }
+            .keyboardShortcut("l", modifiers: [.command, .control])
+            .disabled(live.isEmpty)
             Divider()
             Button("Move to Trash") { library.moveToTrash(live) }
                 .keyboardShortcut(.delete)
@@ -225,6 +241,8 @@ struct StashCommands: Commands {
             Button("Check Feeds Now") { Task { await library.checkFeeds(all: true) } }
                 .keyboardShortcut("k", modifiers: [.command, .shift])
             Button("Indexed Folders…") { library.isManagingIndexedFolders = true }
+            Button("Ask Your Library…") { library.isAskingLibrary = true }
+                .keyboardShortcut("a", modifiers: [.command, .option])
             Button("Link Graph") { library.isShowingGraph = true }
                 .keyboardShortcut("g", modifiers: [.command, .option])
             Button("Smart Rules…") { library.isEditingRules = true }

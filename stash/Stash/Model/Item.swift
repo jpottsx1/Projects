@@ -125,6 +125,13 @@ final class Item {
     @Attribute(.externalStorage) var transcriptData: Data?
     /// An email's Message-ID, so the same message isn't imported twice.
     var messageID: String = ""
+    /// A locked item's text, encrypted (`SealedContents`), and the vault
+    /// whose key it's encrypted with. Its files are encrypted too.
+    @Attribute(.externalStorage) var sealedData: Data?
+    var sealedVaultID: UUID?
+
+    /// Locked with encryption, rather than only hidden.
+    var isSealed: Bool { sealedData != nil }
     @Relationship(inverse: \Tag.items) var tags: [Tag]? = []
     /// Items this one has been linked to by hand. `[[Title]]` links written
     /// in a note are read from its text instead, so they can't go stale.

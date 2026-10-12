@@ -36,11 +36,14 @@ final class ItemPrinter: NSObject, WKNavigationDelegate {
            let data = try? Data(contentsOf: copy) {
             return .archive(data, baseURL: item.url)
         }
-        return .html(page(for: item) { library.pictureURL($0, in: item) }, baseURL: item.url)
+        return .html(page(for: item, text: library.openSeals[item.uuid]?.body) { library.pictureURL($0, in: item) },
+                     baseURL: item.url)
     }
 
     /// The item as a printable page.
-    static func page(for item: Item, pictureURL: (String) -> URL? = { _ in nil }) -> String {
+    /// `text` stands in for the item's own when it's encrypted.
+    static func page(for item: Item, text: String? = nil, pictureURL: (String) -> URL? = { _ in nil }) -> String {
+        let itemText = text ?? item.body
         // Stored pictures go in as data, since the page is loaded from a string.
         let picture: (String) -> String? = { source in
             guard let url = pictureURL(source) else { return nil }
@@ -60,16 +63,16 @@ final class ItemPrinter: NSObject, WKNavigationDelegate {
         var body = ""
         switch item.kind {
         case .note:
-            body = MarkdownHTML.render(item.body, picture: picture)
+            body = MarkdownHTML.render(itemText, picture: picture)
         case .link:
             if let article = item.article {
                 body = article.html
             } else if !item.summary.isEmpty {
                 body = "<p>\(escape(item.summary))</p>"
             }
-            if !item.body.isEmpty { body += "<h2>Notes</h2>" + MarkdownHTML.render(item.body) }
+            if !itemText.isEmpty { body += "<h2>Notes</h2>" + MarkdownHTML.render(itemText) }
         case .document:
-            if !item.body.isEmpty { body = MarkdownHTML.render(item.body) }
+            if !itemText.isEmpty { body = MarkdownHTML.render(itemText) }
         }
         let highlights = item.sortedHighlights
         if !highlights.isEmpty {

@@ -30,9 +30,16 @@
 			</array>
 		</dict>
 	</array>
+	<!-- remote-notification: iCloud changes. fetch: checking feeds now and
+	     then while Stash isn't open (Feeds.swift). -->
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>remote-notification</string>
+		<string>fetch</string>
+	</array>
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>com.jpottsx1.stash.feeds</string>
 	</array>
 </dict>
 </plist>

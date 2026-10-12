@@ -5,6 +5,7 @@ import AppKit
 #endif
 import LocalAuthentication
 import CoreGraphics
+import CryptoKit
 import Foundation
 import Observation
 import SwiftData
@@ -46,7 +47,7 @@ final class Library {
 
     let context: ModelContext
     let files: FileStore
-    private let index: SearchIndex?
+    let index: SearchIndex?
     @ObservationIgnored private let spotlight = SpotlightIndex()
 
     var sidebar: SidebarSelection? = .all {
@@ -398,6 +399,9 @@ final class Library {
         }
         let name = String(source.dropFirst(Self.attachmentScheme.count))
         let path = "\(item.uuid.uuidString)/Attachments/\(name)"
+        if item.isSealed {
+            return unsealedCopy(of: path, synced: item.attachments?.first(where: { $0.fileName == name })?.data, for: item)
+        }
         if !files.exists(path), let data = item.attachments?.first(where: { $0.fileName == name })?.data {
             try? files.write(data, to: path)
         }
@@ -414,6 +418,8 @@ final class Library {
                 context.delete(attachment)
                 continue
             }
+            // A locked note's text is sealed, so it can't be read to see what it shows.
+            if item.isSealed { continue }
             if !item.body.contains(Self.attachmentScheme + attachment.fileName) {
                 try? FileManager.default.removeItem(at: files.url(for: "\(item.uuid.uuidString)/Attachments/\(attachment.fileName)"))
                 context.delete(attachment)
@@ -424,6 +430,7 @@ final class Library {
     // MARK: - Link graph
 
     var isShowingGraph = false
+    var isAskingLibrary = false
 
     /// Items that link or are linked to, and the links between them (as
     /// pairs of indices): hand-made links and `[[links]]` in notes.
@@ -472,7 +479,7 @@ final class Library {
     /// Whether markup is offered: PDFs and pictures.
     static func canMarkUp(_ item: Item) -> Bool {
         // Files in an indexed folder are only read, never written.
-        item.kind == .document && item.indexedFolder == nil
+        item.kind == .document && item.indexedFolder == nil && !item.isSealed
             && (item.isPDF || item.contentType?.conforms(to: .image) == true)
     }
 
@@ -550,7 +557,7 @@ final class Library {
     /// old ones go to the Trash. Returns the new note.
     @discardableResult
     func mergeNotes(_ notes: [Item]) -> Item? {
-        let ordered = notes.filter { $0.kind == .note && !$0.isTrashed }
+        let ordered = notes.filter { $0.kind == .note && !$0.isTrashed && !$0.isLocked }
             .sorted { ($0.createdAt, $0.uuid.uuidString) < ($1.createdAt, $1.uuid.uuidString) }
         guard ordered.count > 1 else { return nil }
         let merged = Item(kind: .note, title: ordered[0].title.isEmpty ? "Merged Note" : ordered[0].title + " (merged)")
@@ -634,18 +641,22 @@ final class Library {
     // MARK: - Locking
 
     /// Locked items unlocked since the app last went to the background.
-    private(set) var unlocked: Set<UUID> = []
+    var unlocked: Set<UUID> = []
     var lockError: String?
+    /// Asking for the locking password, and what to do with it.
+    var passwordRequest: PasswordRequest?
+    /// Vaults' keys, open until the app goes to the background.
+    @ObservationIgnored var vaultKeys: [UUID: SymmetricKey] = [:]
+    /// Unlocked sealed items' text, decrypted, in memory only.
+    var openSeals: [UUID: SealedContents] = [:]
 
     /// Whether the item's contents are to be kept out of sight.
     func isHidden(_ item: Item) -> Bool {
         item.isLocked && !unlocked.contains(item.uuid)
     }
 
-    /// Whether this device can lock things: it needs a passcode or password.
-    static var canLock: Bool {
-        LAContext().canEvaluatePolicy(.deviceOwnerAuthentication, error: nil)
-    }
+    /// Locking needs only a password now; kept for the menus that ask.
+    static var canLock: Bool { true }
 
     private func authenticate(_ reason: String) async -> Bool {
         let context = LAContext()
@@ -659,46 +670,129 @@ final class Library {
         }
     }
 
+    /// Opens a locked item: with its key if it's to hand (from this session,
+    /// or the Keychain behind Face ID or Touch ID), else by asking for the
+    /// password.
     func unlock(_ item: Item) async {
         guard item.isLocked, !unlocked.contains(item.uuid) else { return }
-        if await authenticate("Unlock “\(item.displayTitle)”") {
-            unlocked.insert(item.uuid)
-        }
-    }
-
-    func lock(_ items: [Item]) {
-        guard Self.canLock else {
-            lockError = "Set a passcode on this device to lock items."
+        guard item.isSealed else {
+            // Locked before encryption: unlocked as it always was, then sealed.
+            if await authenticate("Unlock “\(item.displayTitle)”") {
+                unlocked.insert(item.uuid)
+                sealUnsealedLockedItems()
+            }
             return
         }
-        for item in items {
+        guard let key = await key(forVault: item.sealedVaultID, reason: "Unlock “\(item.displayTitle)”") else {
+            passwordRequest = PasswordRequest(kind: .enter, then: .unlock(item.uuid))
+            return
+        }
+        guard let contents = openSealedContents(of: item, key: key) else {
+            lockError = "“\(item.displayTitle)” couldn’t be decrypted. It may have been locked with another password."
+            return
+        }
+        openSeals[item.uuid] = contents
+        unlocked.insert(item.uuid)
+    }
+
+    /// Encrypts items and locks them. The first time, a password is chosen.
+    func lock(_ items: [Item]) {
+        let candidates = items.filter { !$0.isLocked || !$0.isSealed }
+        let lockable = candidates.filter { $0.indexedFolder == nil }
+        if lockable.count < candidates.count {
+            lockError = "Documents in an indexed folder can’t be locked: their files stay in the folder, where Stash can’t encrypt them."
+        }
+        guard !lockable.isEmpty else { return }
+        guard let (vault, key) = currentKey() else {
+            passwordRequest = PasswordRequest(kind: vaults().isEmpty ? .create : .enter, then: .lock(lockable.map(\.uuid)))
+            return
+        }
+        for item in lockable {
+            do {
+                try seal(item, vault: vault, key: key)
+            } catch {
+                lockError = "“\(item.displayTitle)” couldn’t be encrypted: \(error.localizedDescription)"
+                continue
+            }
             item.isLocked = true
             unlocked.remove(item.uuid)
+            openSeals[item.uuid] = nil
             reindex(item)
+        }
+        save()
+        revision += 1
+    }
+
+    /// Items locked before locking encrypted: sealed once there's a key.
+    func sealUnsealedLockedItems() {
+        guard let (vault, key) = currentKey() else { return }
+        let descriptor = FetchDescriptor<Item>(predicate: #Predicate { $0.isLocked && $0.sealedData == nil })
+        for item in (try? context.fetch(descriptor)) ?? [] where item.indexedFolder == nil {
+            try? seal(item, vault: vault, key: key)
+            if unlocked.contains(item.uuid) { openSeals[item.uuid] = openSealedContents(of: item, key: key) }
         }
         save()
     }
 
-    /// Asks to unlock first: taking a lock off is as good as unlocking.
+    /// Decrypts items and takes their locks off. Asks to unlock first:
+    /// taking a lock off is as good as unlocking.
     func removeLock(from items: [Item]) async {
         let locked = items.filter(\.isLocked)
         guard !locked.isEmpty else { return }
-        let needsAsking = locked.contains { !unlocked.contains($0.uuid) }
-        if needsAsking {
-            let reason = locked.count == 1 ? "Remove the lock from “\(locked[0].displayTitle)”" : "Remove the lock from \(locked.count) items"
-            guard await authenticate(reason) else { return }
-        }
         for item in locked {
+            if item.isSealed {
+                guard let key = await key(forVault: item.sealedVaultID, reason: "Remove the lock from “\(item.displayTitle)”") else {
+                    passwordRequest = PasswordRequest(kind: .enter, then: .removeLock(locked.map(\.uuid)))
+                    return
+                }
+                do {
+                    try unseal(item, key: key)
+                } catch {
+                    lockError = "“\(item.displayTitle)” couldn’t be decrypted: \(error.localizedDescription)"
+                    continue
+                }
+            } else if !unlocked.contains(item.uuid) {
+                guard await authenticate("Remove the lock from “\(item.displayTitle)”") else { return }
+            }
             item.isLocked = false
             unlocked.remove(item.uuid)
+            openSeals[item.uuid] = nil
             reindex(item)
         }
         save()
+        revision += 1
+        Task { for item in locked where item.kind == .document { await fillThumbnail(of: item) } }
     }
 
-    /// Locks everything again: when the app goes to the background.
+    /// The password, given in answer to a request: chooses it or opens the
+    /// key, then does what was waiting. False for a wrong password.
+    func answer(_ request: PasswordRequest, password: String) async -> Bool {
+        switch request.kind {
+        case .create:
+            do { try createVault(password: password) } catch {
+                lockError = error.localizedDescription
+                return false
+            }
+        case .enter:
+            guard await openVaults(password: password) else { return false }
+        }
+        passwordRequest = nil
+        sealUnsealedLockedItems()
+        switch request.then {
+        case .lock(let ids): lock(items(withIDs: ids))
+        case .unlock(let id): if let item = items(withIDs: [id]).first { await unlock(item) }
+        case .removeLock(let ids): await removeLock(from: items(withIDs: ids))
+        }
+        return true
+    }
+
+    /// Locks everything again, forgetting keys and decrypted copies: when
+    /// the app goes to the background.
     func relockAll() {
         if !unlocked.isEmpty { unlocked = [] }
+        if !openSeals.isEmpty { openSeals = [:] }
+        vaultKeys = [:]
+        removeUnsealedCopies()
     }
 
     // MARK: - Note history
@@ -724,6 +818,7 @@ final class Library {
 
     /// Keeps the note as it read when editing began, if it's changed since.
     private func keepVersion(of item: Item) {
+        guard !item.isSealed else { return }
         guard let baseline = editBaselines[item.uuid],
               baseline.body != item.body || baseline.title != item.title,
               // A note that was empty has nothing worth going back to.
@@ -770,6 +865,7 @@ final class Library {
     /// the page. Each step stands alone: a page whose HTML can't be read
     /// can often still be copied, and the other way round.
     func refreshPage(of item: Item) async {
+        guard !item.isSealed else { return }
         if let url = item.url, let page = await TextExtractor.page(at: url), isAlive(item) {
             if let title = page.title, !Self.hasOwnTitle(item, url: url) {
                 item.title = title
@@ -788,7 +884,7 @@ final class Library {
     private(set) var copyingPages: Set<UUID> = []
 
     func savePageCopy(of item: Item) async {
-        guard let url = item.url, !copyingPages.contains(item.uuid) else { return }
+        guard !item.isSealed, let url = item.url, !copyingPages.contains(item.uuid) else { return }
         copyingPages.insert(item.uuid)
         defer { copyingPages.remove(item.uuid) }
 
@@ -820,6 +916,7 @@ final class Library {
     /// time it's asked for, as with `localFile(for:)`.
     func localPageCopy(for item: Item) -> URL? {
         guard let path = item.archivePath else { return nil }
+        if item.isSealed { return unsealedCopy(of: path, synced: item.archiveData, for: item) }
         if !files.exists(path), let data = item.archiveData {
             try? files.write(data, to: path)
         }
@@ -833,7 +930,8 @@ final class Library {
     }
 
     func extractText(from item: Item) async {
-        guard let url = localFile(for: item) else { return }
+        // An encrypted item's words stay sealed with it.
+        guard !item.isSealed, let url = localFile(for: item) else { return }
         if item.contentType?.conforms(to: .emailMessage) == true {
             await readEmail(item, at: url)
             finishedReading(item)
@@ -860,6 +958,8 @@ final class Library {
     func localFile(for item: Item) -> URL? {
         if item.indexedFolder != nil { return indexedFile(for: item) }
         guard let path = item.storedFilePath else { return nil }
+        // Encrypted: a decrypted copy while it's unlocked, nothing otherwise.
+        if item.isSealed { return unsealedCopy(of: path, synced: item.fileData, for: item) }
         if !files.exists(path), let data = item.fileData {
             try? files.write(data, to: path)
         }
@@ -1622,7 +1722,7 @@ final class Library {
 
     /// Makes a document's thumbnail, if it hasn't one yet.
     func fillThumbnail(of item: Item) async {
-        guard item.kind == .document, item.thumbnailData == nil, thumbnailsTried.insert(item.uuid).inserted,
+        guard item.kind == .document, !item.isSealed, item.thumbnailData == nil, thumbnailsTried.insert(item.uuid).inserted,
               let url = localFile(for: item) else { return }
         guard let data = await Thumbnails.make(forFileAt: url), isAlive(item) else { return }
         item.thumbnailData = data
@@ -1631,7 +1731,7 @@ final class Library {
 
     /// Works out a document's hash, for finding duplicates, if it hasn't been yet.
     func fillContentHash(of item: Item) async {
-        guard item.kind == .document, item.contentHash.isEmpty, let url = localFile(for: item) else { return }
+        guard item.kind == .document, !item.isSealed, item.contentHash.isEmpty, let url = localFile(for: item) else { return }
         let hash = await Task.detached(priority: .utility) { FileStore.sha256(of: url) }.value
         guard let hash, isAlive(item) else { return }
         item.contentHash = hash

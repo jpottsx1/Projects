@@ -50,10 +50,14 @@ struct ItemDetailView: View {
 
             Divider()
 
-            switch item.kind {
-            case .note: NoteEditor(item: item)
-            case .link: LinkDetail(item: item)
-            case .document: DocumentDetail(item: item)
+            if item.isSealed {
+                SealedItemView(item: item)
+            } else {
+                switch item.kind {
+                case .note: NoteEditor(item: item)
+                case .link: LinkDetail(item: item)
+                case .document: DocumentDetail(item: item)
+                }
             }
         }
         .onChange(of: item.title) { library.didEdit(item) }

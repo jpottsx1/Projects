@@ -80,7 +80,7 @@ struct ItemInspector: View {
                 }
             }
 
-            AssistantSection(item: item)
+            if !item.isLocked { AssistantSection(item: item) }
 
             Section("Reminder") {
                 if let date = item.remindAt {

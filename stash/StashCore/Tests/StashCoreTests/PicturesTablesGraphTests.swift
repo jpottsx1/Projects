@@ -87,3 +87,32 @@ final class LinkGraphTests: XCTestCase {
         XCTAssertEqual(LinkGraph.layout(count: 1, edges: []), [.init(x: 0.5, y: 0.5)])
     }
 }
+
+final class FocusParagraphTests: XCTestCase {
+    func testParagraphAroundTheCursor() {
+        let text = "Intro line\n\nFirst of two\nsecond of two\n\nLast"
+        let string = text as NSString
+        let cursor = string.range(of: "second").location
+        let paragraph = MarkdownStyling.paragraph(touching: cursor..<cursor, in: text)
+        XCTAssertEqual(string.substring(with: NSRange(location: paragraph.lowerBound, length: paragraph.count)),
+                       "First of two\nsecond of two\n")
+        let last = MarkdownStyling.paragraph(touching: (string.length - 1)..<(string.length - 1), in: text)
+        XCTAssertEqual(string.substring(with: NSRange(location: last.lowerBound, length: last.count)), "Last")
+        // On the blank line between: just that line.
+        let gap = string.range(of: "\n\nLast").location + 1
+        XCTAssertEqual(MarkdownStyling.paragraph(touching: gap..<gap, in: text), gap..<(gap + 1))
+    }
+
+    func testHeadingsAndListItemsStandAlone() {
+        let text = "- [ ] Pay\n## Plan\nCheck the page\nand the side.\n- one"
+        let string = text as NSString
+        func block(at word: String) -> String {
+            let at = string.range(of: word).location
+            let range = MarkdownStyling.paragraph(touching: at..<at, in: text)
+            return string.substring(with: NSRange(location: range.lowerBound, length: range.count))
+        }
+        XCTAssertEqual(block(at: "side"), "Check the page\nand the side.\n")
+        XCTAssertEqual(block(at: "Plan"), "## Plan\n")
+        XCTAssertEqual(block(at: "Pay"), "- [ ] Pay\n")
+    }
+}

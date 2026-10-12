@@ -25,6 +25,7 @@ struct NoteEditor: View {
     @State private var mode: Mode
     /// The mode notes open in, from the last one chosen.
     @AppStorage("noteMode") private var preferredMode = Mode.write.rawValue
+    @AppStorage("focusMode") private var focusMode = false
 
     /// Most recently edited first, which is the order suggestions keep.
     @Query(sort: \Item.modifiedAt, order: .reverse) private var allItems: [Item]
@@ -70,6 +71,11 @@ struct NoteEditor: View {
         .onAppear { library.beginEditing(item) }
         .onDisappear { library.endEditing(item) }
         .toolbar {
+            if mode != .preview {
+                ToolbarItem {
+                    outlineMenu
+                }
+            }
             ToolbarItem {
                 Picker("Mode", selection: $mode) {
                     Text("Write").tag(Mode.write)
@@ -136,7 +142,8 @@ struct NoteEditor: View {
             }, onSelectionChanged: { range in
                 selection = range
             }, pictureURL: { library.pictureURL($0, in: item) },
-               addPicture: { data, ext in library.addPicture(data, fileExtension: ext, to: item) })
+               addPicture: { data, ext in library.addPicture(data, fileExtension: ext, to: item) },
+               focusMode: focusMode)
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 let choices = self.choices
                 if !choices.isEmpty {
@@ -188,6 +195,33 @@ struct NoteEditor: View {
                 }
             }
         }
+    }
+
+    /// The note's headings, to jump to; and focus mode.
+    private var outlineMenu: some View {
+        Menu {
+            let headings = MarkdownOutline.headings(in: item.body)
+            if headings.isEmpty {
+                Text("Headings appear here")
+            }
+            ForEach(Array(headings.enumerated()), id: \.offset) { _, heading in
+                Button(String(repeating: "    ", count: max(heading.level - 1, 0)) + heading.title) {
+                    jump(to: heading.offset)
+                }
+            }
+            Divider()
+            Toggle("Focus Mode", isOn: $focusMode)
+        } label: {
+            Label("Outline", systemImage: "list.bullet.indent")
+        }
+        .help("Jump to a heading, or dim all but the paragraph you're writing")
+    }
+
+    private func jump(to offset: Int) {
+        let clamped = min(offset, item.body.count)
+        let index = item.body.index(item.body.startIndex, offsetBy: clamped)
+        selection = clamped..<clamped
+        select = index..<index
     }
 
     /// Picture and table buttons, after the formatting ones.

@@ -8,6 +8,9 @@ struct ContentView: View {
     @Environment(Library.self) private var library
     @Environment(\.scenePhase) private var scenePhase
     @State private var tagDraft = ""
+    #if os(macOS)
+    @Environment(\.openWindow) private var openWindow
+    #endif
 
     var body: some View {
         @Bindable var library = library
@@ -105,6 +108,18 @@ struct ContentView: View {
         .sheet(item: $library.viewingHistoryOf) { item in
             NoteHistoryView(item: item)
         }
+        #if os(iOS)
+        .sheet(isPresented: $library.isShowingGraph) {
+            LinkGraphView()
+        }
+        #else
+        // On a Mac the graph has a window of its own.
+        .onChange(of: library.isShowingGraph) {
+            guard library.isShowingGraph else { return }
+            library.isShowingGraph = false
+            openWindow(id: "graph")
+        }
+        #endif
         .sheet(isPresented: $library.isEditingRules) {
             RulesView()
         }

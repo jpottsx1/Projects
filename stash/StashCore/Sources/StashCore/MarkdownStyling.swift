@@ -190,6 +190,39 @@ public enum MarkdownStyling {
         return range.location..<(range.location + range.length)
     }
 
+    /// The paragraph the selection is in, as UTF-16 offsets: the lines it
+    /// touches, out to the blank lines either side. For focus mode, which
+    /// dims the rest.
+    public static func paragraph(touching selection: Range<Int>, in text: String) -> Range<Int> {
+        let string = text as NSString
+        var range = lines(touching: selection, in: text)
+        func isBlank(_ line: NSRange) -> Bool {
+            string.substring(with: line).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+        /// A heading or a list item is a block of its own, as in Typora.
+        func standsAlone(_ line: NSRange) -> Bool {
+            let trimmed = string.substring(with: line).trimmingCharacters(in: .whitespacesAndNewlines)
+            return MarkdownBlocks.heading(trimmed) != nil || MarkdownBlocks.bullet(trimmed) != nil
+                || MarkdownBlocks.numbered(trimmed) != nil || MarkdownBlocks.isRule(trimmed)
+        }
+        let first = string.lineRange(for: NSRange(location: range.lowerBound, length: 0))
+        // On a blank line, a heading or a list item: that's the whole block.
+        if isBlank(NSRange(location: range.lowerBound, length: range.count))
+            || (range.count == first.length && standsAlone(first)) { return range }
+        // Outwards a line at a time while the next line is more of the same paragraph.
+        while range.lowerBound > 0 {
+            let previous = string.lineRange(for: NSRange(location: range.lowerBound - 1, length: 0))
+            if isBlank(previous) || standsAlone(previous) { break }
+            range = previous.location..<range.upperBound
+        }
+        while range.upperBound < string.length {
+            let next = string.lineRange(for: NSRange(location: range.upperBound, length: 0))
+            if isBlank(next) || standsAlone(next) { break }
+            range = range.lowerBound..<(next.location + next.length)
+        }
+        return range
+    }
+
     /// The note's words without the Markdown: for a line under its title in
     /// a list, a widget or Spotlight. Lines are joined with spaces.
     public static func plainText(_ text: String) -> String {

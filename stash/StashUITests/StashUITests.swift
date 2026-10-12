@@ -143,6 +143,19 @@ final class StashUITests: XCTestCase {
         XCTAssertTrue((editor.value as? String)?.contains("| Column 1 | Column 2 | Column 3 |") == true)
     }
 
+    /// Only where Apple Intelligence is on; skipped elsewhere.
+    func testSummarizing() throws {
+        newNote(title: "Sourdough", text: "Sourdough bread is leavened by a starter of wild yeast and lactic acid bacteria. "
+                + "Feed the starter with flour and water daily. Bake at 230 degrees for 40 minutes.")
+        let summarize = app.buttons["Summarize"]
+        guard summarize.waitForExistence(timeout: 5) else {
+            throw XCTSkip("Apple Intelligence isn't available on this Mac.")
+        }
+        summarize.click()
+        let summary = app.staticTexts.matching(NSPredicate(format: "value CONTAINS[c] 'starter' OR value CONTAINS[c] 'sourdough'"))
+        XCTAssertTrue(summary.firstMatch.waitForExistence(timeout: 60))
+    }
+
     func testSheetsOpen() {
         app.typeKey("r", modifierFlags: [.command, .option])
         XCTAssertTrue(app.staticTexts["Smart Rules"].waitForExistence(timeout: 5)

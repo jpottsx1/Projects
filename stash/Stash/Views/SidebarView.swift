@@ -110,6 +110,7 @@ struct SidebarView: View {
         .toolbar {
             ToolbarItem {
                 Menu {
+                    Button("Link Graph") { library.isShowingGraph = true }
                     Button("Smart Rules…") { library.isEditingRules = true }
                     Divider()
                     Button("Export Everything…") { library.exportRequest = .everything }

@@ -384,6 +384,43 @@ final class Library {
         }
     }
 
+    // MARK: - Link graph
+
+    var isShowingGraph = false
+
+    /// Items that link or are linked to, and the links between them (as
+    /// pairs of indices): hand-made links and `[[links]]` in notes.
+    func linkGraph() -> (items: [Item], links: [(Int, Int)]) {
+        let all = ((try? context.fetch(FetchDescriptor<Item>())) ?? []).filter { !$0.isTrashed }
+        var byTitle: [String: Item] = [:]
+        for item in all where !item.title.isEmpty {
+            let key = WikiLinks.key(item.title)
+            if byTitle[key] == nil { byTitle[key] = item }
+        }
+        var pairs: Set<[UUID]> = []
+        for item in all {
+            for target in item.linksTo ?? [] where target != item && !target.isTrashed {
+                pairs.insert([item.uuid, target.uuid].sorted { $0.uuidString < $1.uuidString })
+            }
+            // A locked note's text isn't read.
+            guard item.kind == .note, !item.isLocked else { continue }
+            for title in WikiLinks.titles(in: item.body) {
+                if let target = byTitle[WikiLinks.key(title)], target != item {
+                    pairs.insert([item.uuid, target.uuid].sorted { $0.uuidString < $1.uuidString })
+                }
+            }
+        }
+        let linked = Set(pairs.flatMap { $0 })
+        let items = all.filter { linked.contains($0.uuid) }
+            .sorted { ($0.createdAt, $0.uuid.uuidString) < ($1.createdAt, $1.uuid.uuidString) }
+        let index = Dictionary(uniqueKeysWithValues: items.enumerated().map { ($1.uuid, $0) })
+        let links = pairs.compactMap { pair -> (Int, Int)? in
+            guard let a = index[pair[0]], let b = index[pair[1]] else { return nil }
+            return (a, b)
+        }.sorted { ($0.0, $0.1) < ($1.0, $1.1) }
+        return (items, links)
+    }
+
     // MARK: - Markup
 
     /// Goes up each time a document's file changes in place, so views

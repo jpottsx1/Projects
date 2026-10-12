@@ -94,6 +94,13 @@ struct StashApp: App {
         Settings {
             SettingsView()
         }
+
+        Window("Link Graph", id: "graph") {
+            LinkGraphView()
+                .environment(library)
+                .modelContainer(container)
+        }
+        .defaultSize(width: 800, height: 600)
         #else
         WindowGroup {
             ContentView()
@@ -166,6 +173,8 @@ struct StashCommands: Commands {
             Button("Put Back") { library.restore(chosen.filter(\.isTrashed)) }
                 .disabled(!chosen.contains(where: \.isTrashed))
             Divider()
+            Button("Link Graph") { library.isShowingGraph = true }
+                .keyboardShortcut("g", modifiers: [.command, .option])
             Button("Smart Rules…") { library.isEditingRules = true }
                 .keyboardShortcut("r", modifiers: [.command, .option])
         }

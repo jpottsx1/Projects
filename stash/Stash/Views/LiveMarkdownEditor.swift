@@ -30,6 +30,8 @@ struct LiveMarkdownEditor {
     /// Stores a pasted or dropped picture (its data and file extension)
     /// and returns the Markdown to put in the note.
     var addPicture: (Data, String) -> String? = { _, _ in nil }
+    /// Typora's focus mode: everything but the paragraph being written is dimmed.
+    var focusMode = false
 
     @MainActor func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -102,13 +104,39 @@ struct LiveMarkdownEditor {
                 guard range.location + range.length <= storage.length else { continue }
                 apply(span.style, to: range, in: storage, active: active)
             }
+            styledFocusMode = parent.focusMode
+            if parent.focusMode {
+                let paragraph = MarkdownStyling.paragraph(touching: selected, in: text)
+                focusedParagraph = paragraph
+                dimOutside(paragraph, in: storage)
+            } else {
+                focusedParagraph = nil
+            }
             storage.endEditing()
         }
 
         /// Whether the selection has moved onto other lines, which shows different marks.
         func needsRestyle(for selection: NSRange, in text: String) -> Bool {
             let selected = selection.location..<(selection.location + selection.length)
+            if parent.focusMode, MarkdownStyling.paragraph(touching: selected, in: text) != focusedParagraph { return true }
             return MarkdownStyling.lines(touching: selected, in: text) != activeLines
+        }
+
+        private var focusedParagraph: Range<Int>?
+        /// The focus mode the text was last styled for.
+        var styledFocusMode = false
+
+        /// Dims all but the paragraph being written, leaving hidden marks hidden.
+        private func dimOutside(_ paragraph: Range<Int>, in storage: NSTextStorage) {
+            let dim = PlatformColor.tertiaryLabelColor
+            for range in [0..<paragraph.lowerBound, paragraph.upperBound..<storage.length] where !range.isEmpty {
+                let nsRange = NSRange(location: range.lowerBound, length: range.count)
+                storage.enumerateAttribute(.foregroundColor, in: nsRange) { value, part, _ in
+                    if (value as? PlatformColor) != PlatformColor.clear {
+                        storage.addAttribute(.foregroundColor, value: dim, range: part)
+                    }
+                }
+            }
         }
 
         private func apply(_ style: MarkdownStyling.Style, to range: NSRange, in storage: NSTextStorage, active: Range<Int>) {
@@ -392,6 +420,9 @@ extension LiveMarkdownEditor: NSViewRepresentable {
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
         context.coordinator.parent = self
         guard let textView = scrollView.documentView as? PictureTextView, let storage = textView.textStorage else { return }
+        if context.coordinator.styledFocusMode != focusMode {
+            context.coordinator.restyle(storage, selection: textView.selectedRange())
+        }
         if context.coordinator.isOutsideChange(text, shown: textView.string) {
             let selection = textView.selectedRange()
             textView.string = text
@@ -435,6 +466,25 @@ extension LiveMarkdownEditor.Coordinator: NSTextViewDelegate {
 /// pictures.
 final class PictureTextView: UITextView {
     var pictureViews: [UIView] = []
+    /// The text system, kept here: a text view made from a container
+    /// doesn't keep its storage alive itself.
+    private var keptStorage: NSTextStorage?
+
+    /// A text view on TextKit 1, which says where each line is. Built by
+    /// hand rather than with `UITextView(usingTextLayoutManager: false)`:
+    /// that's a factory method, which skips this class's own setup, and the
+    /// first use of `pictureViews` then crashed.
+    static func make() -> PictureTextView {
+        let storage = NSTextStorage()
+        let layoutManager = NSLayoutManager()
+        storage.addLayoutManager(layoutManager)
+        let container = NSTextContainer(size: CGSize(width: 0, height: CGFloat.greatestFiniteMagnitude))
+        container.widthTracksTextView = true
+        layoutManager.addTextContainer(container)
+        let view = PictureTextView(frame: .zero, textContainer: container)
+        view.keptStorage = storage
+        return view
+    }
     var onPicture: ((Data, String) -> Void)?
     var onWidthChange: (() -> Void)?
     private var lastWidth: CGFloat = 0
@@ -488,8 +538,7 @@ final class PictureTextView: UITextView {
 
 extension LiveMarkdownEditor: UIViewRepresentable {
     func makeUIView(context: Context) -> PictureTextView {
-        // TextKit 1, which says where each line is, for placing pictures.
-        let textView = PictureTextView(usingTextLayoutManager: false)
+        let textView = PictureTextView.make()
         textView.delegate = context.coordinator
         textView.accessibilityIdentifier = "noteEditor"
         textView.backgroundColor = .clear
@@ -518,6 +567,9 @@ extension LiveMarkdownEditor: UIViewRepresentable {
 
     func updateUIView(_ textView: PictureTextView, context: Context) {
         context.coordinator.parent = self
+        if context.coordinator.styledFocusMode != focusMode {
+            context.coordinator.restyle(textView.textStorage, selection: textView.selectedRange)
+        }
         if context.coordinator.isOutsideChange(text, shown: textView.text) {
             let selection = textView.selectedRange
             textView.text = text

@@ -75,6 +75,8 @@ struct ItemInspector: View {
                 }
             }
 
+            AssistantSection(item: item)
+
             Section("Reminder") {
                 if let date = item.remindAt {
                     DatePicker("Remind Me", selection: Binding(get: { date }, set: { library.setReminder([item], at: $0) }),

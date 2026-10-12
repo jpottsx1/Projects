@@ -104,6 +104,10 @@ Capabilities* for each target, find App Groups, and tick
 | **Selecting several** | Shift-click or Cmd-click in the list or grid on a Mac, or tap *Edit* on an iPhone or iPad, to choose several items. Then tag, file, label, rate, star, remind, mark read or done, export or trash them all at once, from the right-click menu, the panel beside the list, the Item menu, or the *Actions* button. |
 | **Reminders** | *Remind Me* on an item (later today, tomorrow morning, this weekend, next week, or a time you choose) sends a notification then, and choosing it opens the item. *Reminders* in the sidebar lists them soonest first, counting those that have come round. Search with `is:due` or `is:reminder`. Reminders sync; each device notifies. |
 | **Quick capture** | On a Mac, Stash's menu bar icon jots a note or saves the web address on the clipboard from anywhere (hide it in *Stash › Settings*). On an iPhone or iPad, touch and hold Stash's icon for *New Note*, *Scan Document* and *Save Copied Link*. Notes and links saved this way go to the Inbox. |
+| **Pictures and tables** | Paste, drop or add (the picture button) a picture into a note: Write mode shows it in place, as do Preview, printing and PDFs. Pictures are stored with the note and sync. Markdown tables show as tables; *Insert Table* and *Tidy Table* (which lines the columns up) are in the formatting bar. |
+| **Outline and focus** | The outline button above a note lists its headings to jump to, and turns on focus mode, which dims everything but the paragraph you're writing. |
+| **Link graph** | *Link Graph* (the sidebar's ⋯ menu, or Option-Cmd-G on a Mac) shows how items link to each other; choosing one opens it. |
+| **Apple Intelligence** | On iOS and macOS 26 with Apple Intelligence on, the side panel can summarise an item, suggest tags and a category from the ones you use, and answer questions about it, all on the device. |
 | **Merging and tidying** | Select several notes and *Merge Notes* to make one, each under its own heading, keeping their tags and links (links to the old notes point at the new one). An item saved twice can take in its copies (*Merge Copies Into This One* in the side panel), keeping their tags, notes and highlights. The side panel also suggests tags from similar items, and lists notes that mention an item without linking to it, with a button to make the links. |
 | **Markup** | Draw, write, add shapes and sign on PDFs and pictures (*Mark Up* above them): Quick Look's markup on an iPhone or iPad, Preview on a Mac (changes are picked up when you come back to Stash). The file as first imported is kept on that device, and *Revert to Original* puts it back. |
 | **Printing and PDF** | *Print…* (Cmd-P on a Mac) or *Save as PDF…* from an item's menu: notes, articles and saved pages laid out with their title, tags, notes and highlights; PDFs and pictures as they are. |
@@ -185,6 +189,12 @@ StashCore/              no-interface logic, with tests
 
 To run the `StashCore` tests, open the `StashCore` folder in Xcode and press
 Cmd-U, or run `swift test` in it.
+
+The Mac UI tests (`StashUITests`) click through the app in a separate test
+library, so your own is never touched: Cmd-U with the Stash scheme and My
+Mac, or `xcodebuild test -scheme Stash -destination platform=macOS`. To try
+the app by hand in the same way, launch it with `-StashTestLibrary YES`
+(add `-StashResetTestLibrary YES` to start it empty).
 
 ## Not done yet
 

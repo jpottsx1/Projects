@@ -84,7 +84,7 @@ Capabilities* for each target, find App Groups, and tick
 
 | | |
 |---|---|
-| **Notes** | Written in Markdown, shown as a formatted preview, or both side by side on a Mac or iPad (*Split*). Formatting buttons above the note (on a Mac, with Cmd-B, Cmd-I and Cmd-K) or above the keyboard mark up the selected text: bold, italics, code, links, headings, lists, checkboxes, quotes. Ticking a `- [ ]` box in the preview ticks it in the note. |
+| **Notes** | Written in Markdown. *Write* shows it formatted as you type, as Typora does: headings large, bold bold, links tinted, with the Markdown marks tucked away except on the line you're editing. *Source* shows the plain Markdown, *Preview* the finished page, and *Split* (on a Mac or iPad) source and preview side by side. Formatting buttons above the note (on a Mac, with Cmd-B, Cmd-I and Cmd-K) or above the keyboard mark up the selected text: bold, italics, code, links, headings, lists, checkboxes, quotes. Ticking a `- [ ]` box in the preview ticks it in the note. |
 | **Note history** | Each time you finish editing a note (and every ten minutes during a long session) the version before is kept, up to fifty. *History* in the side panel shows them; any can be put back, and what was there is kept as a version too. |
 | **Documents** | Any file: PDFs and EPUB books open in place, other files show a Quick Look preview. Each is copied into the app, so moving or deleting the original doesn't lose it. Books remember where you stopped reading, on every device. |
 | **Scanning** | On an iPhone or iPad, *Scan Documents* in the + menu photographs paper pages into one PDF. On a Mac, *File › Import from iPhone or iPad* does the same with Continuity Camera. Scans have their words laid invisibly over the pictures, so they can be searched, selected and highlighted. PDFs scanned elsewhere without any text are read the same way for search. |
@@ -104,6 +104,10 @@ Capabilities* for each target, find App Groups, and tick
 | **Selecting several** | Shift-click or Cmd-click in the list or grid on a Mac, or tap *Edit* on an iPhone or iPad, to choose several items. Then tag, file, label, rate, star, remind, mark read or done, export or trash them all at once, from the right-click menu, the panel beside the list, the Item menu, or the *Actions* button. |
 | **Reminders** | *Remind Me* on an item (later today, tomorrow morning, this weekend, next week, or a time you choose) sends a notification then, and choosing it opens the item. *Reminders* in the sidebar lists them soonest first, counting those that have come round. Search with `is:due` or `is:reminder`. Reminders sync; each device notifies. |
 | **Quick capture** | On a Mac, Stash's menu bar icon jots a note or saves the web address on the clipboard from anywhere (hide it in *Stash › Settings*). On an iPhone or iPad, touch and hold Stash's icon for *New Note*, *Scan Document* and *Save Copied Link*. Notes and links saved this way go to the Inbox. |
+| **Merging and tidying** | Select several notes and *Merge Notes* to make one, each under its own heading, keeping their tags and links (links to the old notes point at the new one). An item saved twice can take in its copies (*Merge Copies Into This One* in the side panel), keeping their tags, notes and highlights. The side panel also suggests tags from similar items, and lists notes that mention an item without linking to it, with a button to make the links. |
+| **Markup** | Draw, write, add shapes and sign on PDFs and pictures (*Mark Up* above them): Quick Look's markup on an iPhone or iPad, Preview on a Mac (changes are picked up when you come back to Stash). The file as first imported is kept on that device, and *Revert to Original* puts it back. |
+| **Printing and PDF** | *Print…* (Cmd-P on a Mac) or *Save as PDF…* from an item's menu: notes, articles and saved pages laid out with their title, tags, notes and highlights; PDFs and pictures as they are. |
+| **Widgets** | Recent items, favorites or reminders on the Home Screen or the Mac desktop, with a New Note button. They need the same App Group as sharing (`SHARE_EXTENSION`), since widgets can't open the library and read what the app writes there. |
 | **Favorites** | Star an item from its toolbar, its menu, a swipe, or Cmd-D on a Mac. |
 | **Trash** | Deleted items go to the Trash, where they can be put back, for 30 days. |
 | **Sorting** | By date modified, date created, title or kind, either way round. Search results always come best match first. |
@@ -131,6 +135,7 @@ Stash/                  the app (SwiftUI + SwiftData), shared by Mac and iPhone
   Intents/              Shortcuts actions (App Intents)
   Views/
 ShareExtension/         "Save to Stash" in share menus (StashShare target)
+Widgets/                Home Screen and desktop widgets (StashWidgets target)
 StashCore/              no-interface logic, with tests
                         [[link]] parsing, search syntax, Markdown blocks,
                         tag names, web page text, ZIP files, EPUB books,

@@ -8,13 +8,19 @@ import StashCore
 /// the formatting buttons mark up the selected text.
 struct NoteEditor: View {
     enum Mode: String {
-        case edit, split, preview
+        /// Formatted as it's typed (`LiveMarkdownEditor`).
+        case write
+        /// The plain Markdown.
+        case edit
+        case split, preview
     }
 
     @Environment(Library.self) private var library
     @Environment(\.horizontalSizeClass) private var sizeClass
     @Bindable var item: Item
     @State private var mode: Mode
+    /// The mode notes open in, from the last one chosen.
+    @AppStorage("noteMode") private var preferredMode = Mode.write.rawValue
 
     /// Most recently edited first, which is the order suggestions keep.
     @Query(sort: \Item.modifiedAt, order: .reverse) private var allItems: [Item]
@@ -26,8 +32,9 @@ struct NoteEditor: View {
 
     init(item: Item) {
         self.item = item
-        // A new, empty note opens ready to type in; one with words in it opens to read.
-        _mode = State(initialValue: item.body.isEmpty ? .edit : .preview)
+        let preferred = Mode(rawValue: UserDefaults.standard.string(forKey: "noteMode") ?? "") ?? .write
+        // A new, empty note opens ready to type in, however notes were last read.
+        _mode = State(initialValue: item.body.isEmpty && preferred == .preview ? .write : preferred)
     }
 
     var body: some View {
@@ -35,6 +42,8 @@ struct NoteEditor: View {
             switch mode {
             case .preview:
                 preview
+            case .write:
+                liveEditor
             case .edit:
                 editor
             case .split:
@@ -46,13 +55,17 @@ struct NoteEditor: View {
             }
         }
         .onChange(of: item.body) { library.didEdit(item) }
-        .onChange(of: mode) { completion = nil }
+        .onChange(of: mode) {
+            completion = nil
+            preferredMode = mode.rawValue
+        }
         .onAppear { library.beginEditing(item) }
         .onDisappear { library.endEditing(item) }
         .toolbar {
             ToolbarItem {
                 Picker("Mode", selection: $mode) {
-                    Text("Edit").tag(Mode.edit)
+                    Text("Write").tag(Mode.write)
+                    Text("Source").tag(Mode.edit)
                     if sizeClass != .compact {
                         Text("Split").tag(Mode.split)
                     }
@@ -88,6 +101,40 @@ struct NoteEditor: View {
             library.open(wikiURL: url)
             return .handled
         })
+    }
+
+    #if os(iOS)
+    private static let formatSpacing: CGFloat = 16
+    #else
+    private static let formatSpacing: CGFloat = 4
+    #endif
+
+    /// Formatted as it's typed, with the formatting buttons above it.
+    private var liveEditor: some View {
+        VStack(spacing: 0) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: Self.formatSpacing) {
+                    FormatButtons(apply: format)
+                }
+                .buttonStyle(.borderless)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
+            }
+            Divider()
+            LiveMarkdownEditor(text: $item.body, select: $select, onCursorMoved: { cursor in
+                updateCompletion(at: cursor)
+            }, onSelectionChanged: { range in
+                selection = range
+            })
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                let choices = self.choices
+                if !choices.isEmpty {
+                    LinkSuggestions(choices: choices, highlighted: min(highlighted, choices.count - 1)) { choice in
+                        accept(choice)
+                    }
+                }
+            }
+        }
     }
 
     private var editor: some View {

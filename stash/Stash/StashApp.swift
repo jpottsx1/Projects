@@ -102,6 +102,13 @@ struct StashCommands: Commands {
             Button("Import Documents…") { library.isImporting = true }
                 .keyboardShortcut("i", modifiers: [.command, .shift])
         }
+        CommandGroup(replacing: .printItem) {
+            Button("Print…") { library.printRequest = library.selection }
+                .keyboardShortcut("p")
+                .disabled(library.selection == nil)
+            Button("Save as PDF…") { library.pdfRequest = library.selection }
+                .disabled(library.selection == nil)
+        }
         CommandGroup(replacing: .importExport) {
             Button(library.selectedItems.count > 1 ? "Export Items…" : "Export Item…") {
                 let chosen = library.selectedItems

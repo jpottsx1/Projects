@@ -35,6 +35,10 @@ struct ContentView: View {
         .sheet(isPresented: $library.isAddingLink) {
             AddLinkSheet()
         }
+        // A widget's item or New Note.
+        .onOpenURL { url in
+            if url.scheme == Library.linkScheme { library.open(stashURL: url) }
+        }
         // An item chosen in Spotlight.
         .onContinueUserActivity(CSSearchableItemActionType) { activity in
             guard let id = (activity.userInfo?[CSSearchableItemActivityIdentifier] as? String).flatMap(UUID.init(uuidString:)),
@@ -45,6 +49,7 @@ struct ContentView: View {
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
                 library.importSharedItems()
+                library.checkFilesEditedElsewhere()
             } else {
                 // Away from the app, locked items lock again.
                 library.relockAll()
@@ -58,6 +63,14 @@ struct ContentView: View {
         }
         #if os(iOS)
         .onAppear { QuickActions.performPending() }
+        #else
+        // A Mac's scene phase doesn't follow the app in and out of the front.
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            library.checkFilesEditedElsewhere()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in
+            library.relockAll()
+        }
         #endif
         #if os(iOS)
         .fullScreenCover(isPresented: $library.isScanning) {
@@ -101,6 +114,7 @@ struct ContentView: View {
         // Export and restore live on a view of their own: SwiftUI shows one
         // file panel per view, and the documents importer has this one.
         .background { BackupPanels() }
+        .background { PrintPanels() }
         .alert("Couldn’t Import", isPresented: Binding(
             get: { library.importError != nil },
             set: { if !$0 { library.importError = nil } })
@@ -143,7 +157,8 @@ struct AddMenu: View {
 /// Exporting (with progress, then the save panel) and restoring.
 private struct BackupPanels: View {
     @Environment(Library.self) private var library
-    @State private var exported: ExportedFile?
+    /// The finished export, waiting to be moved where it's wanted.
+    @State private var exported: URL?
     @State private var isWorking = false
     @State private var message: (title: String, text: String)?
 
@@ -155,10 +170,11 @@ private struct BackupPanels: View {
                 library.exportRequest = nil
                 Task { await export(request) }
             }
-            .fileExporter(isPresented: Binding(get: { exported != nil }, set: { if !$0 { exported = nil } }),
-                          item: exported, contentTypes: [.zip],
-                          defaultFilename: exported?.url.deletingPathExtension().lastPathComponent) { result in
-                if let url = exported?.url { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+            // Moved rather than exported: a backup can be large, and the
+            // file is already made. (Exporting a Transferable file crashed
+            // in SwiftUI on iOS 26.)
+            .fileMover(isPresented: Binding(get: { exported != nil }, set: { if !$0 { exported = nil } }),
+                       file: exported) { result in
                 if case .failure(let error) = result, (error as? CocoaError)?.code != .userCancelled {
                     message = ("Couldn’t Export", error.localizedDescription)
                 }
@@ -187,9 +203,9 @@ private struct BackupPanels: View {
         do {
             switch request {
             case .items(let items, let name):
-                exported = ExportedFile(url: try await library.export(items, everything: false, named: name))
+                exported = try await library.export(items, everything: false, named: name)
             case .everything:
-                exported = ExportedFile(url: try await library.exportEverything())
+                exported = try await library.exportEverything()
             }
         } catch {
             message = ("Couldn’t Export", error.localizedDescription)
@@ -216,4 +232,38 @@ private struct BackupPanels: View {
 struct ItemGroup: Identifiable {
     let items: [Item]
     var id: String { items.map(\.uuid.uuidString).joined() }
+}
+
+/// Printing, and saving as PDF with the save panel.
+private struct PrintPanels: View {
+    @Environment(Library.self) private var library
+    @State private var printer = ItemPrinter()
+    @State private var pdf: URL?
+    @State private var isWorking = false
+
+    var body: some View {
+        Color.clear
+            .onChange(of: library.printRequest) {
+                guard let item = library.printRequest else { return }
+                library.printRequest = nil
+                Task { await printer.print(item, in: library) }
+            }
+            .onChange(of: library.pdfRequest) {
+                guard let item = library.pdfRequest else { return }
+                library.pdfRequest = nil
+                Task {
+                    isWorking = true
+                    pdf = await printer.pdf(of: item, in: library)
+                    isWorking = false
+                }
+            }
+            .fileMover(isPresented: Binding(get: { pdf != nil }, set: { if !$0 { pdf = nil } }), file: pdf) { _ in }
+            .overlay {
+                if isWorking {
+                    ProgressView()
+                        .padding()
+                        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
+                }
+            }
+    }
 }

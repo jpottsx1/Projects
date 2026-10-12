@@ -10,8 +10,11 @@ SwiftData, one multiplatform target. Read README.md first.
 - `Stash.xcodeproj` uses **Xcode 16 file-system-synchronized groups**:
   any file put under `Stash/` is part of the app, so adding a Swift file
   doesn't require editing the project file.
-- Two targets: **Stash** (the app) and **StashShare** (the share
-  extension, folder `ShareExtension/`, embedded in the app).
+- Three targets: **Stash** (the app), **StashShare** (the share
+  extension, folder `ShareExtension/`) and **StashWidgets** (the widgets,
+  folder `Widgets/`), both embedded in the app. The widgets read a snapshot
+  the app writes into the App Group (`WidgetSnapshot`); like the share
+  extension they never open the SwiftData store.
 - `StashCore/` is a local Swift package with no UI and no Apple-only
   frameworks. Logic that can live there should, because it's the only part
   that can be tested without building the app. `swift test --package-path StashCore`.

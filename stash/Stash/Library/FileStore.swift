@@ -59,6 +59,24 @@ struct FileStore {
         return hasher.finalize().map { String(format: "%02x", $0) }.joined()
     }
 
+    /// Where a document's file is kept as it was first imported, before
+    /// any markup: beside it, in an "Original" folder.
+    func originalPath(for storedPath: String) -> String {
+        let parts = storedPath.split(separator: "/", maxSplits: 1).map(String.init)
+        guard parts.count == 2 else { return storedPath + ".original" }
+        return parts[0] + "/Original/" + parts[1]
+    }
+
+    /// Copies a file within the store, replacing what's there.
+    func copy(_ from: String, to: String) throws {
+        let destination = url(for: to)
+        try FileManager.default.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
+        if FileManager.default.fileExists(atPath: destination.path) {
+            try FileManager.default.removeItem(at: destination)
+        }
+        try FileManager.default.copyItem(at: url(for: from), to: destination)
+    }
+
     /// Removes the item's whole folder.
     func remove(_ storedPath: String) {
         guard let folder = storedPath.split(separator: "/").first else { return }

@@ -1,4 +1,5 @@
 import CoreData
+import LocalAuthentication
 import CoreGraphics
 import Foundation
 import Observation
@@ -123,9 +124,10 @@ final class Library {
     var sortAscending: Bool = UserDefaults.standard.bool(forKey: "sortAscending") {
         didSet { UserDefaults.standard.set(sortAscending, forKey: "sortAscending") }
     }
-    /// Rows or cards, where there's room for cards (not on an iPhone).
-    var showsGrid: Bool = UserDefaults.standard.bool(forKey: "showsGrid") {
-        didSet { UserDefaults.standard.set(showsGrid, forKey: "showsGrid") }
+    /// Rows, cards or columns; cards and columns where there's room (not on an iPhone).
+    var layout: ItemLayout = ItemLayout(rawValue: UserDefaults.standard.string(forKey: "layout") ?? "")
+        ?? (UserDefaults.standard.bool(forKey: "showsGrid") ? .grid : .list) {
+        didSet { UserDefaults.standard.set(layout.rawValue, forKey: "layout") }
     }
     /// Goes up whenever something that links or backlinks depend on changes,
     /// so the views showing them redraw.
@@ -321,6 +323,136 @@ final class Library {
     func didEdit(_ item: Item) {
         item.modifiedAt = .now
         reindex(item)
+        // A long editing session keeps a version every so often, not just at the end.
+        if let baseline = editBaselines[item.uuid], Date.now.timeIntervalSince(baseline.since) > Self.versionInterval {
+            keepVersion(of: item)
+            beginEditing(item)
+        }
+    }
+
+    // MARK: - Locking
+
+    /// Locked items unlocked since the app last went to the background.
+    private(set) var unlocked: Set<UUID> = []
+    var lockError: String?
+
+    /// Whether the item's contents are to be kept out of sight.
+    func isHidden(_ item: Item) -> Bool {
+        item.isLocked && !unlocked.contains(item.uuid)
+    }
+
+    /// Whether this device can lock things: it needs a passcode or password.
+    static var canLock: Bool {
+        LAContext().canEvaluatePolicy(.deviceOwnerAuthentication, error: nil)
+    }
+
+    private func authenticate(_ reason: String) async -> Bool {
+        let context = LAContext()
+        do {
+            return try await context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: reason)
+        } catch {
+            if (error as? LAError)?.code == .passcodeNotSet {
+                lockError = "Set a passcode on this device to use locked items."
+            }
+            return false
+        }
+    }
+
+    func unlock(_ item: Item) async {
+        guard item.isLocked, !unlocked.contains(item.uuid) else { return }
+        if await authenticate("Unlock “\(item.displayTitle)”") {
+            unlocked.insert(item.uuid)
+        }
+    }
+
+    func lock(_ items: [Item]) {
+        guard Self.canLock else {
+            lockError = "Set a passcode on this device to lock items."
+            return
+        }
+        for item in items {
+            item.isLocked = true
+            unlocked.remove(item.uuid)
+            reindex(item)
+        }
+        save()
+    }
+
+    /// Asks to unlock first: taking a lock off is as good as unlocking.
+    func removeLock(from items: [Item]) async {
+        let locked = items.filter(\.isLocked)
+        guard !locked.isEmpty else { return }
+        let needsAsking = locked.contains { !unlocked.contains($0.uuid) }
+        if needsAsking {
+            let reason = locked.count == 1 ? "Remove the lock from “\(locked[0].displayTitle)”" : "Remove the lock from \(locked.count) items"
+            guard await authenticate(reason) else { return }
+        }
+        for item in locked {
+            item.isLocked = false
+            unlocked.remove(item.uuid)
+            reindex(item)
+        }
+        save()
+    }
+
+    /// Locks everything again: when the app goes to the background.
+    func relockAll() {
+        if !unlocked.isEmpty { unlocked = [] }
+    }
+
+    // MARK: - Note history
+
+    static let versionInterval: TimeInterval = 10 * 60
+    static let versionsKept = 50
+
+    /// How each note being edited read when editing began.
+    @ObservationIgnored private var editBaselines: [UUID: (title: String, body: String, modifiedAt: Date, since: Date)] = [:]
+    /// Which note's history is being looked at.
+    var viewingHistoryOf: Item?
+
+    func beginEditing(_ item: Item) {
+        guard item.kind == .note else { return }
+        editBaselines[item.uuid] = (item.title, item.body, item.modifiedAt, .now)
+    }
+
+    func endEditing(_ item: Item) {
+        guard item.kind == .note, isAlive(item) else { return }
+        keepVersion(of: item)
+        editBaselines[item.uuid] = nil
+    }
+
+    /// Keeps the note as it read when editing began, if it's changed since.
+    private func keepVersion(of item: Item) {
+        guard let baseline = editBaselines[item.uuid],
+              baseline.body != item.body || baseline.title != item.title,
+              // A note that was empty has nothing worth going back to.
+              !baseline.body.isEmpty else { return }
+        addVersion(to: item, title: baseline.title, body: baseline.body, savedAt: baseline.modifiedAt)
+    }
+
+    private func addVersion(to item: Item, title: String, body: String, savedAt: Date) {
+        let version = NoteVersion(title: title, body: body, savedAt: savedAt)
+        context.insert(version)
+        version.item = item
+        let versions = (item.versions ?? []).sorted { $0.savedAt > $1.savedAt }
+        for old in versions.dropFirst(Self.versionsKept) { context.delete(old) }
+        save()
+    }
+
+    /// Puts an earlier version's text back, keeping what's there now as a
+    /// version of its own, so restoring can be undone the same way.
+    func restore(_ version: NoteVersion) {
+        guard let item = version.item else { return }
+        addVersion(to: item, title: item.title, body: item.body, savedAt: item.modifiedAt)
+        item.body = version.body
+        didEdit(item)
+        beginEditing(item)
+        save()
+    }
+
+    func delete(_ version: NoteVersion) {
+        context.delete(version)
+        save()
     }
 
     /// Points `[[links]]` to an item's old title at its new one.
@@ -1015,7 +1147,7 @@ final class Library {
         guard !ids.isEmpty else { return [] }
         let found = (try? context.fetch(FetchDescriptor<Item>(predicate: #Predicate { ids.contains($0.uuid) }))) ?? []
         let byID = Dictionary(found.map { ($0.uuid, $0) }, uniquingKeysWith: { first, _ in first })
-        return ids.compactMap { byID[$0] }.filter { !$0.isTrashed }.prefix(limit).map { $0 }
+        return ids.compactMap { byID[$0] }.filter { !$0.isTrashed && !$0.isLocked }.prefix(limit).map { $0 }
     }
 
     // MARK: - Shortcuts and Spotlight
@@ -1146,6 +1278,11 @@ final class Library {
     }
 
     private func entry(for item: Item) -> SearchIndex.Entry {
+        // A locked item is found by its title and tags only.
+        if item.isLocked {
+            return SearchIndex.Entry(id: item.uuid, title: item.title, body: "",
+                                     tags: item.sortedTags.map(\.name).joined(separator: " "), extra: "")
+        }
         let fileName = item.storedFilePath.map { URL(fileURLWithPath: $0).lastPathComponent } ?? ""
         let highlights = item.sortedHighlights
         // Highlights and their notes are your own words about it, so they

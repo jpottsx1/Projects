@@ -19,6 +19,14 @@ struct ItemDetailView: View {
     @State private var titleBeforeEditing = ""
 
     var body: some View {
+        if library.isHidden(item) {
+            LockedItemView(item: item)
+        } else {
+            content
+        }
+    }
+
+    private var content: some View {
         VStack(alignment: .leading, spacing: 0) {
             if item.isTrashed {
                 TrashBanner(item: item)
@@ -80,6 +88,26 @@ struct ItemDetailView: View {
                     Label("Category & Links", systemImage: "sidebar.right")
                 }
             }
+        }
+        #if os(iOS)
+        .navigationBarTitleDisplayMode(.inline)
+        #endif
+    }
+}
+
+/// In place of a locked item until it's unlocked.
+struct LockedItemView: View {
+    @Environment(Library.self) private var library
+    let item: Item
+
+    var body: some View {
+        ContentUnavailableView {
+            Label(item.displayTitle, systemImage: "lock.fill")
+        } description: {
+            Text("This item is locked.")
+        } actions: {
+            Button("Unlock") { Task { await library.unlock(item) } }
+                .buttonStyle(.borderedProminent)
         }
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)

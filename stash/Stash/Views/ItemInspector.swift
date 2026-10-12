@@ -144,6 +144,17 @@ struct ItemInspector: View {
                 }
             }
 
+            if item.kind == .note {
+                Section("History") {
+                    let count = item.versions?.count ?? 0
+                    Button(count == 0 ? "No Earlier Versions Yet" : count == 1 ? "1 Earlier Version…" : "\(count) Earlier Versions…") {
+                        library.viewingHistoryOf = item
+                    }
+                    .buttonStyle(.borderless)
+                    .disabled(count == 0)
+                }
+            }
+
             Section("Info") {
                 LabeledContent("Kind", value: item.kind.rawValue.capitalized)
                 LabeledContent("Created", value: item.createdAt.formatted(date: .abbreviated, time: .shortened))

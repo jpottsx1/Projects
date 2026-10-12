@@ -72,6 +72,11 @@ struct BulkActions: View {
         Button("Add Tags…") { library.taggingItems = items }
         LabelAndRatingMenus(items: items)
         ReminderMenu(items: items)
+        if items.allSatisfy(\.isLocked) {
+            Button("Remove Lock…") { Task { await library.removeLock(from: items) } }
+        } else {
+            Button("Lock") { library.lock(items) }
+        }
         if items.contains(where: \.inInbox) {
             Button("Done (Take Out of Inbox)") { library.markFiled(items) }
         }

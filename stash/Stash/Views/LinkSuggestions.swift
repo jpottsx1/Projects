@@ -1,27 +1,35 @@
 import SwiftUI
 import StashCore
 
-/// A text editor that says where its cursor is, so `[[` can be completed.
+/// A text editor that says where its cursor and selection are, so `[[`
+/// can be completed and the formatting buttons know what to change.
 ///
 /// From iOS 18 (and on every macOS Stash runs on) the system editor
-/// reports its selection, and can be told where to put the cursor after a
-/// suggestion is inserted. On iOS 17.5 it says neither, so the cursor is
-/// taken to be wherever the text last changed -- right while typing; after
-/// a suggestion is inserted, the cursor may land elsewhere.
+/// reports its selection, and can be told what to select after a change.
+/// On iOS 17.5 it says neither, so the cursor is taken to be wherever the
+/// text last changed -- right while typing; after a suggestion or some
+/// formatting is put in, the cursor may land elsewhere.
 struct NoteTextEditor: View {
     @Binding var text: String
-    /// Set to move the cursor (honoured from iOS 18, and on the Mac); cleared once done.
-    @Binding var moveCursorTo: String.Index?
+    /// Set to move the cursor or select some text (honoured from iOS 18,
+    /// and on the Mac); cleared once done.
+    @Binding var select: Range<String.Index>?
     /// Nil when a stretch of text is selected rather than a cursor placed.
     var onCursorMoved: (String.Index?) -> Void
+    /// The selection as character offsets into the text; empty for a cursor.
+    var onSelectionChanged: (Range<Int>) -> Void = { _ in }
 
     var body: some View {
         if #available(iOS 18, *) {
-            SelectionReportingEditor(text: $text, moveCursorTo: $moveCursorTo, onCursorMoved: onCursorMoved)
+            SelectionReportingEditor(text: $text, select: $select, onCursorMoved: onCursorMoved,
+                                     onSelectionChanged: onSelectionChanged)
         } else {
             TextEditor(text: $text)
                 .onChange(of: text) { old, new in
-                    onCursorMoved(WikiLinkCompletion.editPoint(from: old, to: new))
+                    let point = WikiLinkCompletion.editPoint(from: old, to: new)
+                    onCursorMoved(point)
+                    let offset = new.distance(from: new.startIndex, to: point)
+                    onSelectionChanged(offset..<offset)
                 }
         }
     }
@@ -30,24 +38,28 @@ struct NoteTextEditor: View {
 @available(iOS 18, *)
 private struct SelectionReportingEditor: View {
     @Binding var text: String
-    @Binding var moveCursorTo: String.Index?
+    @Binding var select: Range<String.Index>?
     var onCursorMoved: (String.Index?) -> Void
+    var onSelectionChanged: (Range<Int>) -> Void
     @State private var selection: TextSelection?
 
     var body: some View {
         TextEditor(text: $text, selection: $selection)
             .onChange(of: selection) { _, selection in
-                // Only a plain cursor counts; a selected stretch of text isn't typing.
-                if case .selection(let range)? = selection?.indices, range.isEmpty {
-                    onCursorMoved(range.lowerBound)
-                } else {
+                guard case .selection(let range)? = selection?.indices,
+                      range.upperBound <= text.endIndex else {
                     onCursorMoved(nil)
+                    return
                 }
+                // Only a plain cursor counts; a selected stretch of text isn't typing.
+                onCursorMoved(range.isEmpty ? range.lowerBound : nil)
+                let start = text.distance(from: text.startIndex, to: range.lowerBound)
+                onSelectionChanged(start..<(start + text.distance(from: range.lowerBound, to: range.upperBound)))
             }
-            .onChange(of: moveCursorTo) { _, target in
+            .onChange(of: select) { _, target in
                 guard let target else { return }
-                selection = TextSelection(insertionPoint: target)
-                moveCursorTo = nil
+                selection = target.isEmpty ? TextSelection(insertionPoint: target.lowerBound) : TextSelection(range: target)
+                select = nil
             }
     }
 }

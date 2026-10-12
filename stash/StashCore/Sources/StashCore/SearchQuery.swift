@@ -28,7 +28,7 @@ public struct SearchQuery: Equatable {
     }
 
     public enum Kind: String, Equatable, CaseIterable {
-        case note, link, document, pdf, image, video, audio
+        case note, link, document, pdf, image, video, audio, email
 
         init?(typed: String) {
             switch typed.lowercased() {
@@ -39,6 +39,7 @@ public struct SearchQuery: Equatable {
             case "image", "images", "photo", "photos", "picture", "pictures": self = .image
             case "video", "videos", "movie", "movies": self = .video
             case "audio", "sound", "sounds", "music": self = .audio
+            case "email", "emails", "mail", "message", "messages": self = .email
             default: return nil
             }
         }

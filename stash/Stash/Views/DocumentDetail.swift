@@ -21,6 +21,10 @@ struct DocumentDetail: View {
                         .id(library.fileRevision(of: item))
                 } else if let fileURL, item.isEPUB {
                     EPUBReader(item: item, url: fileURL)
+                } else if let fileURL, item.contentType?.conforms(to: .audiovisualContent) == true {
+                    MediaPlayerView(item: item, url: fileURL)
+                } else if let fileURL, item.contentType?.conforms(to: .emailMessage) == true {
+                    EmailView(item: item, url: fileURL)
                 } else if let fileURL {
                     FileThumbnail(url: fileURL)
                         .padding()

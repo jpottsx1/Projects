@@ -57,6 +57,7 @@ final class Library {
     var selection: Item? {
         didSet {
             if selection != nil, !multiSelection.isEmpty { multiSelection = [] }
+            remember(from: oldValue)
             // Looking at something reads it.
             if let selection, selection.isUnread, selection != oldValue {
                 selection.isUnread = false
@@ -168,6 +169,15 @@ final class Library {
     @ObservationIgnored var folderWatchers: [UUID: FolderWatcher] = [:]
     /// Folders being read right now, for the views to show it.
     var scanningFolders: Set<UUID> = []
+    /// Recordings being turned into text, and why any couldn't be.
+    var transcribing: Set<UUID> = []
+    var transcriptionErrors: [UUID: String] = [:]
+    var isRecording = false
+    var isImportingMailbox = false
+    /// Where the last back or forward went, so it isn't remembered as a visit.
+    @ObservationIgnored var isMovingThroughHistory = false
+    var backStack: [UUID] = []
+    var forwardStack: [UUID] = []
     /// Folders that changed again while being read.
     @ObservationIgnored var pendingRescans: Set<UUID> = []
 
@@ -824,6 +834,16 @@ final class Library {
 
     func extractText(from item: Item) async {
         guard let url = localFile(for: item) else { return }
+        if item.contentType?.conforms(to: .emailMessage) == true {
+            await readEmail(item, at: url)
+            finishedReading(item)
+            return
+        }
+        if item.contentType?.conforms(to: .audiovisualContent) == true {
+            if await shouldTranscribe(item, at: url) { await transcribe(item) }
+            finishedReading(item)
+            return
+        }
         let text = await TextExtractor.text(fromFileAt: url, type: item.contentType)
         guard isAlive(item) else { return }
         if !text.isEmpty {

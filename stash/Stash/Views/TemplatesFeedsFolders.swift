@@ -313,6 +313,7 @@ struct ImportPanels: View {
     @State private var isWorking = false
 
     static let enex = UTType(filenameExtension: "enex", conformingTo: .xml) ?? .xml
+    static let mbox = UTType(filenameExtension: "mbox", conformingTo: .data) ?? .data
 
     var body: some View {
         @Bindable var library = library
@@ -327,6 +328,11 @@ struct ImportPanels: View {
                 .fileImporter(isPresented: $library.isImportingNotesFolder, allowedContentTypes: [.folder]) { result in
                     guard case .success(let url) = result else { return }
                     run { await library.importNotes(from: url) }
+                }
+            Color.clear
+                .fileImporter(isPresented: $library.isImportingMailbox, allowedContentTypes: [Self.mbox, .folder, .data]) { result in
+                    guard case .success(let url) = result else { return }
+                    run { await library.importMailbox(url) }
                 }
             Color.clear
                 .fileImporter(isPresented: $library.isChoosingFolderToIndex, allowedContentTypes: [.folder]) { result in

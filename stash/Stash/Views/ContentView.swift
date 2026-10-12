@@ -21,6 +21,7 @@ struct ContentView: View {
             ItemListView()
                 .navigationSplitViewColumnWidth(min: 260, ideal: 320)
         } detail: {
+            Group {
             if library.multiSelection.count > 1 {
                 BulkEditView(items: library.selectedItems)
             } else if let item = library.selection {
@@ -30,6 +31,18 @@ struct ContentView: View {
                 ContentUnavailableView("Nothing Selected", systemImage: "tray",
                                        description: Text("Choose an item, or add a note, link or document."))
             }
+            }
+            #if os(macOS)
+            .toolbar {
+                ToolbarItemGroup(placement: .navigation) {
+                    Button { library.goBack() } label: { Label("Back", systemImage: "chevron.backward") }
+                        .disabled(!library.canGoBack)
+                        .help("Back to the item before")
+                    Button { library.goForward() } label: { Label("Forward", systemImage: "chevron.forward") }
+                        .disabled(!library.canGoForward)
+                }
+            }
+            #endif
         }
         .fileImporter(isPresented: $library.isImporting, allowedContentTypes: [.item],
                       allowsMultipleSelection: true) { result in
@@ -40,6 +53,9 @@ struct ContentView: View {
         }
         .sheet(isPresented: $library.isAddingFeed) {
             AddFeedSheet()
+        }
+        .sheet(isPresented: $library.isRecording) {
+            RecordingSheet()
         }
         .sheet(isPresented: $library.isManagingIndexedFolders) {
             IndexedFoldersView()
@@ -165,6 +181,9 @@ struct AddMenu: View {
             Button { library.openToday() } label: {
                 Label("Today’s Note", systemImage: "calendar")
             }
+            Button { library.isRecording = true } label: {
+                Label("New Voice Note", systemImage: "mic")
+            }
             Menu {
                 TemplateMenuItems(library: library, templates: library.templates())
             } label: {
@@ -244,6 +263,8 @@ private struct BackupPanels: View {
                 exported = try await library.export(items, everything: false, named: name)
             case .everything:
                 exported = try await library.exportEverything()
+            case .highlights:
+                exported = try library.exportHighlights()
             }
         } catch {
             message = ("Couldn’t Export", error.localizedDescription)

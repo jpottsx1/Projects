@@ -78,6 +78,7 @@ struct HighlightMenu: View {
             action(.yellow, false)
         }
         .help("Highlight the selected text")
+        .accessibilityIdentifier("highlightButton")
     }
 }
 

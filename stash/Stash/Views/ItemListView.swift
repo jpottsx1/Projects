@@ -12,6 +12,9 @@ struct ItemListView: View {
     @State private var confirmingEmptyTrash = false
     @State private var confirmingDelete: [Item] = []
     @Environment(\.horizontalSizeClass) private var sizeClass
+    #if os(macOS)
+    @Environment(\.openWindow) private var openWindow
+    #endif
     #if os(iOS)
     /// Kept here rather than read from the environment: this view sits
     /// above the list the Edit button changes, so it wouldn't see the change.
@@ -94,6 +97,13 @@ struct ItemListView: View {
             return !urls.isEmpty
         }
         #if os(macOS)
+        // Messages dragged from Mail arrive as promised .eml files.
+        .onDrop(of: [.emailMessage], isTargeted: nil) { providers in
+            Task { await library.importEmailProviders(providers) }
+            return true
+        }
+        #endif
+        #if os(macOS)
         .onDeleteCommand {
             let chosen = library.selectedItems
             guard !chosen.isEmpty else { return }
@@ -163,6 +173,11 @@ struct ItemListView: View {
             } else if !chosen.isEmpty {
                 bulkMenu(for: Array(chosen))
             }
+        } primaryAction: { chosen in
+            // Double-click: a window of its own, as in Keep It.
+            #if os(macOS)
+            for item in chosen { openWindow.item(item, asTab: false) }
+            #endif
         }
     }
 
@@ -330,6 +345,14 @@ struct ItemListView: View {
                 Button("Remove Lock…") { Task { await library.removeLock(from: [item]) } }
             } else {
                 Button("Lock") { library.lock([item]) }
+            }
+            #if os(macOS)
+            Button("Open in New Window") { openWindow.item(item, asTab: false) }
+            Button("Open in New Tab") { openWindow.item(item, asTab: true) }
+            Divider()
+            #endif
+            if !(item.highlights ?? []).isEmpty {
+                Button("Make Note from Highlights") { library.makeHighlightsNote(for: item) }
             }
             if item.isTemplate {
                 Button("New Note from Template") { library.newNote(from: item) }

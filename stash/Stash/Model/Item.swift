@@ -120,6 +120,11 @@ final class Item {
     /// see when it changes.
     var indexedFileSize: Int = 0
     var indexedFileDate: Date?
+    /// What's said in an audio or video document, phrase by phrase with
+    /// times (a `Transcript` as JSON); its words are in `extractedText` too.
+    @Attribute(.externalStorage) var transcriptData: Data?
+    /// An email's Message-ID, so the same message isn't imported twice.
+    var messageID: String = ""
     @Relationship(inverse: \Tag.items) var tags: [Tag]? = []
     /// Items this one has been linked to by hand. `[[Title]]` links written
     /// in a note are read from its text instead, so they can't go stale.

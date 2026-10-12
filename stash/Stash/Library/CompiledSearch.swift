@@ -102,6 +102,7 @@ extension SearchQuery.Kind {
         case .image: return conforms(item, to: .image)
         case .video: return conforms(item, to: .movie)
         case .audio: return conforms(item, to: .audio)
+        case .email: return conforms(item, to: .emailMessage)
         }
     }
 

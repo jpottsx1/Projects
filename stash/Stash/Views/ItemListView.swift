@@ -13,7 +13,9 @@ struct ItemListView: View {
     @State private var confirmingDelete: [Item] = []
     @Environment(\.horizontalSizeClass) private var sizeClass
     #if os(iOS)
-    @Environment(\.editMode) private var editMode
+    /// Kept here rather than read from the environment: this view sits
+    /// above the list the Edit button changes, so it wouldn't see the change.
+    @State private var editMode: EditMode = .inactive
     #endif
     /// Where a Shift-click range starts in the grid.
     @State private var anchor: Item?
@@ -22,10 +24,10 @@ struct ItemListView: View {
         @Bindable var library = library
         let items = library.visibleItems(from: allItems)
         Group {
-            if library.showsGrid && sizeClass != .compact {
-                grid(items)
-            } else {
-                list(items)
+            switch sizeClass == .compact ? .list : library.layout {
+            case .grid: grid(items)
+            case .table: table(items)
+            case .list: list(items)
             }
         }
         .overlay {
@@ -36,17 +38,20 @@ struct ItemListView: View {
         .toolbar {
             ToolbarItem(placement: .primaryAction) { AddMenu() }
             #if os(iOS)
-            ToolbarItem(placement: .topBarLeading) { EditButton() }
-            if editMode?.wrappedValue.isEditing == true {
-                ToolbarItemGroup(placement: .bottomBar) {
+            ToolbarItem(placement: .topBarLeading) {
+                Button(editMode.isEditing ? "Done" : "Edit") {
+                    withAnimation { editMode = editMode.isEditing ? .inactive : .active }
+                }
+            }
+            // In the top bar, not a bottom bar: from iOS 26 the search
+            // field takes the bottom of the screen.
+            if editMode.isEditing {
+                ToolbarItem(placement: .topBarLeading) {
                     let chosen = library.selectedItems
-                    Text(chosen.isEmpty ? "Select Items" : "\(chosen.count) Selected")
-                        .font(.callout)
-                    Spacer()
                     Menu {
                         bulkMenu(for: chosen)
                     } label: {
-                        Label("Actions", systemImage: "ellipsis.circle")
+                        Text(chosen.isEmpty ? "Actions" : "Actions (\(chosen.count))")
                     }
                     .disabled(chosen.isEmpty)
                 }
@@ -57,12 +62,13 @@ struct ItemListView: View {
             }
             if sizeClass != .compact {
                 ToolbarItem {
-                    Picker("View", selection: $library.showsGrid) {
-                        Label("List", systemImage: "list.bullet").tag(false)
-                        Label("Grid", systemImage: "square.grid.2x2").tag(true)
+                    Picker("View", selection: $library.layout) {
+                        Label("List", systemImage: "list.bullet").tag(ItemLayout.list)
+                        Label("Grid", systemImage: "square.grid.2x2").tag(ItemLayout.grid)
+                        Label("Columns", systemImage: "tablecells").tag(ItemLayout.table)
                     }
                     .pickerStyle(.segmented)
-                    .help("Show as a list or as a grid")
+                    .help("Show as a list, a grid, or columns")
                 }
             }
             if !library.searchText.isEmpty {
@@ -116,6 +122,16 @@ struct ItemListView: View {
 
     private func list(_ items: [Item]) -> some View {
         List(selection: Binding(get: { library.listSelection }, set: { library.select($0) })) {
+            #if os(iOS)
+            // While searching an iPhone hides the toolbar, and its button with it.
+            if !library.searchText.isEmpty, sizeClass == .compact {
+                Button {
+                    savingSearch = library.searchText
+                } label: {
+                    Label("Save as Smart Filter", systemImage: "line.3.horizontal.decrease.circle.badge.plus")
+                }
+            }
+            #endif
             ForEach(items) { item in
                 ItemRow(item: item)
                     .tag(item)
@@ -138,6 +154,9 @@ struct ItemListView: View {
                     }
             }
         }
+        #if os(iOS)
+        .environment(\.editMode, $editMode)
+        #endif
         .contextMenu(forSelectionType: Item.self) { chosen in
             if chosen.count == 1, let item = chosen.first {
                 menu(for: item)
@@ -170,7 +189,7 @@ struct ItemListView: View {
             return
         }
         #else
-        let adding = editMode?.wrappedValue.isEditing == true
+        let adding = editMode.isEditing
         #endif
         if adding {
             if chosen.contains(item) { chosen.remove(item) } else { chosen.insert(item) }
@@ -179,6 +198,94 @@ struct ItemListView: View {
             library.select([item])
         }
         anchor = item
+    }
+
+    /// Columns, as in the Finder or DEVONthink: click a heading to sort by it.
+    private func table(_ items: [Item]) -> some View {
+        let byID = Dictionary(items.map { ($0.persistentModelID, $0) }, uniquingKeysWith: { first, _ in first })
+        return Table(items, selection: Binding(
+            get: { Set(library.listSelection.map(\.persistentModelID)) },
+            set: { ids in library.select(Set(ids.compactMap { byID[$0] })) }
+        ), sortOrder: tableSort) {
+            TableColumn("Title", value: \.displayTitle) { item in
+                HStack(spacing: 6) {
+                    Image(systemName: item.isLocked ? "lock.fill" : item.systemImage)
+                        .foregroundStyle(.tint)
+                    Text(item.displayTitle)
+                    if item.isUnread {
+                        Circle().fill(.blue).frame(width: 7, height: 7).accessibilityLabel("Unread")
+                    }
+                    if item.isFavorite {
+                        Image(systemName: "star.fill").foregroundStyle(.yellow).font(.caption)
+                    }
+                }
+            }
+            .width(min: 180, ideal: 280)
+            TableColumn("Kind", value: \.kindDescription) { item in
+                Text(item.kindDescription).foregroundStyle(.secondary)
+            }
+            .width(min: 60, ideal: 100)
+            TableColumn("Category") { item in
+                Text(item.category?.path ?? "").foregroundStyle(.secondary)
+            }
+            .width(min: 60, ideal: 120)
+            TableColumn("Tags") { item in
+                Text(item.sortedTags.map { "#" + $0.name }.joined(separator: " ")).foregroundStyle(.secondary)
+            }
+            .width(min: 60, ideal: 120)
+            TableColumn("Label", value: \.labelRaw) { item in
+                if item.label != .none {
+                    Circle().fill(item.label.color).frame(width: 10, height: 10)
+                        .accessibilityLabel(item.label.name)
+                }
+            }
+            .width(min: 40, ideal: 50)
+            TableColumn("Rating", value: \.rating) { item in
+                Text(String(repeating: "★", count: item.rating)).foregroundStyle(.orange)
+            }
+            .width(min: 50, ideal: 70)
+            TableColumn("Modified", value: \.modifiedAt) { item in
+                Text(item.modifiedAt, format: .dateTime.day().month().year().hour().minute()).foregroundStyle(.secondary)
+            }
+            .width(min: 90, ideal: 140)
+            TableColumn("Created", value: \.createdAt) { item in
+                Text(item.createdAt, format: .dateTime.day().month().year()).foregroundStyle(.secondary)
+            }
+            .width(min: 80, ideal: 100)
+        }
+        .contextMenu(forSelectionType: PersistentIdentifier.self) { ids in
+            let chosen = ids.compactMap { byID[$0] }
+            if chosen.count == 1 {
+                menu(for: chosen[0])
+            } else if !chosen.isEmpty {
+                bulkMenu(for: chosen)
+            }
+        }
+    }
+
+    /// The table's sorting is the library's: clicking a heading sorts by
+    /// it, and the sort menu shows in the headings.
+    private var tableSort: Binding<[KeyPathComparator<Item>]> {
+        Binding {
+            let order: SortOrder = library.sortAscending ? .forward : .reverse
+            switch library.sort {
+            case .title: return [KeyPathComparator(\Item.displayTitle, order: order)]
+            case .kind: return [KeyPathComparator(\Item.kindDescription, order: order)]
+            case .label: return [KeyPathComparator(\Item.labelRaw, order: order)]
+            case .rating: return [KeyPathComparator(\Item.rating, order: order)]
+            case .created: return [KeyPathComparator(\Item.createdAt, order: order)]
+            case .modified: return [KeyPathComparator(\Item.modifiedAt, order: order)]
+            }
+        } set: { comparators in
+            guard let first = comparators.first else { return }
+            let sorts: [(PartialKeyPath<Item>, ItemSort)] = [
+                (\Item.displayTitle, .title), (\Item.kindDescription, .kind), (\Item.labelRaw, .label),
+                (\Item.rating, .rating), (\Item.createdAt, .created), (\Item.modifiedAt, .modified),
+            ]
+            guard let sort = sorts.first(where: { $0.0 == first.keyPath })?.1 else { return }
+            library.sort = sort
+            library.sortAscending = first.order == .forward
+        }
     }
 
     /// Cards with pictures, for a wide window.
@@ -219,6 +326,11 @@ struct ItemListView: View {
             }
             LabelAndRatingMenus(items: [item])
             ReminderMenu(items: [item])
+            if item.isLocked {
+                Button("Remove Lock…") { Task { await library.removeLock(from: [item]) } }
+            } else {
+                Button("Lock") { library.lock([item]) }
+            }
             Divider()
             Button("Export…") { library.exportRequest = .items([item], name: item.displayTitle) }
             Divider()
@@ -301,7 +413,7 @@ struct ItemRow: View {
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
             Group {
-                if item.thumbnailData != nil {
+                if item.thumbnailData != nil, !item.isLocked {
                     ThumbnailImage(item: item)
                         .frame(width: 40, height: 40)
                         .clipShape(RoundedRectangle(cornerRadius: 5))
@@ -337,6 +449,12 @@ struct ItemRow: View {
                             .fill(item.label.color)
                             .frame(width: 9, height: 9)
                             .accessibilityLabel("\(item.label.name) label")
+                    }
+                    if item.isLocked {
+                        Image(systemName: "lock.fill")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .accessibilityLabel("Locked")
                     }
                 }
                 if !item.listSubtitle.isEmpty {
@@ -417,6 +535,7 @@ extension ItemLabel {
 extension Item {
     /// A line or two under the title: a note's opening, a page's summary, a file's type.
     var listSubtitle: String {
+        if isLocked { return "Locked" }
         switch kind {
         case .note:
             // The first couple of lines, without heading marks.
@@ -477,7 +596,11 @@ struct ItemCard: View {
 
     @ViewBuilder
     private var preview: some View {
-        if item.thumbnailData != nil {
+        if item.isLocked {
+            Image(systemName: "lock.fill")
+                .font(.largeTitle)
+                .foregroundStyle(.secondary)
+        } else if item.thumbnailData != nil {
             ThumbnailImage(item: item)
         } else if item.kind == .note, !item.body.isEmpty {
             Text(item.body.prefix(400))

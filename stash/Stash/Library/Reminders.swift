@@ -52,7 +52,7 @@ final class Reminders: NSObject, UNUserNotificationCenterDelegate {
     private static func request(id: String, item: Item, date: Date) -> UNNotificationRequest {
         let content = UNMutableNotificationContent()
         content.title = item.displayTitle
-        content.body = item.listSubtitle.isEmpty ? "Reminder from Stash" : String(item.listSubtitle.prefix(180))
+        content.body = item.isLocked || item.listSubtitle.isEmpty ? "Reminder from Stash" : String(item.listSubtitle.prefix(180))
         content.sound = .default
         content.userInfo = ["item": item.uuid.uuidString]
         let parts = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: date)

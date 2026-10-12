@@ -122,8 +122,8 @@ final class PageArchiver: NSObject, WKNavigationDelegate {
 
     /// iOS slows a web view that isn't in a window -- timers stall, lazy
     /// pictures never load -- so while copying it sits in the window,
-    /// all but transparent and letting touches through. It keeps its full
-    /// size, so the page lays itself out as it would on screen. A Mac
+    /// behind the app's own view and letting touches through. It keeps its
+    /// full size, so the page lays itself out as it would on screen. A Mac
     /// loads it fine as it is.
     private func attachOffscreen() {
         #if os(iOS)
@@ -132,9 +132,11 @@ final class PageArchiver: NSObject, WKNavigationDelegate {
             .flatMap(\.windows)
             .first { $0.isKeyWindow }
         guard let window else { return }
-        webView.alpha = 0.01
         webView.isUserInteractionEnabled = false
-        window.addSubview(webView)
+        // Behind everything else in the window, rather than see-through:
+        // a see-through view's snapshot comes out see-through too, and the
+        // page's thumbnail would be blank.
+        window.insertSubview(webView, at: 0)
         #endif
     }
 

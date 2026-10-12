@@ -57,6 +57,10 @@ final class Item {
     /// When to be reminded to look at it again; nil for no reminder.
     /// Stays set once it's come round, until it's marked done.
     var remindAt: Date?
+    /// Kept out of sight -- its contents, from search and Spotlight too --
+    /// until unlocked with Face ID, Touch ID or the device password. The
+    /// contents aren't encrypted; this is privacy, not secrecy.
+    var isLocked: Bool = false
 
     // Links
     var urlString: String?
@@ -92,6 +96,8 @@ final class Item {
     /// Where reading stopped in a book: "chapter path|fraction scrolled".
     var readingPosition: String = ""
     @Relationship(deleteRule: .cascade, inverse: \Highlight.item) var highlights: [Highlight]? = []
+    /// A note's earlier versions.
+    @Relationship(deleteRule: .cascade, inverse: \NoteVersion.item) var versions: [NoteVersion]? = []
 
     /// Words that aren't typed by anyone but should still be searchable:
     /// a page's text, a PDF's text, text read out of an image.

@@ -260,3 +260,57 @@ final class ReminderDatesTests: XCTestCase {
         XCTAssertEqual(ReminderDates.nextWeek(now: date(12, 8), calendar: calendar), date(19, 9))
     }
 }
+
+final class MarkdownFormattingTests: XCTestCase {
+    private func apply(_ style: MarkdownFormatting.Style, _ text: String, _ selection: Range<Int>)
+        -> (String, Range<Int>) {
+        let result = MarkdownFormatting.apply(style, to: text, selection: selection)
+        return (result.text, result.selection)
+    }
+
+    func testBoldOnAndOff() {
+        let on = apply(.bold, "a word here", 2..<6)
+        XCTAssertEqual(on.0, "a **word** here")
+        XCTAssertEqual(on.1, 4..<8)
+        let off = apply(.bold, on.0, on.1)
+        XCTAssertEqual(off.0, "a word here")
+        XCTAssertEqual(off.1, 2..<6)
+        // Selecting the stars too also takes them off.
+        XCTAssertEqual(apply(.bold, "a **word** here", 2..<10).0, "a word here")
+    }
+
+    func testWrapKeepsSpacesOutsideAndEmptyGivesACursor() {
+        XCTAssertEqual(apply(.italic, "say hi there", 3..<7).0, "say _hi_ there")
+        let empty = apply(.code, "ab", 1..<1)
+        XCTAssertEqual(empty.0, "a``b")
+        XCTAssertEqual(empty.1, 2..<2)
+    }
+
+    func testLinks() {
+        let words = apply(.link, "see docs now", 4..<8)
+        XCTAssertEqual(words.0, "see [docs](url) now")
+        XCTAssertEqual(words.1, 11..<14)
+        let address = apply(.link, "go example.com", 3..<14)
+        XCTAssertEqual(address.0, "go [link text](example.com)")
+        XCTAssertEqual(address.1, 4..<13)
+    }
+
+    func testHeadingsCycle() {
+        let one = apply(.heading, "Title\nbody", 2..<2)
+        XCTAssertEqual(one.0, "# Title\nbody")
+        XCTAssertEqual(one.1, 4..<4)
+        XCTAssertEqual(apply(.heading, "# Title", 3..<3).0, "## Title")
+        XCTAssertEqual(apply(.heading, "### Title", 5..<5).0, "Title")
+    }
+
+    func testListsOverSeveralLines() {
+        let text = "one\ntwo\nthree"
+        XCTAssertEqual(apply(.bulletList, text, 0..<13).0, "- one\n- two\n- three")
+        XCTAssertEqual(apply(.bulletList, "- one\n- two", 0..<11).0, "one\ntwo")
+        XCTAssertEqual(apply(.checkbox, text, 4..<7).0, "one\n- [ ] two\nthree")
+        XCTAssertEqual(apply(.numberedList, text, 0..<13).0, "1. one\n2. two\n3. three")
+        XCTAssertEqual(apply(.numberedList, "1. one\n2. two", 0..<13).0, "one\ntwo")
+        // A selection ending just after a line break leaves the next line alone.
+        XCTAssertEqual(apply(.quote, text, 0..<4).0, "> one\ntwo\nthree")
+    }
+}

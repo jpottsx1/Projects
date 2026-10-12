@@ -15,6 +15,9 @@
 	<!-- Scanning documents with the iPhone or iPad camera. -->
 	<key>NSCameraUsageDescription</key>
 	<string>Stash uses the camera to scan paper documents into searchable PDFs.</string>
+	<!-- Unlocking locked items. -->
+	<key>NSFaceIDUsageDescription</key>
+	<string>Stash uses Face ID to unlock items you’ve locked.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>remote-notification</string>

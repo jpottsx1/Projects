@@ -43,7 +43,18 @@ struct ContentView: View {
         }
         // Things shared from other apps while Stash wasn't running.
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active { library.importSharedItems() }
+            if phase == .active {
+                library.importSharedItems()
+            } else {
+                // Away from the app, locked items lock again.
+                library.relockAll()
+            }
+        }
+        .alert("Can’t Lock", isPresented: Binding(get: { library.lockError != nil },
+                                                  set: { if !$0 { library.lockError = nil } })) {
+            Button("OK") {}
+        } message: {
+            Text(library.lockError ?? "")
         }
         #if os(iOS)
         .onAppear { QuickActions.performPending() }
@@ -77,6 +88,9 @@ struct ContentView: View {
             }
         } message: {
             Text("They’re added to \(library.taggingItems?.count ?? 0) items.")
+        }
+        .sheet(item: $library.viewingHistoryOf) { item in
+            NoteHistoryView(item: item)
         }
         .sheet(isPresented: $library.isEditingRules) {
             RulesView()

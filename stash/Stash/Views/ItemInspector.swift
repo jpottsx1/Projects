@@ -144,6 +144,17 @@ struct ItemInspector: View {
                 }
             }
 
+            if item.kind == .note {
+                Section("History") {
+                    let count = item.versions?.count ?? 0
+                    Button(count == 0 ? "No Earlier Versions Yet" : count == 1 ? "1 Earlier Version…" : "\(count) Earlier Versions…") {
+                        library.viewingHistoryOf = item
+                    }
+                    .buttonStyle(.borderless)
+                    .disabled(count == 0)
+                }
+            }
+
             Section("Info") {
                 LabeledContent("Kind", value: item.kind.rawValue.capitalized)
                 LabeledContent("Created", value: item.createdAt.formatted(date: .abbreviated, time: .shortened))
@@ -236,7 +247,7 @@ struct ItemPicker: View {
                 }
             }
         }
-        .frame(minWidth: 360, minHeight: 420)
+        .sheetSize(minWidth: 360, minHeight: 420)
     }
 
     private var candidates: [Item] {
@@ -287,6 +298,7 @@ struct HighlightRow: View {
                 RoundedRectangle(cornerRadius: 1.5)
                     .fill(highlight.color.swatch)
                     .frame(width: 3)
+                    .frame(maxHeight: .infinity)
                 VStack(alignment: .leading, spacing: 3) {
                     Text(highlight.text)
                         .lineLimit(4)
@@ -299,8 +311,11 @@ struct HighlightRow: View {
                     }
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
         }
-        .buttonStyle(.borderless)
+        // Plain, so the passage reads as text rather than as a link.
+        .buttonStyle(.plain)
         .contextMenu {
             Button("Edit Note…") { library.editingHighlight = highlight }
             Menu("Colour") {
@@ -365,6 +380,6 @@ struct HighlightNoteEditor: View {
                 }
             }
         }
-        .frame(minWidth: 380, minHeight: 380)
+        .sheetSize(minWidth: 380, minHeight: 380)
     }
 }

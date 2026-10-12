@@ -22,7 +22,7 @@ struct ItemEntity: AppEntity {
         id = item.uuid
         title = item.displayTitle
         kind = item.kind.rawValue.capitalized
-        text = item.body
+        text = item.isLocked ? "" : item.body
         url = item.url
         tags = item.sortedTags.map(\.name)
     }

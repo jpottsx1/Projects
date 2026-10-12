@@ -20,7 +20,7 @@ final class SpotlightIndex {
     func replaceAll(with items: [Item]) {
         waiting = [:]
         flush?.cancel()
-        let searchable = items.filter { !$0.isTrashed }.map(Self.searchable)
+        let searchable = items.filter { !$0.isTrashed && !$0.isLocked }.map(Self.searchable)
         index.deleteAllSearchableItems { [index] _ in
             index.indexSearchableItems(searchable)
         }
@@ -46,7 +46,8 @@ final class SpotlightIndex {
     private func sendWaiting() {
         let items = waiting.values.filter { $0.modelContext != nil && !$0.isDeleted }
         waiting = [:]
-        let (trashed, kept) = (items.filter(\.isTrashed), items.filter { !$0.isTrashed })
+        // In the Trash or locked: out of Spotlight.
+        let (trashed, kept) = (items.filter { $0.isTrashed || $0.isLocked }, items.filter { !$0.isTrashed && !$0.isLocked })
         remove(trashed.map(\.uuid))
         if !kept.isEmpty { index.indexSearchableItems(kept.map(Self.searchable)) }
     }

@@ -79,7 +79,7 @@ struct CompiledSearch {
             if let ranks, ranks[item.uuid] == nil { return false }
             return !excluded.contains(item.uuid)
         }
-        let text = [item.title, item.body, item.summary, item.extractedText]
+        let text = item.isLocked ? [item.title] : [item.title, item.body, item.summary, item.extractedText]
         let contains = { (term: SearchQuery.Term) in text.contains { $0.localizedStandardContains(term.text) } }
         return query.groups.allSatisfy { $0.contains(where: contains) }
             && !query.excludedTerms.contains(where: contains)
@@ -108,6 +108,10 @@ extension SearchQuery.Kind {
     private func conforms(_ item: Item, to type: UTType) -> Bool {
         item.kind == .document && item.contentType?.conforms(to: type) == true
     }
+}
+
+enum ItemLayout: String, CaseIterable {
+    case list, grid, table
 }
 
 /// How the list is ordered when it isn't showing search results best first.
@@ -158,7 +162,7 @@ enum ItemSort: String, CaseIterable, Identifiable {
             }
         case .kind:
             ordered = { a, b in
-                let first = Self.kindName(a), second = Self.kindName(b)
+                let first = a.kindDescription, second = b.kindDescription
                 if first != second { return first.localizedStandardCompare(second) == .orderedAscending }
                 return a.displayTitle.localizedStandardCompare(b.displayTitle) == .orderedAscending
             }
@@ -166,8 +170,12 @@ enum ItemSort: String, CaseIterable, Identifiable {
         return items.sorted(by: ascending ? ordered : { ordered($1, $0) })
     }
 
+
+}
+
+extension Item {
     /// "Note", "Link", or the document's file type ("PDF document").
-    private static func kindName(_ item: Item) -> String {
-        item.kind == .document ? (item.contentType?.localizedDescription ?? "Document") : item.kind.rawValue
+    var kindDescription: String {
+        kind == .document ? (contentType?.localizedDescription ?? "Document") : kind.rawValue.capitalized
     }
 }

@@ -8,7 +8,7 @@ struct RulesView: View {
     @Environment(\.dismiss) private var dismiss
     @Query(sort: \SmartRule.createdAt) private var rules: [SmartRule]
     @State private var editing: SmartRule?
-    @State private var newRuleID: UUID?
+    @State private var isCreating = false
 
     var body: some View {
         NavigationStack {
@@ -58,19 +58,20 @@ struct RulesView: View {
                 }
                 ToolbarItem(placement: .primaryAction) {
                     Button {
-                        let rule = library.newRule()
-                        newRuleID = rule.uuid
-                        editing = rule
+                        isCreating = true
                     } label: {
                         Label("New Rule", systemImage: "plus")
                     }
                 }
             }
             .sheet(item: $editing) { rule in
-                RuleEditor(rule: rule, isNew: rule.uuid == newRuleID)
+                RuleEditor(rule: rule)
+            }
+            .sheet(isPresented: $isCreating) {
+                RuleEditor(rule: nil)
             }
         }
-        .frame(minWidth: 460, minHeight: 420)
+        .sheetSize(minWidth: 460, minHeight: 420)
     }
 }
 
@@ -79,9 +80,8 @@ struct RuleEditor: View {
     @Environment(Library.self) private var library
     @Environment(\.dismiss) private var dismiss
     @Query(sort: \ItemCategory.name) private var categories: [ItemCategory]
-    let rule: SmartRule
-    /// Cancelling a rule just made deletes it.
-    var isNew = false
+    /// Nil for a new rule, which is only made when it's saved.
+    @State private var rule: SmartRule?
 
     @State private var name: String
     @State private var query: String
@@ -95,19 +95,18 @@ struct RuleEditor: View {
     @State private var isEnabled: Bool
     @State private var appliedCount: Int?
 
-    init(rule: SmartRule, isNew: Bool = false) {
-        self.rule = rule
-        self.isNew = isNew
-        _name = State(initialValue: rule.name)
-        _query = State(initialValue: rule.query)
-        _category = State(initialValue: rule.category)
-        _tags = State(initialValue: rule.tagsToAdd)
-        _labelRaw = State(initialValue: rule.labelRaw)
-        _rating = State(initialValue: rule.rating)
-        _makesFavorite = State(initialValue: rule.makesFavorite)
-        _marksRead = State(initialValue: rule.marksRead)
-        _takesOutOfInbox = State(initialValue: rule.takesOutOfInbox)
-        _isEnabled = State(initialValue: rule.isEnabled)
+    init(rule: SmartRule?) {
+        _rule = State(initialValue: rule)
+        _name = State(initialValue: rule?.name ?? "New Rule")
+        _query = State(initialValue: rule?.query ?? "")
+        _category = State(initialValue: rule?.category)
+        _tags = State(initialValue: rule?.tagsToAdd ?? "")
+        _labelRaw = State(initialValue: rule?.labelRaw ?? -1)
+        _rating = State(initialValue: rule?.rating ?? -1)
+        _makesFavorite = State(initialValue: rule?.makesFavorite ?? false)
+        _marksRead = State(initialValue: rule?.marksRead ?? false)
+        _takesOutOfInbox = State(initialValue: rule?.takesOutOfInbox ?? false)
+        _isEnabled = State(initialValue: rule?.isEnabled ?? true)
     }
 
     var body: some View {
@@ -138,7 +137,7 @@ struct RuleEditor: View {
                             Text(category.path).tag(Optional(category))
                         }
                     }
-                    TextField("Add Tags", text: $tags, prompt: Text("none"))
+                    TextField("Add Tags", text: $tags, prompt: Text("Add tags, separated by commas"))
                         .autocorrectionDisabled()
                     Picker("Label", selection: $labelRaw) {
                         Text("Leave as It Is").tag(-1)
@@ -159,8 +158,7 @@ struct RuleEditor: View {
                 }
                 Section {
                     Button("Apply to Matching Items Now") {
-                        save()
-                        appliedCount = library.apply(rule, toExisting: true)
+                        appliedCount = library.apply(save(), toExisting: true)
                     }
                     if let appliedCount {
                         Text(appliedCount == 1 ? "Applied to 1 item." : "Applied to \(appliedCount) items.")
@@ -169,21 +167,20 @@ struct RuleEditor: View {
                 } footer: {
                     Text("Rules run on new arrivals by themselves. This runs it on what's already here too.")
                 }
-                Section {
-                    Button("Delete Rule", role: .destructive) {
-                        library.delete(rule)
-                        dismiss()
+                if let rule {
+                    Section {
+                        Button("Delete Rule", role: .destructive) {
+                            library.delete(rule)
+                            dismiss()
+                        }
                     }
                 }
             }
             .formStyle(.grouped)
-            .navigationTitle("Rule")
+            .navigationTitle(rule == nil ? "New Rule" : "Rule")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") {
-                        if isNew && appliedCount == nil { library.delete(rule) }
-                        dismiss()
-                    }
+                    Button("Cancel") { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
@@ -193,7 +190,7 @@ struct RuleEditor: View {
                 }
             }
         }
-        .frame(minWidth: 440, minHeight: 560)
+        .sheetSize(minWidth: 440, minHeight: 560)
     }
 
     private var matchDescription: String {
@@ -201,7 +198,11 @@ struct RuleEditor: View {
         return count == 1 ? "1 item here matches now." : "\(count) items here match now."
     }
 
-    private func save() {
+    /// Saves the rule, making it first if it's new.
+    @discardableResult
+    private func save() -> SmartRule {
+        let rule = self.rule ?? library.newRule()
+        self.rule = rule
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         rule.name = trimmed.isEmpty ? "Rule" : trimmed
         rule.query = query.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -214,5 +215,6 @@ struct RuleEditor: View {
         rule.takesOutOfInbox = takesOutOfInbox
         rule.isEnabled = isEnabled
         library.save()
+        return rule
     }
 }

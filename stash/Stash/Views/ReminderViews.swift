@@ -72,7 +72,7 @@ struct ReminderPicker: View {
                 }
             }
         }
-        .frame(minWidth: 360, minHeight: 460)
+        .sheetSize(minWidth: 360, minHeight: 460)
     }
 }
 

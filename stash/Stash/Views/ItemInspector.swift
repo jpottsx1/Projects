@@ -137,10 +137,52 @@ struct ItemInspector: View {
 
             let copies = library.duplicates(of: item)
             if !copies.isEmpty {
-                Section("Also Saved As") {
+                Section {
                     ForEach(copies) { other in
                         row(for: other, note: other.createdAt.formatted(date: .abbreviated, time: .omitted))
                     }
+                    Button("Merge Copies Into This One") { library.mergeDuplicates(into: item) }
+                        .buttonStyle(.borderless)
+                } header: {
+                    Text("Also Saved As")
+                } footer: {
+                    Text("Merging keeps this one, with the others’ tags, notes, highlights and links, and puts the others in the Trash.")
+                }
+            }
+
+            let suggested = suggestedTags
+            if !suggested.isEmpty {
+                Section {
+                    FlowLayout(spacing: 6) {
+                        ForEach(suggested, id: \.self) { name in
+                            Button("+ #" + name) { library.addTags(from: name, to: item) }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+                        }
+                    }
+                } header: {
+                    Text("Suggested Tags")
+                } footer: {
+                    Text("Tags on the items most like this one.")
+                }
+            }
+
+            let mentions = library.unlinkedMentions(of: item)
+            if !mentions.isEmpty {
+                Section {
+                    ForEach(mentions) { note in
+                        HStack {
+                            row(for: note)
+                            Spacer()
+                            Button("Link") { library.linkMentions(in: note, to: item) }
+                                .buttonStyle(.borderless)
+                                .help("Make its mentions of “\(item.displayTitle)” into [[links]]")
+                        }
+                    }
+                } header: {
+                    Text("Unlinked Mentions")
+                } footer: {
+                    Text("Notes that name this item without linking to it.")
                 }
             }
 
@@ -192,6 +234,19 @@ struct ItemInspector: View {
     /// Every category, parents before the categories inside them.
     private var categoryTree: [ItemCategory] {
         categories.filter { $0.parent == nil }.flatMap(\.flattened)
+    }
+
+    /// Tags on two or more of the See Also items that this one hasn't got.
+    private var suggestedTags: [String] {
+        var counts: [String: (name: String, count: Int)] = [:]
+        for other in seeAlso {
+            for tag in other.tags ?? [] where !item.hasTag(key: tag.key) {
+                counts[tag.key, default: (tag.name, 0)].count += 1
+            }
+        }
+        return counts.values.filter { $0.count >= 2 }
+            .sorted { $0.count != $1.count ? $0.count > $1.count : $0.name < $1.name }
+            .prefix(6).map(\.name)
     }
 
     /// The category most of the See Also items are in.

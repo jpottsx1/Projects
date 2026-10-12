@@ -70,6 +70,9 @@ struct BulkActions: View {
             }
         }
         Button("Add Tags…") { library.taggingItems = items }
+        if items.count > 1, items.allSatisfy({ $0.kind == .note }) {
+            Button("Merge Notes") { library.mergeNotes(items) }
+        }
         LabelAndRatingMenus(items: items)
         ReminderMenu(items: items)
         if items.allSatisfy(\.isLocked) {

@@ -1,4 +1,8 @@
 import CoreData
+import WidgetKit
+#if os(macOS)
+import AppKit
+#endif
 import LocalAuthentication
 import CoreGraphics
 import Foundation
@@ -100,6 +104,9 @@ final class Library {
     var exportRequest: ExportRequest?
     var isRestoring = false
     var isEditingRules = false
+    /// Items to print, or to save as PDF; the window does it.
+    var printRequest: Item?
+    var pdfRequest: Item?
     var isScanning = false
     var isImporting = false
     var importError: String?
@@ -328,6 +335,177 @@ final class Library {
             keepVersion(of: item)
             beginEditing(item)
         }
+    }
+
+    // MARK: - Markup
+
+    /// Goes up each time a document's file changes in place, so views
+    /// showing it load it again.
+    private(set) var fileRevisions: [UUID: Int] = [:]
+    /// Documents opened in another app to mark up (on a Mac, Preview), with
+    /// their files' dates then: checked when Stash comes back to the front.
+    @ObservationIgnored private var editingElsewhere: [UUID: Date] = [:]
+
+    func fileRevision(of item: Item) -> Int { fileRevisions[item.uuid, default: 0] }
+
+    /// Whether markup is offered: PDFs and pictures.
+    static func canMarkUp(_ item: Item) -> Bool {
+        item.kind == .document && (item.isPDF || item.contentType?.conforms(to: .image) == true)
+    }
+
+    /// Keeps the file as first imported, the first time it's marked up.
+    func keepOriginal(of item: Item) {
+        guard let path = item.storedFilePath, files.exists(path) else { return }
+        let original = files.originalPath(for: path)
+        if !files.exists(original) { try? files.copy(path, to: original) }
+    }
+
+    func hasOriginal(_ item: Item) -> Bool {
+        item.storedFilePath.map { files.exists(files.originalPath(for: $0)) } ?? false
+    }
+
+    /// Puts the file back as it was first imported, undoing all markup.
+    func revertToOriginal(_ item: Item) {
+        guard let path = item.storedFilePath else { return }
+        let original = files.originalPath(for: path)
+        guard files.exists(original), (try? files.copy(original, to: path)) != nil else { return }
+        try? FileManager.default.removeItem(at: files.url(for: original))
+        Task { await fileDidChange(item) }
+    }
+
+    /// After the file has been changed in place: what syncs, what's
+    /// searched and the thumbnail follow it.
+    func fileDidChange(_ item: Item) async {
+        guard isAlive(item) else { return }
+        item.fileData = syncableContents(of: item)
+        item.contentHash = ""
+        item.thumbnailData = nil
+        thumbnailsTried.remove(item.uuid)
+        item.modifiedAt = .now
+        fileRevisions[item.uuid, default: 0] += 1
+        save()
+        await fillContentHash(of: item)
+        await fillThumbnail(of: item)
+        await extractText(from: item)
+    }
+
+    #if os(macOS)
+    /// Opens the document in Preview to mark it up; changes are picked up
+    /// when Stash comes back to the front.
+    func markUpInPreview(_ item: Item) {
+        guard let url = localFile(for: item),
+              let preview = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.Preview") else { return }
+        keepOriginal(of: item)
+        editingElsewhere[item.uuid] = Self.modificationDate(of: url)
+        NSWorkspace.shared.open([url], withApplicationAt: preview, configuration: NSWorkspace.OpenConfiguration())
+    }
+    #endif
+
+    /// When Stash comes back to the front: has anything sent off to be
+    /// marked up changed?
+    func checkFilesEditedElsewhere() {
+        guard !editingElsewhere.isEmpty else { return }
+        for item in items(withIDs: Array(editingElsewhere.keys)) {
+            guard let url = localFile(for: item) else { continue }
+            let date = Self.modificationDate(of: url)
+            if date != editingElsewhere[item.uuid] {
+                editingElsewhere[item.uuid] = date
+                Task { await fileDidChange(item) }
+            }
+        }
+    }
+
+    private static func modificationDate(of url: URL) -> Date? {
+        (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+    }
+
+    // MARK: - Merging and tidying
+
+    /// Several notes made into one, each under its own heading, as
+    /// DEVONthink's Merge does. The new note takes their tags, category
+    /// and hand-made links; `[[links]]` to the old ones point at it; the
+    /// old ones go to the Trash. Returns the new note.
+    @discardableResult
+    func mergeNotes(_ notes: [Item]) -> Item? {
+        let ordered = notes.filter { $0.kind == .note && !$0.isTrashed }
+            .sorted { ($0.createdAt, $0.uuid.uuidString) < ($1.createdAt, $1.uuid.uuidString) }
+        guard ordered.count > 1 else { return nil }
+        let merged = Item(kind: .note, title: ordered[0].title.isEmpty ? "Merged Note" : ordered[0].title + " (merged)")
+        merged.body = NoteMerge.merge(ordered.map { ($0.title, $0.body) })
+        context.insert(merged)
+        merged.category = ordered.first { $0.category != nil }?.category
+        merged.isFavorite = ordered.contains(where: \.isFavorite)
+        merged.rating = ordered.map(\.rating).max() ?? 0
+        combine(ordered, into: merged)
+        for note in ordered where !note.title.isEmpty {
+            for linking in notesLinking(toTitle: note.title) where !ordered.contains(linking) {
+                linking.body = WikiLinks.renaming(note.title, to: merged.title, in: linking.body)
+                didEdit(linking)
+            }
+        }
+        moveToTrash(ordered)
+        save()
+        reindex(merged)
+        selection = merged
+        return merged
+    }
+
+    /// Folds other copies of the same page or file into `keeper`: their
+    /// tags, highlights, links, notes and stars join it, and they go to
+    /// the Trash.
+    func mergeDuplicates(into keeper: Item) {
+        let copies = duplicates(of: keeper)
+        guard !copies.isEmpty else { return }
+        for copy in copies {
+            let extra = copy.body.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !extra.isEmpty, !keeper.body.contains(extra) {
+                keeper.body = keeper.body.isEmpty ? extra : keeper.body + "\n\n" + extra
+            }
+            keeper.isFavorite = keeper.isFavorite || copy.isFavorite
+            keeper.rating = max(keeper.rating, copy.rating)
+            if keeper.label == .none { keeper.label = copy.label }
+            if keeper.category == nil { keeper.category = copy.category }
+            if keeper.remindAt == nil { keeper.remindAt = copy.remindAt }
+        }
+        combine(copies, into: keeper)
+        moveToTrash(copies)
+        didEdit(keeper)
+        save()
+    }
+
+    /// Tags, highlights and hand-made links from `items` onto `target`.
+    private func combine(_ items: [Item], into target: Item) {
+        var tags = target.tags ?? []
+        var linksTo = target.linksTo ?? []
+        for item in items {
+            for tag in item.tags ?? [] where !tags.contains(tag) { tags.append(tag) }
+            for other in item.linksTo ?? [] where other != target && !linksTo.contains(other) { linksTo.append(other) }
+            for other in item.linkedFrom ?? [] where other != target && !(other.linksTo ?? []).contains(target) {
+                other.linksTo = (other.linksTo ?? []) + [target]
+            }
+            for highlight in item.highlights ?? [] { highlight.item = target }
+        }
+        target.tags = tags
+        target.linksTo = linksTo.filter { !items.contains($0) }
+    }
+
+    /// Notes that name the item without linking to it, for making links.
+    func unlinkedMentions(of item: Item) -> [Item] {
+        _ = revision
+        let title = item.title.trimmingCharacters(in: .whitespaces)
+        // A short title ("A", "To") is mentioned everywhere and means nothing.
+        guard title.count >= 3 else { return [] }
+        return notes(mentioning: title).filter { note in
+            note != item && !note.isTrashed && !note.isLocked
+                && !WikiLinks.unlinkedMentions(of: title, in: note.body).isEmpty
+        }
+    }
+
+    /// Turns a note's mentions of the item into `[[links]]`.
+    func linkMentions(in note: Item, to item: Item) {
+        note.body = WikiLinks.linkingMentions(of: item.title, in: note.body)
+        didEdit(note)
+        save()
     }
 
     // MARK: - Locking
@@ -1323,6 +1501,60 @@ final class Library {
 
     func save() {
         try? context.save()
+        scheduleWidgetUpdate()
+    }
+
+    // MARK: - Widgets
+
+    @ObservationIgnored private var pendingWidgetUpdate: Task<Void, Never>?
+    /// Where the widgets read from; nil without an App Group.
+    @ObservationIgnored private let widgetFolder = WidgetSnapshot.folder()
+
+    /// Saves come in bursts while typing; the widgets are told once it settles.
+    private func scheduleWidgetUpdate() {
+        guard widgetFolder != nil else { return }
+        pendingWidgetUpdate?.cancel()
+        pendingWidgetUpdate = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(3))
+            guard !Task.isCancelled else { return }
+            self?.publishWidgets()
+        }
+    }
+
+    /// Writes what the widgets show, and asks them to look again.
+    func publishWidgets() {
+        guard let widgetFolder,
+              let items = try? context.fetch(FetchDescriptor<Item>(sortBy: [SortDescriptor(\.modifiedAt, order: .reverse)])) else { return }
+        let live = items.filter { !$0.isTrashed }
+        func entry(_ item: Item) -> WidgetSnapshot.Entry {
+            WidgetSnapshot.Entry(id: item.uuid, title: item.displayTitle, kind: item.kindRaw,
+                                 subtitle: item.isLocked ? "Locked" : item.listSubtitle, date: item.remindAt)
+        }
+        let snapshot = WidgetSnapshot(
+            updatedAt: .now,
+            recent: live.prefix(8).map(entry),
+            favorites: live.filter(\.isFavorite).prefix(8).map(entry),
+            reminders: live.filter { $0.remindAt != nil }
+                .sorted { ($0.remindAt ?? .distantFuture) < ($1.remindAt ?? .distantFuture) }
+                .prefix(8).map(entry),
+            inboxCount: live.filter(\.inInbox).count)
+        try? snapshot.write(to: widgetFolder)
+        WidgetCenter.shared.reloadAllTimelines()
+    }
+
+    /// `stash://` links from the widgets: an item, or a new note.
+    func open(stashURL url: URL) {
+        switch url.host {
+        case "item":
+            let id = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?
+                .first { $0.name == "id" }?.value.flatMap(UUID.init(uuidString:))
+            if let id, let item = items(withIDs: [id]).first { show(item) }
+        case "new-note":
+            sidebar = .all
+            newNote()
+        default:
+            open(wikiURL: url)
+        }
     }
 
     /// False once an item has been deleted -- checked after anything slow,

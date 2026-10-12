@@ -89,4 +89,51 @@ public enum WikiLinks {
         result += text[cursor...]
         return result
     }
+
+    // MARK: - Unlinked mentions
+
+    /// Where `title` appears in `text` as whole words, ignoring case, but
+    /// not already inside a `[[link]]` -- places a link could go.
+    public static func unlinkedMentions(of title: String, in text: String) -> [Range<String.Index>] {
+        let trimmed = title.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return [] }
+        let linked = linkRanges(in: text)
+        var found: [Range<String.Index>] = []
+        var searchStart = text.startIndex
+        while let range = text.range(of: trimmed, options: [.caseInsensitive, .diacriticInsensitive],
+                                     range: searchStart..<text.endIndex) {
+            searchStart = range.upperBound
+            let before = range.lowerBound > text.startIndex ? text[text.index(before: range.lowerBound)] : nil
+            let after = range.upperBound < text.endIndex ? text[range.upperBound] : nil
+            let wordBefore = before.map { $0.isLetter || $0.isNumber } ?? false
+            let wordAfter = after.map { $0.isLetter || $0.isNumber } ?? false
+            guard !wordBefore, !wordAfter,
+                  !linked.contains(where: { $0.overlaps(range) }) else { continue }
+            found.append(range)
+        }
+        return found
+    }
+
+    /// `text` with each unlinked mention of `title` made into a link to it,
+    /// keeping the words as they were written: `[[Title|title]]` when the
+    /// case differs.
+    public static func linkingMentions(of title: String, in text: String) -> String {
+        var result = text
+        for range in unlinkedMentions(of: title, in: text).reversed() {
+            let written = String(text[range])
+            result.replaceSubrange(range, with: written == title ? "[[\(title)]]" : "[[\(title)|\(written)]]")
+        }
+        return result
+    }
+
+    private static func linkRanges(in text: String) -> [Range<String.Index>] {
+        var ranges: [Range<String.Index>] = []
+        var searchStart = text.startIndex
+        while let open = text.range(of: "[[", range: searchStart..<text.endIndex),
+              let close = text.range(of: "]]", range: open.upperBound..<text.endIndex) {
+            ranges.append(open.lowerBound..<close.upperBound)
+            searchStart = close.upperBound
+        }
+        return ranges
+    }
 }

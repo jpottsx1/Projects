@@ -332,6 +332,8 @@ struct ItemListView: View {
                 Button("Lock") { library.lock([item]) }
             }
             Divider()
+            Button("Print…") { library.printRequest = item }
+            Button("Save as PDF…") { library.pdfRequest = item }
             Button("Export…") { library.exportRequest = .items([item], name: item.displayTitle) }
             Divider()
             Button("Move to Trash", role: .destructive) { library.moveToTrash([item]) }
@@ -538,12 +540,8 @@ extension Item {
         if isLocked { return "Locked" }
         switch kind {
         case .note:
-            // The first couple of lines, without heading marks.
-            return body
-                .split(separator: "\n", omittingEmptySubsequences: true)
-                .prefix(2)
-                .map { $0.trimmingCharacters(in: CharacterSet(charactersIn: "# ")) }
-                .joined(separator: " ")
+            // The opening words, without the Markdown.
+            return MarkdownStyling.plainText(String(body.prefix(400)))
         case .link:
             if !summary.isEmpty { return summary }
             return url.map { WebAddress.displayHost(of: $0) } ?? ""

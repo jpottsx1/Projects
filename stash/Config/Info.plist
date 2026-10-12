@@ -18,6 +18,18 @@
 	<!-- Unlocking locked items. -->
 	<key>NSFaceIDUsageDescription</key>
 	<string>Stash uses Face ID to unlock items you’ve locked.</string>
+	<!-- stash:// links, from the widgets: an item, or a new note. -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>stash</string>
+			</array>
+		</dict>
+	</array>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>remote-notification</string>

@@ -1,0 +1,9 @@
+// The widgets' settings: everything in Stash.xcconfig (change things there,
+// not here). They read what the app writes into the App Group, so they use
+// the share extension's entitlements, switched on by SHARE_EXTENSION.
+#include "Stash.xcconfig"
+
+STASH_WIDGET_ENTITLEMENTS_YES = Config/ShareExtension.entitlements
+CODE_SIGN_ENTITLEMENTS[sdk=iphoneos*] = $(STASH_WIDGET_ENTITLEMENTS_$(SHARE_EXTENSION))
+CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*] = $(STASH_WIDGET_ENTITLEMENTS_$(SHARE_EXTENSION))
+CODE_SIGN_ENTITLEMENTS[sdk=macosx*] = $(STASH_WIDGET_ENTITLEMENTS_$(SHARE_EXTENSION))

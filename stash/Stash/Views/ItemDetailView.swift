@@ -81,6 +81,20 @@ struct ItemDetailView: View {
                 .disabled(item.isTrashed)
                 .help(item.isFavorite ? "Remove from Favorites" : "Add to Favorites")
             }
+            ToolbarItem(placement: .secondaryAction) {
+                Button {
+                    library.printRequest = item
+                } label: {
+                    Label("Print…", systemImage: "printer")
+                }
+            }
+            ToolbarItem(placement: .secondaryAction) {
+                Button {
+                    library.pdfRequest = item
+                } label: {
+                    Label("Save as PDF…", systemImage: "doc.richtext")
+                }
+            }
             ToolbarItem(placement: .primaryAction) {
                 Button {
                     showInspector.toggle()

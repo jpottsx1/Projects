@@ -10,17 +10,21 @@ struct DocumentDetail: View {
     @State private var quickLookURL: URL?
     @State private var fileURL: URL?
     @State private var hasLooked = false
+    @State private var isMarkingUp = false
 
     var body: some View {
         VStack(spacing: 0) {
             Group {
                 if let fileURL, item.isPDF {
                     PDFReader(item: item, url: fileURL)
+                        // Marked up: load the changed file.
+                        .id(library.fileRevision(of: item))
                 } else if let fileURL, item.isEPUB {
                     EPUBReader(item: item, url: fileURL)
                 } else if let fileURL {
                     FileThumbnail(url: fileURL)
                         .padding()
+                        .id(library.fileRevision(of: item))
                 } else if !hasLooked {
                     ProgressView()
                 } else {
@@ -54,6 +58,37 @@ struct DocumentDetail: View {
             .padding()
         }
         .quickLookPreview($quickLookURL)
+        .toolbar {
+            if Library.canMarkUp(item), fileURL != nil {
+                ToolbarItem {
+                    Menu {
+                        Button {
+                            markUp()
+                        } label: {
+                            Label("Mark Up", systemImage: "pencil.tip.crop.circle")
+                        }
+                        if library.hasOriginal(item) {
+                            Button("Revert to Original") { library.revertToOriginal(item) }
+                        }
+                    } label: {
+                        Label("Mark Up", systemImage: "pencil.tip.crop.circle")
+                    } primaryAction: {
+                        markUp()
+                    }
+                    .help("Draw, write and add shapes on it")
+                }
+            }
+        }
+        #if os(iOS)
+        .fullScreenCover(isPresented: $isMarkingUp) {
+            if let fileURL {
+                MarkupView(url: fileURL) {
+                    Task { await library.fileDidChange(item) }
+                }
+                .ignoresSafeArea()
+            }
+        }
+        #endif
         // Looked for again whenever the library changes, which includes the
         // file's contents arriving from iCloud.
         .task(id: library.revision) {
@@ -61,6 +96,15 @@ struct DocumentDetail: View {
             hasLooked = true
         }
         .onChange(of: item.body) { library.didEdit(item) }
+    }
+
+    private func markUp() {
+        #if os(macOS)
+        library.markUpInPreview(item)
+        #else
+        library.keepOriginal(of: item)
+        isMarkingUp = true
+        #endif
     }
 }
 

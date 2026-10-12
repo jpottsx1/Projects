@@ -295,17 +295,6 @@ extension Library {
     }
 }
 
-/// A finished export, handed to the system's save panel.
-struct ExportedFile: Transferable {
-    let url: URL
-
-    static var transferRepresentation: some TransferRepresentation {
-        FileRepresentation(exportedContentType: .zip) { file in
-            SentTransferredFile(file.url)
-        }
-    }
-}
-
 /// Asked for from a menu; `ContentView` does it and offers to save the result.
 enum ExportRequest: Identifiable {
     case items([Item], name: String)

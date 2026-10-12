@@ -35,6 +35,7 @@ struct ItemListView: View {
                 case .grid: grid(items)
                 case .table: table(items)
                 case .list: list(items)
+                case .board: BoardView(items: items, menu: { AnyView(menu(for: $0)) })
                 }
             }
         }
@@ -74,6 +75,7 @@ struct ItemListView: View {
                         Label("List", systemImage: "list.bullet").tag(ItemLayout.list)
                         Label("Grid", systemImage: "square.grid.2x2").tag(ItemLayout.grid)
                         Label("Columns", systemImage: "tablecells").tag(ItemLayout.table)
+                        Label("Board", systemImage: "rectangle.split.3x1").tag(ItemLayout.board)
                     }
                     .pickerStyle(.segmented)
                     .help("Show as a list, a grid, or columns")
@@ -374,6 +376,7 @@ struct ItemListView: View {
             Divider()
             #endif
             ListMenus(items: [item])
+            BatchMenus(items: [item])
             if !(item.highlights ?? []).isEmpty {
                 Button("Make Note from Highlights") { library.makeHighlightsNote(for: item) }
             }

@@ -677,5 +677,86 @@ final class StashUITests: XCTestCase {
         editor.typeKey(.upArrow, modifierFlags: .command)
         XCTAssertTrue(app.images["notePicture"].waitForExistence(timeout: 5))
     }
+    // MARK: - Board, batch rename, convert, a big library
+
+    func testBoardMovesCardsBetweenColumns() {
+        newNote(title: "Card", text: "on the board")
+        app.radioButtons["rectangle.split.3x1"].click()
+        let card = app.descendants(matching: .any)["card-Card"].firstMatch
+        XCTAssertTrue(card.waitForExistence(timeout: 5))
+        let red = app.descendants(matching: .any)["boardColumn-Red"].firstMatch
+        XCTAssertTrue(red.exists)
+        card.press(forDuration: 0.3, thenDragTo: red)
+        // Its label is now red.
+        XCTAssertTrue(red.descendants(matching: .any)["card-Card"].waitForExistence(timeout: 5))
+        app.radioButtons["list.bullet"].click()
+    }
+
+    func testRenamingSeveralItems() {
+        newNote(title: "Scan 1", text: "a")
+        newNote(title: "Scan 2", text: "b")
+        app.outlines.staticTexts["Notes"].click()
+        let list = app.outlines.element(boundBy: 1)
+        list.staticTexts["Scan 1"].click()
+        XCUIElement.perform(withKeyModifiers: .command) { list.staticTexts["Scan 2"].click() }
+        menuItem("Item", "Rename Items…").click()
+        let find = app.textFields["renameFind"]
+        XCTAssertTrue(find.waitForExistence(timeout: 5))
+        find.click()
+        find.typeText("Scan")
+        app.textFields["renameReplace"].click()
+        app.textFields["renameReplace"].typeText("Receipt")
+        app.buttons["renameConfirm"].click()
+        XCTAssertTrue(listRow("Receipt 1").waitForExistence(timeout: 5))
+        XCTAssertTrue(listRow("Receipt 2").exists)
+    }
+
+    func testConvertingANoteToMarkdown() {
+        newNote(title: "Recipe", text: "## Dough\n\nFlour and water.")
+        menuItem("Item", "Convert To").click()
+        app.menuItems["Markdown Document"].click()
+        app.outlines.staticTexts["Documents"].click()
+        XCTAssertTrue(listRow("Recipe").waitForExistence(timeout: 10))
+    }
+
+    /// Ten thousand made-up items: how long Stash takes to open with them,
+    /// and to search them. The times are attached to the test's results.
+    func testBigLibraryStaysQuick() throws {
+        app.terminate()
+        let big = XCUIApplication()
+        big.launchArguments = ["-StashTestLibrary", "YES", "-StashResetTestLibrary", "YES",
+                               "-ApplePersistenceIgnoreState", "YES", "-StashGenerateItems", "10000"]
+        let made = Date()
+        big.launch()
+        XCTAssertTrue(big.windows.firstMatch.waitForExistence(timeout: 600))
+        let madeIn = Date().timeIntervalSince(made)
+
+        // Open again: the library's there, and the index only catches up.
+        big.terminate()
+        let reopened = Date()
+        big.launchArguments = ["-StashTestLibrary", "YES", "-ApplePersistenceIgnoreState", "YES"]
+        big.launch()
+        XCTAssertTrue(big.windows.firstMatch.waitForExistence(timeout: 120))
+        XCTAssertTrue(big.outlines.staticTexts["All Items"].waitForExistence(timeout: 60))
+        let openedIn = Date().timeIntervalSince(reopened)
+
+        let search = big.searchFields.firstMatch
+        XCTAssertTrue(search.waitForExistence(timeout: 30))
+        search.click()
+        let searched = Date()
+        search.typeText("zebra harbour")
+        XCTAssertTrue(big.outlines.element(boundBy: 1).cells.firstMatch.waitForExistence(timeout: 30))
+        let searchedIn = Date().timeIntervalSince(searched)
+
+        let report = String(format: "Made 10,000 items and opened: %.1f s\nOpened again: %.1f s\nSearch: %.1f s",
+                            madeIn, openedIn, searchedIn)
+        let attachment = XCTAttachment(string: report)
+        attachment.name = "Big library timings"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        print(report)
+        XCTAssertLessThan(openedIn, 30, "Opening a 10,000-item library took \(openedIn) s")
+        big.terminate()
+    }
     #endif
 }

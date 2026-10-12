@@ -7,7 +7,6 @@ struct SidebarView: View {
     private var rootCategories: [ItemCategory]
     @Query(sort: \Tag.name) private var tags: [Tag]
     @Query(sort: \SmartFilter.name) private var smartFilters: [SmartFilter]
-    @Query private var items: [Item]
     @State private var editingFilter: FilterEditing?
 
     private enum Naming {
@@ -19,20 +18,24 @@ struct SidebarView: View {
 
     var body: some View {
         @Bindable var library = library
+        // Counted by the store and kept until the next save: loading every
+        // item to count them made a big library slow to draw.
+        let _ = library.storeVersion
+        let counts = library.sidebarCounts()
         List(selection: $library.sidebar) {
             Section("Library") {
                 Label("Inbox", systemImage: "tray.and.arrow.down")
-                    .badge(items.filter { $0.inInbox && !$0.isTrashed }.count)
+                    .badge(counts.inbox)
                     .tag(SidebarSelection.inbox)
                 Label("All Items", systemImage: "tray.full")
                     .tag(SidebarSelection.all)
                 Label("Favorites", systemImage: "star")
                     .tag(SidebarSelection.favorites)
                 Label("Reminders", systemImage: "bell")
-                    .badge(items.filter { $0.isDue && !$0.isTrashed }.count)
+                    .badge(counts.due)
                     .tag(SidebarSelection.reminders)
                 Label("Read Later", systemImage: "book")
-                    .badge(items.filter { $0.readLaterAt != nil && !$0.isTrashed && $0.readingProgress < 0.98 }.count)
+                    .badge(counts.readLater)
                     .tag(SidebarSelection.readLater)
                 Label("Timeline", systemImage: "calendar")
                     .tag(SidebarSelection.timeline)
@@ -40,7 +43,7 @@ struct SidebarView: View {
                     Label(kind.pluralName, systemImage: kind.systemImage)
                         .tag(SidebarSelection.kind(kind))
                 }
-                let duplicateCount = library.duplicates(among: items).count
+                let duplicateCount = counts.duplicates
                 if duplicateCount > 0 || library.sidebar == .duplicates {
                     Label("Duplicates", systemImage: "square.on.square")
                         .badge(duplicateCount)
@@ -84,7 +87,7 @@ struct SidebarView: View {
                             Button("New Category Inside…") { startNaming(.new(parent: category)) }
                             Button("Rename…") { startNaming(.rename(category)) }
                             Button("Export…") {
-                                let inside = items.filter { category.contains($0.category) && !$0.isTrashed }
+                                let inside = library.items(in: category)
                                 library.exportRequest = .items(inside, name: category.name)
                             }
                             Divider()
@@ -140,6 +143,10 @@ struct SidebarView: View {
                     Button("Export All Highlights…") { library.exportRequest = .highlights }
                     Button("Export Everything…") { library.exportRequest = .everything }
                     Button("Restore from Backup…") { library.isRestoring = true }
+                    if StashStore.isTestLibrary {
+                        Divider()
+                        Button("Add 10,000 Test Items") { library.generateTestItems(10_000) }
+                    }
                 } label: {
                     Label("More", systemImage: "ellipsis.circle")
                 }

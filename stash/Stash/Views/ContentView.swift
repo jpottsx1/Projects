@@ -51,19 +51,7 @@ struct ContentView: View {
         .sheet(isPresented: $library.isAddingLink) {
             AddLinkSheet()
         }
-        .sheet(isPresented: $library.isAddingFeed) {
-            AddFeedSheet()
-        }
-        .sheet(isPresented: $library.isRecording) {
-            RecordingSheet()
-        }
-        .sheet(item: $library.passwordRequest) { request in
-            PasswordSheet(request: request)
-        }
-        .modifier(NewListPrompt())
-        .sheet(isPresented: $library.isManagingIndexedFolders) {
-            IndexedFoldersView()
-        }
+        .modifier(LibrarySheets())
         // A widget's item or New Note.
         .onOpenURL { url in
             if url.scheme == Library.linkScheme { library.open(stashURL: url) }
@@ -339,5 +327,33 @@ private struct PrintPanels: View {
                         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
                 }
             }
+    }
+}
+
+/// Sheets the library asks for from anywhere: kept apart from
+/// `ContentView`'s own, which were more than the compiler could check at once.
+private struct LibrarySheets: ViewModifier {
+    @Environment(Library.self) private var library
+
+    func body(content: Content) -> some View {
+        @Bindable var library = library
+        content
+        .sheet(isPresented: $library.isAddingFeed) {
+            AddFeedSheet()
+        }
+        .sheet(isPresented: $library.isManagingIndexedFolders) {
+            IndexedFoldersView()
+        }
+        .sheet(isPresented: $library.isRecording) {
+            RecordingSheet()
+        }
+        .sheet(item: $library.passwordRequest) { request in
+            PasswordSheet(request: request)
+        }
+        .modifier(NewListPrompt())
+        .sheet(item: Binding(get: { library.renamingItems.map(ItemGroup.init) },
+                             set: { library.renamingItems = $0?.items })) { group in
+            BatchRenameView(items: group.items)
+        }
     }
 }

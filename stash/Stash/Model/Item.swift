@@ -61,6 +61,9 @@ final class Item {
     /// until unlocked with Face ID, Touch ID or the device password. The
     /// contents aren't encrypted; this is privacy, not secrecy.
     var isLocked: Bool = false
+    /// A note to make others from (see `NoteTemplate`), kept to one side:
+    /// templates are only shown in Templates.
+    var isTemplate: Bool = false
 
     // Links
     var urlString: String?
@@ -106,6 +109,17 @@ final class Item {
     var extractedText: String = ""
 
     var category: ItemCategory?
+    /// The feed a link came from, and what the feed calls the post.
+    var feed: Feed?
+    var feedEntryID: String = ""
+    /// A document in an indexed folder: its file stays there, at this path
+    /// inside the folder, rather than being copied into Stash.
+    var indexedFolder: IndexedFolder?
+    var indexedPath: String?
+    /// The file's size and modification date when it was last read, to
+    /// see when it changes.
+    var indexedFileSize: Int = 0
+    var indexedFileDate: Date?
     @Relationship(inverse: \Tag.items) var tags: [Tag]? = []
     /// Items this one has been linked to by hand. `[[Title]]` links written
     /// in a note are read from its text instead, so they can't go stale.

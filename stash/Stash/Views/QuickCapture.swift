@@ -98,6 +98,7 @@ struct QuickCaptureView: View {
 /// Stash › Settings.
 struct SettingsView: View {
     @AppStorage("showMenuBarExtra") private var showMenuBarExtra = true
+    @AppStorage("dailyNoteFormat") private var dailyFormat = ""
 
     var body: some View {
         Form {
@@ -105,6 +106,15 @@ struct SettingsView: View {
             Text("Jot a note or save the web address on the clipboard from anywhere. What you save there goes to the Inbox.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+            Section("Daily Notes") {
+                TextField("Title format", text: $dailyFormat, prompt: Text(NoteTemplate.dailyTitleFormat))
+                Text("Today: \(NoteTemplate.format(.now, dailyFormat.isEmpty ? NoteTemplate.dailyTitleFormat : dailyFormat, NoteTemplate.Values()))")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Section("Feeds") {
+                FeedIntervalPicker()
+            }
         }
         .formStyle(.grouped)
         .frame(width: 420)

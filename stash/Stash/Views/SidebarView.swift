@@ -41,9 +41,13 @@ struct SidebarView: View {
                         .badge(duplicateCount)
                         .tag(SidebarSelection.duplicates)
                 }
+                Label("Templates", systemImage: "doc.on.doc")
+                    .tag(SidebarSelection.templates)
                 Label("Trash", systemImage: "trash")
                     .tag(SidebarSelection.trash)
             }
+
+            FeedsSection()
 
             Section("Smart Filters") {
                 ForEach(smartFilters) { filter in
@@ -110,15 +114,25 @@ struct SidebarView: View {
         .toolbar {
             ToolbarItem {
                 Menu {
+                    Button("Today’s Note") { library.openToday() }
                     Button("Link Graph") { library.isShowingGraph = true }
                     Button("Smart Rules…") { library.isEditingRules = true }
                     Divider()
+                    Button("Subscribe to Feed…") { library.isAddingFeed = true }
+                    Button("Check Feeds Now") { Task { await library.checkFeeds(all: true) } }
+                    FeedIntervalPicker()
+                    Divider()
+                    Button("Index Folder…") { library.isChoosingFolderToIndex = true }
+                    Button("Indexed Folders…") { library.isManagingIndexedFolders = true }
+                    Divider()
+                    Button("Import from Evernote…") { library.isImportingEvernote = true }
+                    Button("Import Notes Folder…") { library.isImportingNotesFolder = true }
                     Button("Export Everything…") { library.exportRequest = .everything }
                     Button("Restore from Backup…") { library.isRestoring = true }
                 } label: {
                     Label("More", systemImage: "ellipsis.circle")
                 }
-                .help("Smart rules, export and restore")
+                .help("Daily notes, feeds, folders, import and export")
             }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {

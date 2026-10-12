@@ -30,6 +30,8 @@ struct ItemDetailView: View {
         VStack(alignment: .leading, spacing: 0) {
             if item.isTrashed {
                 TrashBanner(item: item)
+            } else if item.isTemplate {
+                TemplateBanner(item: item)
             } else if item.inInbox {
                 InboxBanner(item: item)
             }

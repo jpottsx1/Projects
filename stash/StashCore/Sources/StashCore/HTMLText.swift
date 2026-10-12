@@ -118,7 +118,7 @@ public enum HTMLText {
     }
 
     /// `<meta name="x" content='y'>` -> ["name": "x", "content": "y"]
-    private static func attributes(of tag: String) -> [String: String] {
+    static func attributes(of tag: String) -> [String: String] {
         let regex = try! NSRegularExpression(
             pattern: #"([a-zA-Z][\w:-]*)\s*=\s*(?:"([^"]*)"|'([^']*)')"#, options: options)
         var result: [String: String] = [:]

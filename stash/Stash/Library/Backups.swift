@@ -115,6 +115,7 @@ extension Library {
             record.contentHash = item.contentHash
             record.extractedText = item.extractedText
             record.readingPosition = item.readingPosition
+            record.isTemplate = item.isTemplate ? true : nil
             record.archivedAt = item.archivedAt
             record.highlights = item.sortedHighlights.map {
                 .init(id: $0.uuid, text: $0.text, note: $0.note, color: $0.colorRaw, anchor: $0.anchorJSON,
@@ -263,6 +264,7 @@ extension Library {
             item.contentHash = record.contentHash
             item.extractedText = record.extractedText
             item.readingPosition = record.readingPosition
+            item.isTemplate = record.isTemplate ?? false
             context.insert(item)
             item.category = record.category.flatMap { categories[$0] }
 

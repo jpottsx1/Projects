@@ -85,11 +85,16 @@ Capabilities* for each target, find App Groups, and tick
 | | |
 |---|---|
 | **Notes** | Written in Markdown. *Write* shows it formatted as you type, as Typora does: headings large, bold bold, links tinted, with the Markdown marks tucked away except on the line you're editing. *Source* shows the plain Markdown, *Preview* the finished page, and *Split* (on a Mac or iPad) source and preview side by side. Formatting buttons above the note (on a Mac, with Cmd-B, Cmd-I and Cmd-K) or above the keyboard mark up the selected text: bold, italics, code, links, headings, lists, checkboxes, quotes. Ticking a `- [ ]` box in the preview ticks it in the note. |
+| **Templates** | Notes kept under *Templates* in the sidebar to make others from: *New Note* there makes one, or *Save as Template* copies any note. *New from Template* (the + menu, or *File* on a Mac) makes a note from one, filling in `{{date}}`, `{{time}}`, `{{weekday}}`, `{{yesterday}}`, `{{tomorrow}}`, `{{title}}`, `{{clipboard}}`, and `{{date:EEEE d MMMM}}` in any date format, in its title and text. Its pictures, tags and category come along. |
+| **Daily notes** | *Today's Note* (the + menu or the sidebar's ⋯ menu; Shift-Cmd-T on a Mac) opens the day's note, titled `2026-10-12`, making it the first time in the *Daily Notes* category. Tick *Daily Note* on a template to make each day's note from it. On a Mac, *Stash › Settings* changes the title's date format. |
 | **Note history** | Each time you finish editing a note (and every ten minutes during a long session) the version before is kept, up to fifty. *History* in the side panel shows them; any can be put back, and what was there is kept as a version too. |
 | **Documents** | Any file: PDFs and EPUB books open in place, other files show a Quick Look preview. Each is copied into the app, so moving or deleting the original doesn't lose it. Books remember where you stopped reading, on every device. |
 | **Scanning** | On an iPhone or iPad, *Scan Documents* in the + menu photographs paper pages into one PDF. On a Mac, *File › Import from iPhone or iPad* does the same with Continuity Camera. Scans have their words laid invisibly over the pictures, so they can be searched, selected and highlighted. PDFs scanned elsewhere without any text are read the same way for search. |
 | **Highlights** | Select text in a PDF, a book or a saved article and choose *Highlight* (or a colour, or *Highlight and Add Note*). Highlights are listed in the side panel, where choosing one scrolls to it; tapping one in the document opens its note. Highlights and notes are searchable, and the file itself is left untouched. |
 | **Links** | Paste or type a web address. The page's title and description are fetched, and a full copy of the page (text, pictures and styles) is saved, so you can read it offline exactly as it was. Pages with an article also get a clean copy of just the article, without menus, ads or comments, shown by default (*Article* / *Full Page* above it). Its words are there offline; its pictures load from the web. Links saved before this get one when you choose *Refresh*. Search covers the page's words, including text the page adds itself once it has loaded. *Refresh* fetches it all again. |
+| **Feeds** | *Subscribe to Feed…* takes a feed's address or just the site's (Stash finds the feed). RSS, Atom and JSON Feed. New posts arrive as unread links under the feed in the sidebar, saved with a clean article like any link; a post you've deleted doesn't come back. Feeds are checked when Stash opens and every hour while it's open (the ⋯ menu or *Settings* changes how often). Right-click a feed to check it, mark it read, rename it, file its new posts in a category, or unsubscribe. |
+| **Indexed folders** | *Index Folder…* shows a folder's documents in Stash while the files stay where they are, as DEVONthink does. It gets a category, with one inside for each folder in it. Files added, changed, renamed, moved or deleted there are followed: at once on a Mac, when Stash comes to the front on an iPhone or iPad. A moved file keeps its tags, notes and highlights. Indexed files are only read, never changed; deleting one in Stash leaves the file alone. The folder belongs to the device that indexed it: others see its items, but not the files. *Indexed Folders…* lists them. |
+| **Importing notes** | *Import from Evernote…* takes `.enex` exports: each becomes a category, with its notes' text, tags, dates, to-dos, tables, pictures (in the note) and other attachments (as documents linked from it). *Import Notes Folder…* takes a folder of Markdown, text and HTML files, as Obsidian, Bear, iA Writer and Apple Notes exporters make: front-matter titles, tags and dates are kept, pictures they show go into the notes, other files come in as documents, and folders become categories. |
 | **Linking items** | Type `[[` in a note and pick from the suggestions (arrows and Return or Tab on a keyboard, or tap one), or type `[[Title]]` in full, or use *Link to Item…* in the side panel for any kind of item. Each item lists what it links to and what links to it. Renaming an item updates the `[[links]]` that point at it. Tapping a link to an item that doesn't exist yet creates it. |
 | **Categories** | One per item, and they can nest. Choosing a category also shows everything in the categories inside it. |
 | **Tags** | As many per item as you like. Type them separated by commas. Tags are single words: "to read" becomes `to-read`. |
@@ -131,7 +136,8 @@ Config/                 Stash.xcconfig (the sync and sharing switches),
                         entitlements, Info.plist additions
 Stash/                  the app (SwiftUI + SwiftData), shared by Mac and iPhone
   StashApp.swift        window, menus
-  Model/                Item, Tag, ItemCategory, SmartFilter, Highlight, SmartRule
+  Model/                Item, Tag, ItemCategory, SmartFilter, Highlight, SmartRule,
+                        NoteAttachment, NoteVersion, Feed, IndexedFolder
   Library/              Library: every change goes through it
                         SearchIndex: SQLite full-text search
                         FileStore: copies of imported documents
@@ -143,7 +149,9 @@ Widgets/                Home Screen and desktop widgets (StashWidgets target)
 StashCore/              no-interface logic, with tests
                         [[link]] parsing, search syntax, Markdown blocks,
                         tag names, web page text, ZIP files, EPUB books,
-                        highlight anchors, the backup format
+                        highlight anchors, the backup format, templates,
+                        feeds (RSS, Atom, JSON Feed), HTML to Markdown,
+                        Evernote exports, indexed-folder changes
 ```
 
 - **Data** is kept with SwiftData in the app's own storage. Imported files
@@ -184,6 +192,17 @@ StashCore/              no-interface logic, with tests
   when it comes to the front, or as soon as the extension signals. The
   app writes its category list into the same folder for the share sheet
   to offer.
+- **Feeds** are read by `FeedParser` (StashCore). Each feed remembers the
+  posts it has seen (`Feed.seenIDs`), so deleting a post doesn't bring it
+  back, and a post already in the library isn't added twice.
+- **Indexed folders** are found again through a security-scoped bookmark,
+  which only works on the device that made it. `FolderIndex` (StashCore)
+  compares what's on disk with what the library last saw there; a file
+  that vanishes as one the same size and age appears is a move. On a Mac
+  FSEvents says when to look (`FolderWatcher`).
+- **Importing** turns HTML into Markdown with `HTMLMarkdown` (StashCore),
+  which reads Evernote's ENML too; Evernote names attachments by their MD5,
+  worked out by `MD5`.
 - `Config/Stash.xcconfig` holds both switches. The entitlements files next
   to it are chosen from them, and none is used when both are off.
 
@@ -194,7 +213,9 @@ The Mac UI tests (`StashUITests`) click through the app in a separate test
 library, so your own is never touched: Cmd-U with the Stash scheme and My
 Mac, or `xcodebuild test -scheme Stash -destination platform=macOS`. To try
 the app by hand in the same way, launch it with `-StashTestLibrary YES`
-(add `-StashResetTestLibrary YES` to start it empty).
+(add `-StashResetTestLibrary YES` to start it empty). The test that
+subscribes to a feed needs the internet, so it's skipped unless
+`TEST_RUNNER_STASH_NETWORK_TESTS=1` is set.
 
 ## Not done yet
 

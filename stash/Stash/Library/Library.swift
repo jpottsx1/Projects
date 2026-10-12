@@ -161,7 +161,8 @@ final class Library {
 
     init(context: ModelContext) {
         self.context = context
-        let support = URL.applicationSupportDirectory.appendingPathComponent("Stash", isDirectory: true)
+        let support = URL.applicationSupportDirectory
+            .appendingPathComponent(StashStore.isTestLibrary ? "StashTest" : "Stash", isDirectory: true)
         files = FileStore(root: support.appendingPathComponent("Files", isDirectory: true))
         index = SearchIndex(url: support.appendingPathComponent("SearchIndex.sqlite"))
         refreshAfterStoreChange()
@@ -335,6 +336,89 @@ final class Library {
             keepVersion(of: item)
             beginEditing(item)
         }
+    }
+
+    // MARK: - Pictures in notes
+
+    static let attachmentScheme = "attachment:"
+
+    /// Stores a picture with a note and returns the Markdown that shows it.
+    func addPicture(_ data: Data, fileExtension: String, to item: Item) -> String {
+        let name = String(UUID().uuidString.prefix(8)).lowercased() + "." + (fileExtension.isEmpty ? "png" : fileExtension)
+        let attachment = NoteAttachment(fileName: name, data: data)
+        context.insert(attachment)
+        attachment.item = item
+        try? files.write(data, to: "\(item.uuid.uuidString)/Attachments/\(name)")
+        save()
+        return "![](\(Self.attachmentScheme)\(name))"
+    }
+
+    /// Where a picture in a note is: a stored attachment, written out if
+    /// it's only just arrived from another device, or a web address.
+    func pictureURL(_ source: String, in item: Item) -> URL? {
+        guard source.hasPrefix(Self.attachmentScheme) else {
+            return URL(string: source).flatMap { ["http", "https"].contains($0.scheme?.lowercased() ?? "") ? $0 : nil }
+        }
+        let name = String(source.dropFirst(Self.attachmentScheme.count))
+        let path = "\(item.uuid.uuidString)/Attachments/\(name)"
+        if !files.exists(path), let data = item.attachments?.first(where: { $0.fileName == name })?.data {
+            try? files.write(data, to: path)
+        }
+        return files.exists(path) ? files.url(for: path) : nil
+    }
+
+    /// Pictures no longer in their note's text, a day after they were
+    /// added (so one whose note hasn't synced yet isn't taken for unused).
+    private func removeUnusedPictures() {
+        let attachments = (try? context.fetch(FetchDescriptor<NoteAttachment>())) ?? []
+        let dayAgo = Date.now.addingTimeInterval(-86_400)
+        for attachment in attachments where attachment.createdAt < dayAgo {
+            guard let item = attachment.item else {
+                context.delete(attachment)
+                continue
+            }
+            if !item.body.contains(Self.attachmentScheme + attachment.fileName) {
+                try? FileManager.default.removeItem(at: files.url(for: "\(item.uuid.uuidString)/Attachments/\(attachment.fileName)"))
+                context.delete(attachment)
+            }
+        }
+    }
+
+    // MARK: - Link graph
+
+    var isShowingGraph = false
+
+    /// Items that link or are linked to, and the links between them (as
+    /// pairs of indices): hand-made links and `[[links]]` in notes.
+    func linkGraph() -> (items: [Item], links: [(Int, Int)]) {
+        let all = ((try? context.fetch(FetchDescriptor<Item>())) ?? []).filter { !$0.isTrashed }
+        var byTitle: [String: Item] = [:]
+        for item in all where !item.title.isEmpty {
+            let key = WikiLinks.key(item.title)
+            if byTitle[key] == nil { byTitle[key] = item }
+        }
+        var pairs: Set<[UUID]> = []
+        for item in all {
+            for target in item.linksTo ?? [] where target != item && !target.isTrashed {
+                pairs.insert([item.uuid, target.uuid].sorted { $0.uuidString < $1.uuidString })
+            }
+            // A locked note's text isn't read.
+            guard item.kind == .note, !item.isLocked else { continue }
+            for title in WikiLinks.titles(in: item.body) {
+                if let target = byTitle[WikiLinks.key(title)], target != item {
+                    pairs.insert([item.uuid, target.uuid].sorted { $0.uuidString < $1.uuidString })
+                }
+            }
+        }
+        let linked = Set(pairs.flatMap { $0 })
+        let items = all.filter { linked.contains($0.uuid) }
+            .sorted { ($0.createdAt, $0.uuid.uuidString) < ($1.createdAt, $1.uuid.uuidString) }
+        let index = Dictionary(uniqueKeysWithValues: items.enumerated().map { ($1.uuid, $0) })
+        let links = pairs.compactMap { pair -> (Int, Int)? in
+            guard let a = index[pair[0]], let b = index[pair[1]] else { return nil }
+            return (a, b)
+        }.sorted { ($0.0, $0.1) < ($1.0, $1.1) }
+        return (items, links)
     }
 
     // MARK: - Markup
@@ -1371,6 +1455,7 @@ final class Library {
         if let selection, !isAlive(selection) { self.selection = nil }
         mergeDuplicates()
         deleteOldTrash()
+        removeUnusedPictures()
         // Only tidy files away when the library definitely loaded: an empty
         // list from a failed fetch would otherwise delete every document.
         guard let items = try? context.fetch(FetchDescriptor<Item>()) else { return }
@@ -1508,7 +1593,7 @@ final class Library {
 
     @ObservationIgnored private var pendingWidgetUpdate: Task<Void, Never>?
     /// Where the widgets read from; nil without an App Group.
-    @ObservationIgnored private let widgetFolder = WidgetSnapshot.folder()
+    @ObservationIgnored private let widgetFolder = StashStore.isTestLibrary ? nil : WidgetSnapshot.folder()
 
     /// Saves come in bursts while typing; the widgets are told once it settles.
     private func scheduleWidgetUpdate() {

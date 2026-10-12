@@ -106,10 +106,11 @@ struct SidebarView: View {
             }
         }
         .listStyle(.sidebar)
-        .navigationTitle("Stash")
+        .navigationTitle(StashStore.isTestLibrary ? "Stash (Test Library)" : "Stash")
         .toolbar {
             ToolbarItem {
                 Menu {
+                    Button("Link Graph") { library.isShowingGraph = true }
                     Button("Smart Rules…") { library.isEditingRules = true }
                     Divider()
                     Button("Export Everything…") { library.exportRequest = .everything }

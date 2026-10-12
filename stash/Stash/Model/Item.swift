@@ -96,6 +96,8 @@ final class Item {
     /// Where reading stopped in a book: "chapter path|fraction scrolled".
     var readingPosition: String = ""
     @Relationship(deleteRule: .cascade, inverse: \Highlight.item) var highlights: [Highlight]? = []
+    /// Pictures in a note.
+    @Relationship(deleteRule: .cascade, inverse: \NoteAttachment.item) var attachments: [NoteAttachment]? = []
     /// A note's earlier versions.
     @Relationship(deleteRule: .cascade, inverse: \NoteVersion.item) var versions: [NoteVersion]? = []
 

@@ -12,12 +12,16 @@ import UniformTypeIdentifiers
 @MainActor
 final class SpotlightIndex {
     private let index = CSSearchableIndex.default()
+    /// Off for the test library, which would otherwise replace the real
+    /// library's entries.
+    private let isEnabled = !StashStore.isTestLibrary
     private var waiting: [UUID: Item] = [:]
     private var flush: Task<Void, Never>?
     /// Spotlight only needs enough to find an item by.
     private static let textLimit = 20_000
 
     func replaceAll(with items: [Item]) {
+        guard isEnabled else { return }
         waiting = [:]
         flush?.cancel()
         let searchable = items.filter { !$0.isTrashed && !$0.isLocked }.map(Self.searchable)
@@ -28,6 +32,7 @@ final class SpotlightIndex {
 
     /// Indexes the item shortly, or removes it if it's in the Trash.
     func update(_ item: Item) {
+        guard isEnabled else { return }
         waiting[item.uuid] = item
         flush?.cancel()
         flush = Task { [weak self] in
@@ -38,6 +43,7 @@ final class SpotlightIndex {
     }
 
     func remove(_ ids: [UUID]) {
+        guard isEnabled else { return }
         for id in ids { waiting[id] = nil }
         guard !ids.isEmpty else { return }
         index.deleteSearchableItems(withIdentifiers: ids.map(\.uuidString))

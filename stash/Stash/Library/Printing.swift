@@ -36,11 +36,19 @@ final class ItemPrinter: NSObject, WKNavigationDelegate {
            let data = try? Data(contentsOf: copy) {
             return .archive(data, baseURL: item.url)
         }
-        return .html(page(for: item), baseURL: item.url)
+        return .html(page(for: item) { library.pictureURL($0, in: item) }, baseURL: item.url)
     }
 
     /// The item as a printable page.
-    static func page(for item: Item) -> String {
+    static func page(for item: Item, pictureURL: (String) -> URL? = { _ in nil }) -> String {
+        // Stored pictures go in as data, since the page is loaded from a string.
+        let picture: (String) -> String? = { source in
+            guard let url = pictureURL(source) else { return nil }
+            guard url.isFileURL else { return url.absoluteString }
+            guard let data = try? Data(contentsOf: url) else { return nil }
+            let type = UTType(filenameExtension: url.pathExtension)?.preferredMIMEType ?? "image/png"
+            return "data:\(type);base64," + data.base64EncodedString()
+        }
         let escape = MarkdownHTML.escape
         var about: [String] = []
         if let url = item.urlString { about.append("<a href=\"\(escape(url))\">\(escape(url))</a>") }
@@ -52,7 +60,7 @@ final class ItemPrinter: NSObject, WKNavigationDelegate {
         var body = ""
         switch item.kind {
         case .note:
-            body = MarkdownHTML.render(item.body)
+            body = MarkdownHTML.render(item.body, picture: picture)
         case .link:
             if let article = item.article {
                 body = article.html
@@ -81,6 +89,8 @@ final class ItemPrinter: NSObject, WKNavigationDelegate {
             img { max-width: 100%; }
             pre, code { font: 10pt ui-monospace, Menlo, monospace; }
             pre { white-space: pre-wrap; background: #f4f4f4; padding: 6pt; }
+            table { border-collapse: collapse; margin: 6pt 0; }
+            th, td { border: 0.5pt solid #bbb; padding: 3pt 6pt; text-align: left; }
             blockquote { margin: 6pt 0; padding-left: 10pt; border-left: 2pt solid #ccc; color: #444; }
             a { color: #1a5fb4; text-decoration: none; }
             li.task { list-style: none; margin-left: -1.2em; }

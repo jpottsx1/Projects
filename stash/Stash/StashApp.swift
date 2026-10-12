@@ -10,17 +10,33 @@ final class StashStore {
     let container: ModelContainer
     let library: Library
 
+    /// Launched with `-StashTestLibrary YES` (or `STASH_TEST_LIBRARY` set):
+    /// a separate library to try things in, never synced, kept out of
+    /// Spotlight, notifications and widgets, leaving the real one alone.
+    static let isTestLibrary = UserDefaults.standard.bool(forKey: "StashTestLibrary")
+        || ProcessInfo.processInfo.environment["STASH_TEST_LIBRARY"] != nil
+
     private init() {
-        let schema = Schema([Item.self, Tag.self, ItemCategory.self, SmartFilter.self, Highlight.self, SmartRule.self, NoteVersion.self])
+        let schema = Schema([Item.self, Tag.self, ItemCategory.self, SmartFilter.self, Highlight.self, SmartRule.self, NoteVersion.self, NoteAttachment.self])
         // Syncs through the iCloud container named in the entitlements,
         // which only exist when ICLOUD_SYNC is on (Config/Stash.xcconfig).
         // Said explicitly either way: left to itself SwiftData syncs
         // whenever it finds an iCloud entitlement.
         #if ICLOUD_SYNC
-        let configuration = ModelConfiguration(schema: schema, cloudKitDatabase: .automatic)
+        var configuration = ModelConfiguration(schema: schema, cloudKitDatabase: .automatic)
         #else
-        let configuration = ModelConfiguration(schema: schema, cloudKitDatabase: .none)
+        var configuration = ModelConfiguration(schema: schema, cloudKitDatabase: .none)
         #endif
+        if Self.isTestLibrary {
+            let folder = URL.applicationSupportDirectory.appendingPathComponent("StashTest", isDirectory: true)
+            // UI tests start each run from nothing.
+            if UserDefaults.standard.bool(forKey: "StashResetTestLibrary") {
+                try? FileManager.default.removeItem(at: folder)
+            }
+            try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            configuration = ModelConfiguration(schema: schema, url: folder.appendingPathComponent("Library.store"),
+                                               cloudKitDatabase: .none)
+        }
         do {
             container = try ModelContainer(for: schema, configurations: configuration)
         } catch {
@@ -78,6 +94,13 @@ struct StashApp: App {
         Settings {
             SettingsView()
         }
+
+        Window("Link Graph", id: "graph") {
+            LinkGraphView()
+                .environment(library)
+                .modelContainer(container)
+        }
+        .defaultSize(width: 800, height: 600)
         #else
         WindowGroup {
             ContentView()
@@ -150,6 +173,8 @@ struct StashCommands: Commands {
             Button("Put Back") { library.restore(chosen.filter(\.isTrashed)) }
                 .disabled(!chosen.contains(where: \.isTrashed))
             Divider()
+            Button("Link Graph") { library.isShowingGraph = true }
+                .keyboardShortcut("g", modifiers: [.command, .option])
             Button("Smart Rules…") { library.isEditingRules = true }
                 .keyboardShortcut("r", modifiers: [.command, .option])
         }

@@ -10,6 +10,11 @@ SwiftData, one multiplatform target. Read README.md first.
 - `Stash.xcodeproj` uses **Xcode 16 file-system-synchronized groups**:
   any file put under `Stash/` is part of the app, so adding a Swift file
   doesn't require editing the project file.
+- **Test library**: launched with `-StashTestLibrary YES`, Stash uses a
+  separate library (Application Support/StashTest) that never syncs and
+  stays out of Spotlight, notifications and widgets. The Mac UI tests
+  (`StashUITests`, in the Stash scheme) use it; run them before trusting a
+  change to the Mac interface.
 - Three targets: **Stash** (the app), **StashShare** (the share
   extension, folder `ShareExtension/`) and **StashWidgets** (the widgets,
   folder `Widgets/`), both embedded in the app. The widgets read a snapshot

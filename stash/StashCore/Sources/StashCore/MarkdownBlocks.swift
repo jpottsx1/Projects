@@ -12,6 +12,11 @@ public enum MarkdownBlock: Equatable {
     case quote(String)
     case code(language: String?, text: String)
     case rule
+    /// A picture on its own line: `![alt](source)`. The source is a web
+    /// address, or `attachment:name` for one stored with the note.
+    case image(alt: String, source: String)
+    /// A table: its heading row, then the rest, cells as written.
+    case table(header: [String], rows: [[String]])
 }
 
 /// The block structure of a note: enough Markdown for everyday notes, not
@@ -58,7 +63,22 @@ public enum MarkdownBlocks {
                 continue
             }
 
-            if trimmed.isEmpty {
+            if let picture = image(trimmed) {
+                flush()
+                blocks.append(.image(alt: picture.alt, source: picture.source))
+            } else if MarkdownTable.isRow(trimmed), index + 1 < lines.count,
+                      MarkdownTable.isSeparator(lines[index + 1].trimmingCharacters(in: .whitespaces)) {
+                flush()
+                let header = MarkdownTable.cells(trimmed)
+                var rows: [[String]] = []
+                index += 2
+                while index < lines.count, MarkdownTable.isRow(lines[index].trimmingCharacters(in: .whitespaces)) {
+                    rows.append(MarkdownTable.cells(lines[index].trimmingCharacters(in: .whitespaces)))
+                    index += 1
+                }
+                blocks.append(.table(header: header, rows: rows))
+                continue
+            } else if trimmed.isEmpty {
                 flush()
             } else if case let (level, text)? = heading(trimmed) {
                 flush()
@@ -122,6 +142,16 @@ public enum MarkdownBlocks {
         let rest = line.dropFirst(hashes)
         guard rest.isEmpty || rest.first == " " else { return nil }
         return (hashes, rest.trimmingCharacters(in: .whitespaces))
+    }
+
+    /// `![alt](source)`, alone on its line.
+    static func image(_ line: String) -> (alt: String, source: String)? {
+        guard line.hasPrefix("!["), line.hasSuffix(")"),
+              let middle = line.range(of: "]("), line.distance(from: line.startIndex, to: middle.lowerBound) >= 2 else { return nil }
+        let alt = String(line[line.index(line.startIndex, offsetBy: 2)..<middle.lowerBound])
+        let source = String(line[middle.upperBound..<line.index(before: line.endIndex)])
+        guard !source.isEmpty, !source.contains(" "), !alt.contains("]") else { return nil }
+        return (alt, source)
     }
 
     static func isRule(_ line: String) -> Bool {

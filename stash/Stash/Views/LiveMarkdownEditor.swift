@@ -1,13 +1,16 @@
 import SwiftUI
 import StashCore
+import UniformTypeIdentifiers
 #if os(macOS)
 import AppKit
 typealias PlatformFont = NSFont
 typealias PlatformColor = NSColor
+typealias PlatformImage = NSImage
 #else
 import UIKit
 typealias PlatformFont = UIFont
 typealias PlatformColor = UIColor
+typealias PlatformImage = UIImage
 #endif
 
 /// A note's Markdown, shown formatted as it's typed, as Typora does:
@@ -22,6 +25,13 @@ struct LiveMarkdownEditor {
     var onCursorMoved: (String.Index?) -> Void
     /// The selection as character offsets; empty for a cursor.
     var onSelectionChanged: (Range<Int>) -> Void
+    /// A picture's file, from its `![](source)`.
+    var pictureURL: (String) -> URL? = { _ in nil }
+    /// Stores a pasted or dropped picture (its data and file extension)
+    /// and returns the Markdown to put in the note.
+    var addPicture: (Data, String) -> String? = { _, _ in nil }
+    /// Typora's focus mode: everything but the paragraph being written is dimmed.
+    var focusMode = false
 
     @MainActor func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -35,6 +45,11 @@ struct LiveMarkdownEditor {
         /// one of these a moment late, after more has been typed; putting
         /// it back would lose the typing, so it's recognised and ignored.
         private var recentlySent: [String] = []
+        /// Pictures shown in place of their `![](…)` lines: where, what, how big.
+        private var pictures: [(range: NSRange, image: PlatformImage, size: CGSize)] = []
+        private var imageCache: [URL: PlatformImage] = [:]
+        /// How wide pictures can be: the text's width.
+        var availableWidth: CGFloat = 500
 
         func send(_ text: String) {
             recentlySent.append(text)
@@ -80,6 +95,7 @@ struct LiveMarkdownEditor {
             let active = MarkdownStyling.lines(touching: selected, in: text)
             activeLines = active
 
+            pictures = []
             storage.beginEditing()
             let whole = NSRange(location: 0, length: storage.length)
             storage.setAttributes(Self.baseAttributes, range: whole)
@@ -88,13 +104,39 @@ struct LiveMarkdownEditor {
                 guard range.location + range.length <= storage.length else { continue }
                 apply(span.style, to: range, in: storage, active: active)
             }
+            styledFocusMode = parent.focusMode
+            if parent.focusMode {
+                let paragraph = MarkdownStyling.paragraph(touching: selected, in: text)
+                focusedParagraph = paragraph
+                dimOutside(paragraph, in: storage)
+            } else {
+                focusedParagraph = nil
+            }
             storage.endEditing()
         }
 
         /// Whether the selection has moved onto other lines, which shows different marks.
         func needsRestyle(for selection: NSRange, in text: String) -> Bool {
             let selected = selection.location..<(selection.location + selection.length)
+            if parent.focusMode, MarkdownStyling.paragraph(touching: selected, in: text) != focusedParagraph { return true }
             return MarkdownStyling.lines(touching: selected, in: text) != activeLines
+        }
+
+        private var focusedParagraph: Range<Int>?
+        /// The focus mode the text was last styled for.
+        var styledFocusMode = false
+
+        /// Dims all but the paragraph being written, leaving hidden marks hidden.
+        private func dimOutside(_ paragraph: Range<Int>, in storage: NSTextStorage) {
+            let dim = PlatformColor.tertiaryLabelColor
+            for range in [0..<paragraph.lowerBound, paragraph.upperBound..<storage.length] where !range.isEmpty {
+                let nsRange = NSRange(location: range.lowerBound, length: range.count)
+                storage.enumerateAttribute(.foregroundColor, in: nsRange) { value, part, _ in
+                    if (value as? PlatformColor) != PlatformColor.clear {
+                        storage.addAttribute(.foregroundColor, value: dim, range: part)
+                    }
+                }
+            }
         }
 
         private func apply(_ style: MarkdownStyling.Style, to range: NSRange, in storage: NSTextStorage, active: Range<Int>) {
@@ -134,7 +176,66 @@ struct LiveMarkdownEditor {
                 storage.addAttribute(.foregroundColor, value: PlatformColor.secondaryLabelColor, range: range)
             case .task(let done):
                 storage.addAttribute(.foregroundColor, value: done ? tint : PlatformColor.secondaryLabelColor, range: range)
+            case .tableRow:
+                // Fixed-width, so the columns of a tidied table line up.
+                storage.addAttribute(.font, value: PlatformFont.monospacedSystemFont(ofSize: Self.bodySize * 0.92, weight: .regular), range: range)
+            case .image(let source):
+                let onLine = range.location >= active.lowerBound && range.location < max(active.upperBound, active.lowerBound + 1)
+                guard !onLine, let image = image(for: source) else {
+                    storage.addAttribute(.foregroundColor, value: PlatformColor.secondaryLabelColor, range: range)
+                    return
+                }
+                // The Markdown tucked away, with room above it for the picture.
+                let size = fittedSize(of: image)
+                let paragraph = NSMutableParagraphStyle()
+                paragraph.paragraphSpacingBefore = size.height + 6
+                storage.addAttribute(.paragraphStyle, value: paragraph, range: range)
+                storage.addAttribute(.font, value: PlatformFont.systemFont(ofSize: 0.1), range: range)
+                storage.addAttribute(.foregroundColor, value: PlatformColor.clear, range: range)
+                pictures.append((range, image, size))
             }
+        }
+
+        private func image(for source: String) -> PlatformImage? {
+            guard let url = parent.pictureURL(source), url.isFileURL else { return nil }
+            if let cached = imageCache[url] { return cached }
+            #if os(macOS)
+            let image = NSImage(contentsOf: url)
+            #else
+            let image = UIImage(contentsOfFile: url.path)
+            #endif
+            if let image { imageCache[url] = image }
+            return image
+        }
+
+        private func fittedSize(of image: PlatformImage) -> CGSize {
+            let size = image.size
+            guard size.width > 0, size.height > 0 else { return CGSize(width: 1, height: 1) }
+            let scale = min(1, max(availableWidth, 50) / size.width, 360 / size.height)
+            return CGSize(width: size.width * scale, height: size.height * scale)
+        }
+
+        /// Puts each picture in the room left above its line.
+        func layoutPictures(in textView: PictureTextView) {
+            for view in textView.pictureViews { view.removeFromSuperview() }
+            textView.pictureViews = []
+            guard let (layoutManager, container) = textView.lineLayout else { return }
+            layoutManager.ensureLayout(for: container)
+            let origin = textView.textOrigin
+            for picture in pictures {
+                let glyphs = layoutManager.glyphRange(forCharacterRange: picture.range, actualCharacterRange: nil)
+                guard glyphs.length > 0 else { continue }
+                let line = layoutManager.lineFragmentRect(forGlyphAt: glyphs.location, effectiveRange: nil)
+                let frame = CGRect(x: origin.x + container.lineFragmentPadding, y: origin.y + line.minY,
+                                   width: picture.size.width, height: picture.size.height)
+                textView.addPicture(picture.image, frame: frame)
+            }
+        }
+
+        /// A picture pasted or dropped in, on a line of its own.
+        func insertPicture(_ data: Data, fileExtension: String, into textView: PictureTextView) {
+            guard let markdown = parent.addPicture(data, fileExtension) else { return }
+            textView.insertOwnLine(markdown)
         }
 
         private enum Trait { case bold, italic }
@@ -187,34 +288,147 @@ extension UIColor {
 #endif
 
 #if os(macOS)
+/// The text view, able to show pictures over the text and to take pasted
+/// or dropped pictures.
+final class PictureTextView: NSTextView {
+    var pictureViews: [NSView] = []
+    var onPicture: ((Data, String) -> Void)?
+
+    var textOrigin: CGPoint { textContainerOrigin }
+
+    /// TextKit 1's layout, which says where each line is.
+    var lineLayout: (NSLayoutManager, NSTextContainer)? {
+        guard let layoutManager, let textContainer else { return nil }
+        return (layoutManager, textContainer)
+    }
+
+    func addPicture(_ image: NSImage, frame: CGRect) {
+        let view = NSImageView(frame: frame)
+        view.image = image
+        view.imageScaling = .scaleProportionallyUpOrDown
+        view.setAccessibilityIdentifier("notePicture")
+        view.setAccessibilityLabel("Picture")
+        view.wantsLayer = true
+        view.layer?.cornerRadius = 6
+        view.layer?.masksToBounds = true
+        addSubview(view)
+        pictureViews.append(view)
+    }
+
+    func insertOwnLine(_ text: String) {
+        let selection = selectedRange()
+        let string = self.string as NSString
+        let before = selection.location > 0 && string.character(at: selection.location - 1) != 0x0A ? "\n" : ""
+        insertText(before + text + "\n", replacementRange: selection)
+    }
+
+    override func paste(_ sender: Any?) {
+        let pasteboard = NSPasteboard.general
+        if pasteboard.string(forType: .string) == nil, let data = Self.pictureData(from: pasteboard) {
+            onPicture?(data, "png")
+        } else {
+            super.paste(sender)
+        }
+    }
+
+    /// The pictures shown over the text are part of the note, so they're
+    /// offered to VoiceOver with it.
+    override func accessibilityChildren() -> [Any]? {
+        (super.accessibilityChildren() ?? []) + pictureViews
+    }
+
+    /// A plain-text view turns Paste off when there's only a picture to
+    /// paste; pictures are welcome here.
+    override func validateUserInterfaceItem(_ item: any NSValidatedUserInterfaceItem) -> Bool {
+        if item.action == #selector(paste(_:)), Self.pictureData(from: .general) != nil { return true }
+        return super.validateUserInterfaceItem(item)
+    }
+
+    override var readablePasteboardTypes: [NSPasteboard.PasteboardType] {
+        super.readablePasteboardTypes + [.png, .tiff]
+    }
+
+    override func performDragOperation(_ sender: any NSDraggingInfo) -> Bool {
+        let options: [NSPasteboard.ReadingOptionKey: Any] = [
+            .urlReadingFileURLsOnly: true, .urlReadingContentsConformToTypes: [UTType.image.identifier],
+        ]
+        if let urls = sender.draggingPasteboard.readObjects(forClasses: [NSURL.self], options: options) as? [URL], !urls.isEmpty {
+            for url in urls {
+                if let data = try? Data(contentsOf: url) { onPicture?(data, url.pathExtension.lowercased()) }
+            }
+            return true
+        }
+        return super.performDragOperation(sender)
+    }
+
+    /// A picture on the pasteboard, as PNG.
+    static func pictureData(from pasteboard: NSPasteboard) -> Data? {
+        if let png = pasteboard.data(forType: .png) { return png }
+        guard let tiff = pasteboard.data(forType: .tiff), let bitmap = NSBitmapImageRep(data: tiff) else { return nil }
+        return bitmap.representation(using: .png, properties: [:])
+    }
+}
+
 extension LiveMarkdownEditor: NSViewRepresentable {
     func makeNSView(context: Context) -> NSScrollView {
-        let scrollView = NSTextView.scrollableTextView()
-        guard let textView = scrollView.documentView as? NSTextView else { return scrollView }
+        // TextKit 1, which says where each line is, for placing pictures.
+        let textView = PictureTextView(usingTextLayoutManager: false)
+        let scrollView = NSScrollView()
+        scrollView.documentView = textView
+        scrollView.hasVerticalScroller = true
+        scrollView.drawsBackground = false
+        textView.minSize = .zero
+        textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: .greatestFiniteMagnitude)
+        textView.isVerticallyResizable = true
+        textView.isHorizontallyResizable = false
+        textView.autoresizingMask = [.width]
+        textView.textContainer?.widthTracksTextView = true
         textView.delegate = context.coordinator
+        textView.setAccessibilityIdentifier("noteEditor")
         textView.isRichText = false
         textView.allowsUndo = true
         textView.isAutomaticQuoteSubstitutionEnabled = false
         textView.isAutomaticDashSubstitutionEnabled = false
         textView.textContainerInset = NSSize(width: 12, height: 12)
         textView.drawsBackground = false
-        scrollView.drawsBackground = false
+        textView.registerForDraggedTypes([.fileURL])
         textView.typingAttributes = Coordinator.baseAttributes
         textView.string = text
+        let coordinator = context.coordinator
+        textView.onPicture = { [weak textView] data, ext in
+            guard let textView else { return }
+            coordinator.insertPicture(data, fileExtension: ext, into: textView)
+        }
+        textView.postsFrameChangedNotifications = true
+        NotificationCenter.default.addObserver(forName: NSView.frameDidChangeNotification, object: textView, queue: .main) { [weak textView] _ in
+            MainActor.assumeIsolated {
+                guard let textView, let storage = textView.textStorage else { return }
+                let width = textView.bounds.width - 2 * textView.textContainerInset.width - 10
+                guard abs(width - coordinator.availableWidth) > 1 else { return }
+                coordinator.availableWidth = width
+                coordinator.restyle(storage, selection: textView.selectedRange())
+                coordinator.layoutPictures(in: textView)
+            }
+        }
         if let storage = textView.textStorage {
             context.coordinator.restyle(storage, selection: textView.selectedRange())
+            DispatchQueue.main.async { context.coordinator.layoutPictures(in: textView) }
         }
         return scrollView
     }
 
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
         context.coordinator.parent = self
-        guard let textView = scrollView.documentView as? NSTextView, let storage = textView.textStorage else { return }
+        guard let textView = scrollView.documentView as? PictureTextView, let storage = textView.textStorage else { return }
+        if context.coordinator.styledFocusMode != focusMode {
+            context.coordinator.restyle(storage, selection: textView.selectedRange())
+        }
         if context.coordinator.isOutsideChange(text, shown: textView.string) {
             let selection = textView.selectedRange()
             textView.string = text
             textView.setSelectedRange(NSRange(location: min(selection.location, (text as NSString).length), length: 0))
             context.coordinator.restyle(storage, selection: textView.selectedRange())
+            context.coordinator.layoutPictures(in: textView)
         }
         if let target = select {
             let range = NSRange(target, in: text)
@@ -227,27 +441,106 @@ extension LiveMarkdownEditor: NSViewRepresentable {
 
 extension LiveMarkdownEditor.Coordinator: NSTextViewDelegate {
     func textDidChange(_ notification: Notification) {
-        guard let textView = notification.object as? NSTextView, let storage = textView.textStorage else { return }
+        guard let textView = notification.object as? PictureTextView, let storage = textView.textStorage else { return }
         send(textView.string)
         // Mid-way through composing a character (Japanese, accents): style it after.
         guard !textView.hasMarkedText() else { return }
         restyle(storage, selection: textView.selectedRange())
+        layoutPictures(in: textView)
         textView.typingAttributes = Self.baseAttributes
     }
 
     func textViewDidChangeSelection(_ notification: Notification) {
-        guard let textView = notification.object as? NSTextView, let storage = textView.textStorage else { return }
+        guard let textView = notification.object as? PictureTextView, let storage = textView.textStorage else { return }
         let selection = textView.selectedRange()
-        if needsRestyle(for: selection, in: textView.string) { restyle(storage, selection: selection) }
+        if needsRestyle(for: selection, in: textView.string) {
+            restyle(storage, selection: selection)
+            layoutPictures(in: textView)
+        }
         textView.typingAttributes = Self.baseAttributes
         report(selection: selection, in: textView.string)
     }
 }
 #else
+/// The text view, able to show pictures over the text and to take pasted
+/// pictures.
+final class PictureTextView: UITextView {
+    var pictureViews: [UIView] = []
+    /// The text system, kept here: a text view made from a container
+    /// doesn't keep its storage alive itself.
+    private var keptStorage: NSTextStorage?
+
+    /// A text view on TextKit 1, which says where each line is. Built by
+    /// hand rather than with `UITextView(usingTextLayoutManager: false)`:
+    /// that's a factory method, which skips this class's own setup, and the
+    /// first use of `pictureViews` then crashed.
+    static func make() -> PictureTextView {
+        let storage = NSTextStorage()
+        let layoutManager = NSLayoutManager()
+        storage.addLayoutManager(layoutManager)
+        let container = NSTextContainer(size: CGSize(width: 0, height: CGFloat.greatestFiniteMagnitude))
+        container.widthTracksTextView = true
+        layoutManager.addTextContainer(container)
+        let view = PictureTextView(frame: .zero, textContainer: container)
+        view.keptStorage = storage
+        return view
+    }
+    var onPicture: ((Data, String) -> Void)?
+    var onWidthChange: (() -> Void)?
+    private var lastWidth: CGFloat = 0
+
+    var textOrigin: CGPoint { CGPoint(x: textContainerInset.left, y: textContainerInset.top) }
+
+    /// TextKit 1's layout, which says where each line is.
+    var lineLayout: (NSLayoutManager, NSTextContainer)? { (layoutManager, textContainer) }
+
+    func addPicture(_ image: UIImage, frame: CGRect) {
+        let view = UIImageView(frame: frame)
+        view.image = image
+        view.contentMode = .scaleAspectFit
+        view.accessibilityIdentifier = "notePicture"
+        view.isAccessibilityElement = true
+        view.layer.cornerRadius = 6
+        view.clipsToBounds = true
+        addSubview(view)
+        pictureViews.append(view)
+    }
+
+    func insertOwnLine(_ text: String) {
+        let selection = selectedRange
+        let string = self.text as NSString
+        let before = selection.location > 0 && string.character(at: selection.location - 1) != 0x0A ? "\n" : ""
+        insertText(before + text + "\n")
+    }
+
+    override func paste(_ sender: Any?) {
+        let pasteboard = UIPasteboard.general
+        if !pasteboard.hasStrings, let data = pasteboard.image?.pngData() {
+            onPicture?(data, "png")
+        } else {
+            super.paste(sender)
+        }
+    }
+
+    override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
+        if action == #selector(paste(_:)), UIPasteboard.general.hasImages { return true }
+        return super.canPerformAction(action, withSender: sender)
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        if abs(bounds.width - lastWidth) > 1 {
+            lastWidth = bounds.width
+            onWidthChange?()
+        }
+    }
+}
+
 extension LiveMarkdownEditor: UIViewRepresentable {
-    func makeUIView(context: Context) -> UITextView {
-        let textView = UITextView()
+    func makeUIView(context: Context) -> PictureTextView {
+        let textView = PictureTextView.make()
         textView.delegate = context.coordinator
+        textView.accessibilityIdentifier = "noteEditor"
         textView.backgroundColor = .clear
         textView.textContainerInset = UIEdgeInsets(top: 12, left: 8, bottom: 12, right: 8)
         textView.smartQuotesType = .no
@@ -256,17 +549,33 @@ extension LiveMarkdownEditor: UIViewRepresentable {
         textView.keyboardDismissMode = .interactive
         textView.typingAttributes = Coordinator.baseAttributes
         textView.text = text
+        let coordinator = context.coordinator
+        textView.onPicture = { [weak textView] data, ext in
+            guard let textView else { return }
+            coordinator.insertPicture(data, fileExtension: ext, into: textView)
+        }
+        textView.onWidthChange = { [weak textView] in
+            guard let textView else { return }
+            coordinator.availableWidth = textView.bounds.width - textView.textContainerInset.left
+                - textView.textContainerInset.right - 2 * textView.textContainer.lineFragmentPadding
+            coordinator.restyle(textView.textStorage, selection: textView.selectedRange)
+            coordinator.layoutPictures(in: textView)
+        }
         context.coordinator.restyle(textView.textStorage, selection: textView.selectedRange)
         return textView
     }
 
-    func updateUIView(_ textView: UITextView, context: Context) {
+    func updateUIView(_ textView: PictureTextView, context: Context) {
         context.coordinator.parent = self
+        if context.coordinator.styledFocusMode != focusMode {
+            context.coordinator.restyle(textView.textStorage, selection: textView.selectedRange)
+        }
         if context.coordinator.isOutsideChange(text, shown: textView.text) {
             let selection = textView.selectedRange
             textView.text = text
             textView.selectedRange = NSRange(location: min(selection.location, (text as NSString).length), length: 0)
             context.coordinator.restyle(textView.textStorage, selection: textView.selectedRange)
+            context.coordinator.layoutPictures(in: textView)
         }
         if let target = select {
             textView.selectedRange = NSRange(target, in: text)
@@ -282,12 +591,16 @@ extension LiveMarkdownEditor.Coordinator: UITextViewDelegate {
         // Mid-way through composing a character (Japanese, accents): style it after.
         guard textView.markedTextRange == nil else { return }
         restyle(textView.textStorage, selection: textView.selectedRange)
+        if let textView = textView as? PictureTextView { layoutPictures(in: textView) }
         textView.typingAttributes = Self.baseAttributes
     }
 
     func textViewDidChangeSelection(_ textView: UITextView) {
         let selection = textView.selectedRange
-        if needsRestyle(for: selection, in: textView.text) { restyle(textView.textStorage, selection: selection) }
+        if needsRestyle(for: selection, in: textView.text) {
+            restyle(textView.textStorage, selection: selection)
+            if let textView = textView as? PictureTextView { layoutPictures(in: textView) }
+        }
         textView.typingAttributes = Self.baseAttributes
         report(selection: selection, in: textView.text)
     }

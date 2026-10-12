@@ -17,7 +17,7 @@ final class StashStore {
         || ProcessInfo.processInfo.environment["STASH_TEST_LIBRARY"] != nil
 
     private init() {
-        let schema = Schema([Item.self, Tag.self, ItemCategory.self, SmartFilter.self, Highlight.self, SmartRule.self, NoteVersion.self])
+        let schema = Schema([Item.self, Tag.self, ItemCategory.self, SmartFilter.self, Highlight.self, SmartRule.self, NoteVersion.self, NoteAttachment.self])
         // Syncs through the iCloud container named in the entitlements,
         // which only exist when ICLOUD_SYNC is on (Config/Stash.xcconfig).
         // Said explicitly either way: left to itself SwiftData syncs

@@ -132,6 +132,9 @@ public struct BackupManifest: Codable, Equatable {
         /// The readable Markdown version inside the export.
         public var markdown: String?
         public var highlights: [HighlightRecord] = []
+        /// A note's pictures: each one's name, and where it is in the export.
+        /// Nil in exports made before notes had pictures.
+        public var attachments: [String: String]?
 
         public init(id: UUID, kind: String, title: String, createdAt: Date, modifiedAt: Date) {
             self.id = id

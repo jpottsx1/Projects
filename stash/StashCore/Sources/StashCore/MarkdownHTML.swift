@@ -3,7 +3,9 @@ import Foundation
 /// A note as HTML, for printing and saving as PDF.
 public enum MarkdownHTML {
     /// The note's blocks as HTML, without `<html>` or `<body>` around them.
-    public static func render(_ text: String) -> String {
+    /// `picture` turns a picture's source into what the `<img>` should load
+    /// (a stored attachment as a data URL, say); nil leaves it out.
+    public static func render(_ text: String, picture: (String) -> String? = { $0 }) -> String {
         var html: [String] = []
         var openList: String?
         func closeList() {
@@ -36,6 +38,14 @@ public enum MarkdownHTML {
                 case .quote(let text): html.append("<blockquote>\(inline(text))</blockquote>")
                 case .code(_, let text): html.append("<pre><code>\(escape(text))</code></pre>")
                 case .rule: html.append("<hr>")
+                case .image(let alt, let source):
+                    if let resolved = picture(source) {
+                        html.append("<p><img src=\"\(escape(resolved))\" alt=\"\(escape(alt))\"></p>")
+                    }
+                case .table(let header, let rows):
+                    let head = header.map { "<th>\(inline($0))</th>" }.joined()
+                    let body = rows.map { row in "<tr>" + row.map { "<td>\(inline($0))</td>" }.joined() + "</tr>" }.joined()
+                    html.append("<table><thead><tr>\(head)</tr></thead><tbody>\(body)</tbody></table>")
                 default: break
                 }
             }

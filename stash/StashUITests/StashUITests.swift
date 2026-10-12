@@ -118,6 +118,31 @@ final class StashUITests: XCTestCase {
         XCTAssertEqual(app.textFields["itemTitle"].value as? String, "First (merged)")
     }
 
+    func testPastedPictureShowsInTheNote() throws {
+        let editor = newNote(title: "Picture", text: "Above\n")
+        // A small red square on the clipboard.
+        let image = NSImage(size: NSSize(width: 120, height: 80), flipped: false) { rect in
+            NSColor.systemRed.setFill()
+            rect.fill()
+            return true
+        }
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.writeObjects([image])
+        editor.typeKey("v", modifierFlags: .command)
+        XCTAssertTrue((editor.value as? String)?.contains("![](attachment:") == true)
+        // Off its line, the Markdown gives way to the picture itself.
+        editor.typeText("Below")
+        XCTAssertTrue(app.images["notePicture"].waitForExistence(timeout: 5))
+    }
+
+    func testInsertingAndTidyingATable() {
+        let editor = newNote(title: "Table", text: "")
+        app.menuButtons["Table"].click()
+        app.menuItems["Insert Table"].click()
+        XCTAssertTrue((editor.value as? String)?.contains("| Column 1 | Column 2 | Column 3 |") == true)
+    }
+
     func testSheetsOpen() {
         app.typeKey("r", modifierFlags: [.command, .option])
         XCTAssertTrue(app.staticTexts["Smart Rules"].waitForExistence(timeout: 5)

@@ -1,6 +1,10 @@
 import SwiftUI
 import SwiftData
+import UniformTypeIdentifiers
 import StashCore
+#if os(iOS)
+import PhotosUI
+#endif
 
 /// Markdown as text to edit, as a formatted preview, or both side by side
 /// where there's room. In the preview `[[links]]` can be followed and task
@@ -29,6 +33,10 @@ struct NoteEditor: View {
     @State private var select: Range<String.Index>?
     /// The selection as character offsets, for the formatting buttons.
     @State private var selection: Range<Int>?
+    @State private var isChoosingPicture = false
+    #if os(iOS)
+    @State private var photo: PhotosPickerItem?
+    #endif
 
     init(item: Item) {
         self.item = item
@@ -80,6 +88,7 @@ struct NoteEditor: View {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 18) {
                         FormatButtons(apply: format)
+                        extraButtons
                     }
                     .padding(.horizontal, 4)
                 }
@@ -90,9 +99,9 @@ struct NoteEditor: View {
 
     private var preview: some View {
         ScrollView {
-            MarkdownView(text: item.body) { line in
+            MarkdownView(text: item.body, onToggleTask: { line in
                 item.body = MarkdownBlocks.toggleTask(onLine: line, in: item.body)
-            }
+            }, pictureURL: { library.pictureURL($0, in: item) })
             .padding()
             .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -115,6 +124,7 @@ struct NoteEditor: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: Self.formatSpacing) {
                     FormatButtons(apply: format)
+                    extraButtons
                 }
                 .buttonStyle(.borderless)
                 .padding(.horizontal, 10)
@@ -125,7 +135,8 @@ struct NoteEditor: View {
                 updateCompletion(at: cursor)
             }, onSelectionChanged: { range in
                 selection = range
-            })
+            }, pictureURL: { library.pictureURL($0, in: item) },
+               addPicture: { data, ext in library.addPicture(data, fileExtension: ext, to: item) })
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 let choices = self.choices
                 if !choices.isEmpty {
@@ -142,6 +153,7 @@ struct NoteEditor: View {
             #if os(macOS)
             HStack(spacing: 2) {
                 FormatButtons(apply: format)
+                extraButtons
             }
             .buttonStyle(.borderless)
             .padding(.horizontal, 10)
@@ -176,6 +188,72 @@ struct NoteEditor: View {
                 }
             }
         }
+    }
+
+    /// Picture and table buttons, after the formatting ones.
+    @ViewBuilder
+    private var extraButtons: some View {
+        #if os(iOS)
+        PhotosPicker(selection: $photo, matching: .images) {
+            Label("Picture", systemImage: "photo").labelStyle(.iconOnly)
+        }
+        .onChange(of: photo) {
+            guard let photo else { return }
+            Task {
+                if let data = try? await photo.loadTransferable(type: Data.self) {
+                    insertOwnLine(library.addPicture(data, fileExtension: "jpg", to: item))
+                }
+                self.photo = nil
+            }
+        }
+        #else
+        Button {
+            isChoosingPicture = true
+        } label: {
+            Label("Picture", systemImage: "photo").labelStyle(.iconOnly)
+        }
+        .help("Add a picture")
+        .fileImporter(isPresented: $isChoosingPicture, allowedContentTypes: [.image]) { result in
+            guard case .success(let url) = result else { return }
+            let accessing = url.startAccessingSecurityScopedResource()
+            defer { if accessing { url.stopAccessingSecurityScopedResource() } }
+            if let data = try? Data(contentsOf: url) {
+                insertOwnLine(library.addPicture(data, fileExtension: url.pathExtension.lowercased(), to: item))
+            }
+        }
+        #endif
+        Menu {
+            Button("Insert Table") { insertOwnLine(MarkdownTable.template()) }
+            Button("Tidy Table") { tidyTable() }
+        } label: {
+            Label("Table", systemImage: "tablecells").labelStyle(.iconOnly)
+        }
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("Insert a table, or line up the columns of the one the cursor is in")
+    }
+
+    /// Puts `text` on lines of its own at the cursor (or the end).
+    private func insertOwnLine(_ text: String) {
+        var characters = Array(item.body)
+        let at = min(selection?.upperBound ?? characters.count, characters.count)
+        let before = at > 0 && characters[at - 1] != "\n" ? "\n" : ""
+        let after = at < characters.count && characters[at] != "\n" ? "\n" : ""
+        let insertion = Array(before + text + "\n" + after)
+        characters.insert(contentsOf: insertion, at: at)
+        item.body = String(characters)
+        let end = at + insertion.count
+        selection = end..<end
+        let index = item.body.index(item.body.startIndex, offsetBy: min(end, item.body.count))
+        select = index..<index
+    }
+
+    /// Lines up the columns of the table the cursor is in.
+    private func tidyTable() {
+        let offset = min(selection?.lowerBound ?? 0, item.body.count)
+        let line = item.body.prefix(offset).filter { $0 == "\n" }.count
+        guard let tidied = MarkdownTable.tidy(item.body, aroundLine: line) else { return }
+        item.body = tidied.text
     }
 
     /// Marks up the selection; with nothing known to be selected, the end of the note.
@@ -244,6 +322,8 @@ struct NoteEditor: View {
 struct MarkdownView: View {
     let text: String
     var onToggleTask: (Int) -> Void = { _ in }
+    /// Where a picture's source is, for showing it; nil leaves it out.
+    var pictureURL: (String) -> URL? = { _ in nil }
 
     var body: some View {
         let blocks = MarkdownBlocks.parse(WikiLinks.markdownLinks(in: text, scheme: Library.linkScheme))
@@ -300,6 +380,34 @@ struct MarkdownView: View {
                 .overlay(alignment: .leading) {
                     Rectangle().fill(Color.accentColor).frame(width: 3)
                 }
+        case .image(let alt, let source):
+            if let url = pictureURL(source) {
+                PictureView(url: url)
+                    .accessibilityLabel(alt.isEmpty ? "Picture" : alt)
+            } else {
+                Label(alt.isEmpty ? "Picture" : alt, systemImage: "photo")
+                    .foregroundStyle(.secondary)
+            }
+        case .table(let header, let rows):
+            ScrollView(.horizontal, showsIndicators: false) {
+                Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 6) {
+                    GridRow {
+                        ForEach(Array(header.enumerated()), id: \.offset) { _, cell in
+                            inline(cell).bold()
+                        }
+                    }
+                    Divider()
+                    ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
+                        GridRow {
+                            ForEach(0..<max(header.count, row.count), id: \.self) { column in
+                                inline(column < row.count ? row[column] : "")
+                            }
+                        }
+                    }
+                }
+                .padding(10)
+            }
+            .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
         case .code(_, let text):
             ScrollView(.horizontal, showsIndicators: false) {
                 Text(text)
@@ -357,5 +465,34 @@ private struct OptionalShortcut: ViewModifier {
         } else {
             content
         }
+    }
+}
+
+/// A picture in a note: a stored one from its file, or one from the web.
+struct PictureView: View {
+    let url: URL
+
+    var body: some View {
+        Group {
+            if url.isFileURL {
+                #if os(macOS)
+                if let image = NSImage(contentsOf: url) {
+                    Image(nsImage: image).resizable().scaledToFit()
+                }
+                #else
+                if let image = UIImage(contentsOfFile: url.path) {
+                    Image(uiImage: image).resizable().scaledToFit()
+                }
+                #endif
+            } else {
+                AsyncImage(url: url) { image in
+                    image.resizable().scaledToFit()
+                } placeholder: {
+                    ProgressView()
+                }
+            }
+        }
+        .frame(maxWidth: 600, maxHeight: 420, alignment: .leading)
+        .clipShape(RoundedRectangle(cornerRadius: 6))
     }
 }

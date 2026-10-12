@@ -27,6 +27,10 @@ public enum MarkdownStyling {
         case task(done: Bool)
         /// A `---` line.
         case rule
+        /// A picture's whole `![alt](source)` line, and where it comes from.
+        case image(source: String)
+        /// A line of a table, shown in fixed-width type so its columns line up.
+        case tableRow
     }
 
     public struct Span: Equatable {
@@ -79,7 +83,11 @@ public enum MarkdownStyling {
         let leading = line.prefix { $0 == " " || $0 == "\t" }.utf16.count
         let body = String(line.dropFirst(line.prefix { $0 == " " || $0 == "\t" }.count))
 
-        if let (level, _) = MarkdownBlocks.heading(body) {
+        if let picture = MarkdownBlocks.image(body.trimmingCharacters(in: .whitespaces)) {
+            return [Span(start..<(start + units), .image(source: picture.source))]
+        } else if MarkdownTable.isRow(body.trimmingCharacters(in: .whitespaces)) {
+            return [Span(start..<(start + units), .tableRow)]
+        } else if let (level, _) = MarkdownBlocks.heading(body) {
             let marks = leading + level + (body.dropFirst(level).first == " " ? 1 : 0)
             spans.append(Span(start..<(start + marks), .marker))
             if marks < units { spans.append(Span((start + marks)..<(start + units), .heading(level))) }
@@ -189,7 +197,7 @@ public enum MarkdownStyling {
         var hidden = IndexSet()
         for span in spans(in: text) {
             switch span.style {
-            case .marker, .listMarker, .task, .rule: hidden.insert(integersIn: span.range)
+            case .marker, .listMarker, .task, .rule, .image: hidden.insert(integersIn: span.range)
             default: break
             }
         }

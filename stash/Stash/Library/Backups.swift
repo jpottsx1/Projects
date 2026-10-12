@@ -135,12 +135,31 @@ extension Library {
                 record.pageCopy = path
                 job.entries.append(.init(path: path, source: .file(copy), modified: item.archivedAt ?? item.modifiedAt))
             }
+            // A note's pictures, in a folder beside it.
+            var readable = record
+            let attachments = item.attachments ?? []
+            if !attachments.isEmpty {
+                let picturesFolder = ExportNaming.unique(item.displayTitle + " files", ext: "", in: folder, taken: &taken)
+                var paths: [String: String] = [:]
+                for attachment in attachments {
+                    guard let url = pictureURL(Self.attachmentScheme + attachment.fileName, in: item) else { continue }
+                    let path = picturesFolder + "/" + attachment.fileName
+                    job.entries.append(.init(path: path, source: .file(url), modified: attachment.createdAt))
+                    paths[attachment.fileName] = path
+                    // In the readable copy, pictures point at the folder.
+                    let relative = String(path.dropFirst(folder.isEmpty ? 0 : folder.count + 1))
+                    readable.body = readable.body.replacingOccurrences(
+                        of: Self.attachmentScheme + attachment.fileName,
+                        with: relative.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? relative)
+                }
+                record.attachments = paths
+            }
             // A document only needs a Markdown file for what's said about it.
             if item.kind != .document || !item.body.isEmpty || !record.highlights.isEmpty {
                 let path = ExportNaming.unique(item.displayTitle + (item.kind == .document ? " (notes)" : ""),
                                                ext: "md", in: folder, taken: &taken)
                 record.markdown = path
-                let text = ExportMarkdown.render(record, category: item.category?.path ?? "")
+                let text = ExportMarkdown.render(readable, category: item.category?.path ?? "")
                 job.entries.append(.init(path: path, source: .data(Data(text.utf8)), modified: item.modifiedAt))
             }
             manifest.items.append(record)
@@ -166,6 +185,9 @@ extension Library {
         // Files first, off the main thread: they can be large.
         var copies: [(from: String, to: String)] = []
         for record in missing {
+            for (name, path) in record.attachments ?? [:] {
+                copies.append((path, "\(record.id.uuidString)/Attachments/\(name)"))
+            }
             if let file = record.file { copies.append((file, "\(record.id.uuidString)/" + Self.fileName(file))) }
             if let page = record.pageCopy { copies.append((page, "\(record.id.uuidString)/Page.webarchive")) }
         }
@@ -256,6 +278,13 @@ extension Library {
                    data.count <= Self.largestSyncedFile {
                     item.archiveData = data
                 }
+            }
+            for (name, path) in record.attachments ?? [:] where !failed.contains(path) {
+                let stored = files.url(for: "\(record.id.uuidString)/Attachments/\(name)")
+                guard let data = try? Data(contentsOf: stored) else { continue }
+                let attachment = NoteAttachment(fileName: name, data: data)
+                context.insert(attachment)
+                attachment.item = item
             }
             for highlightRecord in record.highlights {
                 let highlight = Highlight(text: highlightRecord.text,

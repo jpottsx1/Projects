@@ -338,6 +338,52 @@ final class Library {
         }
     }
 
+    // MARK: - Pictures in notes
+
+    static let attachmentScheme = "attachment:"
+
+    /// Stores a picture with a note and returns the Markdown that shows it.
+    func addPicture(_ data: Data, fileExtension: String, to item: Item) -> String {
+        let name = String(UUID().uuidString.prefix(8)).lowercased() + "." + (fileExtension.isEmpty ? "png" : fileExtension)
+        let attachment = NoteAttachment(fileName: name, data: data)
+        context.insert(attachment)
+        attachment.item = item
+        try? files.write(data, to: "\(item.uuid.uuidString)/Attachments/\(name)")
+        save()
+        return "![](\(Self.attachmentScheme)\(name))"
+    }
+
+    /// Where a picture in a note is: a stored attachment, written out if
+    /// it's only just arrived from another device, or a web address.
+    func pictureURL(_ source: String, in item: Item) -> URL? {
+        guard source.hasPrefix(Self.attachmentScheme) else {
+            return URL(string: source).flatMap { ["http", "https"].contains($0.scheme?.lowercased() ?? "") ? $0 : nil }
+        }
+        let name = String(source.dropFirst(Self.attachmentScheme.count))
+        let path = "\(item.uuid.uuidString)/Attachments/\(name)"
+        if !files.exists(path), let data = item.attachments?.first(where: { $0.fileName == name })?.data {
+            try? files.write(data, to: path)
+        }
+        return files.exists(path) ? files.url(for: path) : nil
+    }
+
+    /// Pictures no longer in their note's text, a day after they were
+    /// added (so one whose note hasn't synced yet isn't taken for unused).
+    private func removeUnusedPictures() {
+        let attachments = (try? context.fetch(FetchDescriptor<NoteAttachment>())) ?? []
+        let dayAgo = Date.now.addingTimeInterval(-86_400)
+        for attachment in attachments where attachment.createdAt < dayAgo {
+            guard let item = attachment.item else {
+                context.delete(attachment)
+                continue
+            }
+            if !item.body.contains(Self.attachmentScheme + attachment.fileName) {
+                try? FileManager.default.removeItem(at: files.url(for: "\(item.uuid.uuidString)/Attachments/\(attachment.fileName)"))
+                context.delete(attachment)
+            }
+        }
+    }
+
     // MARK: - Markup
 
     /// Goes up each time a document's file changes in place, so views
@@ -1372,6 +1418,7 @@ final class Library {
         if let selection, !isAlive(selection) { self.selection = nil }
         mergeDuplicates()
         deleteOldTrash()
+        removeUnusedPictures()
         // Only tidy files away when the library definitely loaded: an empty
         // list from a failed fetch would otherwise delete every document.
         guard let items = try? context.fetch(FetchDescriptor<Item>()) else { return }

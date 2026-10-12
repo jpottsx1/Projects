@@ -195,14 +195,24 @@ def _reference_curve(conn, wanted: str,
 
 def _auto_amount(conn, path: str, curve: dict, cap: float,
                  bands=report.LOW_SHAPE_BANDS,
-                 offset: float = 0.0) -> tuple[float, str | None]:
+                 offset: float = 0.0,
+                 clip_excess: bool = False) -> tuple[float, str | None]:
     """How much this track is short of the reference over `bands`, and
     whether it can take it.
 
     `offset` is added to the shortfall before anything else: the
     "More or less than the reference" control, for a record that by ear
     wants a little more than matching the reference gives it (Blue Monday,
-    "more like +3 dB"). Still capped at `cap`."""
+    "more like +3 dB"). Still capped at `cap`.
+
+    `clip_excess` counts a band ABOVE the reference as level with it rather
+    than as a surplus that pays off the other bands' shortfall. The sub
+    asks for it: 80s synth-pop with a deep bass line sits ~11 dB over the
+    reference at 31.5 Hz and ~3 dB under it at 50-63 Hz, where the kick is,
+    and the plain mean called that "already there" -- 46 of a 50-track 80s
+    batch (2026-10-12) got no sub, Yazoo at -4.4 dB. A bass note at 31 Hz
+    does not fill a kick at 63; clipped, 44 of the 50 got some, median
+    +1.7 dB."""
     rows = conn.execute(
         "SELECT b.band_hz, b.shape_db FROM bands b "
         "JOIN tracks t ON t.id = b.track_id WHERE t.path = ? "
@@ -213,7 +223,8 @@ def _auto_amount(conn, path: str, curve: dict, cap: float,
         target = curve.get(row["band_hz"])
         if target is None or row["shape_db"] is None:
             continue
-        deficits.append(target - row["shape_db"])
+        deficit = target - row["shape_db"]
+        deficits.append(max(deficit, 0.0) if clip_excess else deficit)
     if not deficits:
         return 0.0, "no band data"
     shortfall = float(np.mean(deficits)) + offset
@@ -1016,7 +1027,8 @@ def cmd_subbass(args: argparse.Namespace) -> int:
             for row in rows:
                 amounts[row["path"]] = _auto_amount(conn, row["path"], curve,
                                                     args.max_amount,
-                                                    offset=args.sub_offset)
+                                                    offset=args.sub_offset,
+                                                    clip_excess=True)
                 air_amounts[row["path"]] = (
                     _air_for(args, conn, row["path"], top_curve), None)
     finally:

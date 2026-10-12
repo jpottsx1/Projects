@@ -449,7 +449,8 @@ def main() -> int:
             "ON t.id = b.track_id WHERE t.path = ? AND b.band_hz IN "
             f"({', '.join(str(b) for b in reportlib.LOW_SHAPE_BANDS)})",
             (str(path),)).fetchall()
-        deficits = [curve[r["band_hz"]] - r["shape_db"] for r in rows
+        # Clipped at zero per band, as the sub sizes it (`clip_excess`).
+        deficits = [max(curve[r["band_hz"]] - r["shape_db"], 0.0) for r in rows
                     if curve.get(r["band_hz"]) is not None and r["shape_db"] is not None]
         mean = float(np.mean(deficits)) if deficits else None
         shortfalls.append({"path": path.name, "meanDeficitDB": rounded(mean)})

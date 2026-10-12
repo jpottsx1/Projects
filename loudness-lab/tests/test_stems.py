@@ -732,6 +732,27 @@ class TestFixedAir(unittest.TestCase):
         self.assertEqual(amount(-10.0, 0.0)[0], 0.0)           # matched: nothing
         self.assertEqual(amount(-12.0, -3.0)[0], 0.0)          # less: nothing left
 
+    def test_a_deep_bass_line_does_not_pay_off_a_thin_kick(self):
+        """80s synth-pop: well over the reference at 31.5 Hz (the bass line),
+        under it at 50-63 (the kick). The sub clips the surplus; the plain
+        mean called Yazoo "already within -4.4 dB" and gave it nothing."""
+        class Rows:
+            def execute(self, *_):
+                return self
+            def fetchall(self):
+                return [{"band_hz": 31.5, "shape_db": -12.0},   # 11.4 over
+                        {"band_hz": 50.0, "shape_db": -9.0},    # 2.2 short
+                        {"band_hz": 63.0, "shape_db": -11.6}]   # 3.1 short
+        curve = {31.5: -23.4, 50.0: -6.8, 63.0: -8.5}
+        bands = (31.5, 50.0, 63.0)
+        plain, why = cli._auto_amount(Rows(), "t.mp3", curve, 11.0, bands=bands)
+        self.assertEqual(plain, 0.0)
+        self.assertIn("already within", why)
+        clipped, why = cli._auto_amount(Rows(), "t.mp3", curve, 11.0, bands=bands,
+                                        clip_excess=True)
+        self.assertAlmostEqual(clipped, (2.2 + 3.1) / 3, places=6)
+        self.assertIsNone(why)
+
     def test_it_is_a_profile_setting(self):
         from loudnesslab import profiles
         self.assertIs(profiles.FIELDS["air_fixed"], False)

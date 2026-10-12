@@ -549,7 +549,10 @@ public final class Library {
     }
 
     /// Mean shortfall of one track against a reference curve, in dB, and the
-    /// reason when there is nothing to do.
+    /// reason when there is nothing to do. A band over the reference counts
+    /// as level with it, not as surplus paying off the others: a deep bass
+    /// line at 31.5 Hz does not fill a thin kick at 63 (`_auto_amount`'s
+    /// `clip_excess`, which the sub uses).
     public func shortfall(of path: String, against curve: [Double: Double],
                           cap: Double) throws -> (amount: Double, reason: String?) {
         let list = Library.sqlList(Library.lowShapeBands)
@@ -563,7 +566,7 @@ public final class Library {
             guard let band = row["band_hz"] as? Double,
                   let target = curve[band],
                   let shape = row["shape_db"] as? Double else { continue }
-            deficits.append(target - shape)
+            deficits.append(max(target - shape, 0))
         }
         guard !deficits.isEmpty else { return (0, "no band data") }
         let mean = deficits.reduce(0, +) / Double(deficits.count)

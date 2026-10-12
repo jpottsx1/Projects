@@ -59,7 +59,7 @@ struct RecordingSheet: View {
             .disabled(isTranscribing)
         }
         .padding(32)
-        .frame(minWidth: 340)
+        .sheetSize(minWidth: 340, minHeight: 300)
         .task { await recorder.start() }
         .interactiveDismissDisabled(recorder.isRecording || isTranscribing)
     }

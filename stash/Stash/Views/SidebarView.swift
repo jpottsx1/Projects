@@ -116,6 +116,7 @@ struct SidebarView: View {
                 Menu {
                     Button("Today’s Note") { library.openToday() }
                     Button("New Voice Note") { library.isRecording = true }
+                    Button("Ask Your Library…") { library.isAskingLibrary = true }
                     Button("Link Graph") { library.isShowingGraph = true }
                     Button("Smart Rules…") { library.isEditingRules = true }
                     Divider()

@@ -1,4 +1,7 @@
 import Foundation
+#if os(iOS)
+import BackgroundTasks
+#endif
 import SwiftData
 import StashCore
 
@@ -219,3 +222,27 @@ extension Library {
         save()
     }
 }
+
+#if os(iOS)
+/// Checking feeds while Stash isn't open: iOS wakes it now and then (as
+/// often as it sees fit, at most as often as feeds are set to be checked).
+enum FeedRefresh {
+    static let identifier = "com.jpottsx1.stash.feeds"
+
+    /// Asks to be woken again; called as Stash goes into the background.
+    @MainActor
+    static func schedule() {
+        let request = BGAppRefreshTaskRequest(identifier: identifier)
+        request.earliestBeginDate = Date(timeIntervalSinceNow: TimeInterval(max(Library.feedCheckMinutes, 15) * 60))
+        try? BGTaskScheduler.shared.submit(request)
+    }
+
+    @MainActor
+    static func run() async {
+        schedule()
+        let library = StashStore.shared.library
+        guard !library.feeds().isEmpty else { return }
+        await library.checkFeeds()
+    }
+}
+#endif

@@ -104,7 +104,7 @@ struct AddFeedSheet: View {
                 }
             }
         }
-        .frame(minWidth: 420, minHeight: 220)
+        .sheetSize(minWidth: 420, minHeight: 220)
         .onAppear {
             // A web address on the clipboard is probably the one wanted.
             if let copied = Library.clipboardText(), WebAddress.url(from: copied) != nil, !copied.contains(" ") {
@@ -253,7 +253,7 @@ struct IndexedFoldersView: View {
                 }
             }
         }
-        .frame(minWidth: 520, minHeight: 320)
+        .sheetSize(minWidth: 520, minHeight: 320)
         .confirmationDialog("Stop indexing “\(removing?.name ?? "")”?",
                             isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } })) {
             Button("Stop Indexing", role: .destructive) {

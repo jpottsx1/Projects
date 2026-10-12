@@ -57,6 +57,9 @@ struct ContentView: View {
         .sheet(isPresented: $library.isRecording) {
             RecordingSheet()
         }
+        .sheet(item: $library.passwordRequest) { request in
+            PasswordSheet(request: request)
+        }
         .sheet(isPresented: $library.isManagingIndexedFolders) {
             IndexedFoldersView()
         }
@@ -82,6 +85,9 @@ struct ContentView: View {
             } else {
                 // Away from the app, locked items lock again.
                 library.relockAll()
+                #if os(iOS)
+                if phase == .background { FeedRefresh.schedule() }
+                #endif
             }
         }
         .alert("Can’t Lock", isPresented: Binding(get: { library.lockError != nil },
@@ -139,7 +145,15 @@ struct ContentView: View {
         .sheet(isPresented: $library.isShowingGraph) {
             LinkGraphView()
         }
+        .sheet(isPresented: $library.isAskingLibrary) {
+            AskLibraryView()
+        }
         #else
+        .onChange(of: library.isAskingLibrary) {
+            guard library.isAskingLibrary else { return }
+            library.isAskingLibrary = false
+            openWindow(id: "ask")
+        }
         // On a Mac the graph has a window of its own.
         .onChange(of: library.isShowingGraph) {
             guard library.isShowingGraph else { return }

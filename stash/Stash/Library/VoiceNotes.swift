@@ -50,7 +50,7 @@ extension Library {
     }
 
     func transcribe(_ item: Item) async {
-        guard let url = localFile(for: item), transcribing.insert(item.uuid).inserted else { return }
+        guard !item.isSealed, let url = localFile(for: item), transcribing.insert(item.uuid).inserted else { return }
         transcriptionErrors[item.uuid] = nil
         defer { transcribing.remove(item.uuid) }
         do {
@@ -66,6 +66,7 @@ extension Library {
     }
 
     func transcript(of item: Item) -> Transcript? {
-        item.transcriptData.flatMap(Transcript.init(json:))
+        if item.isSealed { return openSeals[item.uuid]?.transcript.flatMap(Transcript.init(json:)) }
+        return item.transcriptData.flatMap(Transcript.init(json:))
     }
 }

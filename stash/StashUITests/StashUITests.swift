@@ -486,5 +486,85 @@ final class StashUITests: XCTestCase {
         // A tab of the main window: the two share a tab bar.
         XCTAssertTrue(app.tabGroups.firstMatch.waitForExistence(timeout: 5) || app.radioButtons["First Page"].exists)
     }
+    // MARK: - Locking and asking
+
+    private func enterPassword(_ password: String, twice: Bool) {
+        let field = app.secureTextFields["lockPassword"]
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        field.click()
+        field.typeText(password)
+        if twice {
+            let again = app.secureTextFields["lockPasswordAgain"]
+            again.click()
+            again.typeText(password + "\r")
+        } else {
+            field.typeText("\r")
+        }
+    }
+
+    func testLockingEncryptsAndNeedsThePassword() {
+        newNote(title: "Diary", text: "Met Alex at the park.")
+        menuItem("Item", "Lock").click()
+        enterPassword("correct horse", twice: true)
+        let unlock = app.buttons["Unlock"]
+        XCTAssertTrue(unlock.waitForExistence(timeout: 10))
+        // Its words can't be found while it's locked.
+        let search = app.searchFields.firstMatch
+        search.click()
+        search.typeText("Alex")
+        XCTAssertFalse(listRow("Diary").waitForExistence(timeout: 2))
+        search.typeKey("a", modifierFlags: .command)
+        search.typeKey(.delete, modifierFlags: [])
+
+        // Unlocked in the same session, it opens straight away and can be written in.
+        listRow("Diary").click()
+        app.buttons["Unlock"].click()
+        let editor = app.textViews["noteEditor"]
+        XCTAssertTrue(editor.waitForExistence(timeout: 5))
+        XCTAssertEqual(editor.value as? String, "Met Alex at the park.")
+        editor.click()
+        editor.typeKey(.downArrow, modifierFlags: .command)
+        editor.typeText(" Again.")
+        sleep(2)
+
+        // Opened again, it needs the password: the wrong one won't do.
+        app.terminate()
+        app.launchArguments = ["-StashTestLibrary", "YES"]
+        app.launch()
+        listRow("Diary").click()
+        XCTAssertTrue(app.buttons["Unlock"].waitForExistence(timeout: 5))
+        app.buttons["Unlock"].click()
+        enterPassword("wrong horse", twice: false)
+        XCTAssertTrue(app.staticTexts["That’s not the password."].waitForExistence(timeout: 15))
+        app.secureTextFields["lockPassword"].click()
+        app.secureTextFields["lockPassword"].typeText("correct horse\r")
+        XCTAssertTrue(editor.waitForExistence(timeout: 15))
+        XCTAssertEqual(editor.value as? String, "Met Alex at the park. Again.")
+
+        // Taking the lock off decrypts it for good.
+        menuItem("Item", "Remove Lock…").click()
+        XCTAssertTrue(app.textViews["noteEditor"].waitForExistence(timeout: 5))
+        search.click()
+        search.typeText("Alex")
+        XCTAssertTrue(listRow("Diary").waitForExistence(timeout: 5))
+    }
+
+    /// Only where Apple Intelligence is on; skipped elsewhere.
+    func testAskingTheLibrary() throws {
+        newNote(title: "Boiler", text: "The boiler was serviced in March by Ray from Warmfix. It needs a new pressure valve next year.")
+        newNote(title: "Groceries", text: "Apples, bread and milk.")
+        menuItem("Item", "Ask Your Library…").click()
+        let question = app.textFields["libraryQuestion"]
+        guard question.waitForExistence(timeout: 5) else {
+            throw XCTSkip("Apple Intelligence isn't available on this Mac.")
+        }
+        question.click()
+        question.typeText("Who serviced the boiler?\r")
+        let answer = app.staticTexts["libraryAnswer"]
+        XCTAssertTrue(answer.waitForExistence(timeout: 90))
+        XCTAssertTrue((answer.value as? String ?? answer.label).localizedCaseInsensitiveContains("Ray"))
+        let source = app.buttons.matching(identifier: "librarySource").matching(NSPredicate(format: "label CONTAINS 'Boiler'")).firstMatch
+        XCTAssertTrue(source.exists)
+    }
     #endif
 }

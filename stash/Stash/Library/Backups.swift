@@ -87,6 +87,10 @@ extension Library {
         if everything {
             manifest.smartFilters = try context.fetch(FetchDescriptor<SmartFilter>())
                 .map { .init(id: $0.uuid, name: $0.name, query: $0.query, createdAt: $0.createdAt) }
+            manifest.feeds = try context.fetch(FetchDescriptor<Feed>()).map {
+                .init(id: $0.uuid, title: $0.title, url: $0.urlString, siteURL: $0.siteURLString,
+                      category: $0.categoryID, seenIDs: $0.seenIDs, addedAt: $0.addedAt)
+            }
             manifest.rules = try context.fetch(FetchDescriptor<SmartRule>()).map {
                 .init(id: $0.uuid, name: $0.name, query: $0.query, isEnabled: $0.isEnabled, createdAt: $0.createdAt,
                       category: $0.category?.uuid, tags: $0.tagsToAdd, label: $0.labelRaw, rating: $0.rating,
@@ -96,6 +100,7 @@ extension Library {
 
         var job = ExportJob()
         var taken: Set<String> = [BackupManifest.fileName.lowercased()]
+        var usedVaults: Set<UUID> = []
         for item in items {
             var record = BackupManifest.ItemRecord(id: item.uuid, kind: item.kindRaw, title: item.title,
                                                    createdAt: item.createdAt, modifiedAt: item.modifiedAt)
@@ -116,6 +121,8 @@ extension Library {
             record.extractedText = item.extractedText
             record.readingPosition = item.readingPosition
             record.isTemplate = item.isTemplate ? true : nil
+            record.feed = item.feed?.uuid
+            record.feedEntryID = item.feedEntryID.isEmpty ? nil : item.feedEntryID
             record.archivedAt = item.archivedAt
             record.highlights = item.sortedHighlights.map {
                 .init(id: $0.uuid, text: $0.text, note: $0.note, color: $0.colorRaw, anchor: $0.anchorJSON,
@@ -125,14 +132,24 @@ extension Library {
             var folder = manifest.folder(for: item.category?.uuid)
             if item.isTrashed { folder = folder.isEmpty ? "Trash" : "Trash/" + folder }
 
-            if item.kind == .document, let file = localFile(for: item) {
-                let ext = file.pathExtension
+            // Locked items go out as they're kept: encrypted, never decrypted copies.
+            let isSealed = item.isSealed
+            if isSealed {
+                record.sealed = item.sealedData
+                record.sealedVault = item.sealedVaultID
+                if let id = item.sealedVaultID { usedVaults.insert(id) }
+            }
+            if item.kind == .document,
+               let file = isSealed ? storedCopy(item.storedFilePath, synced: item.fileData) : localFile(for: item) {
+                let ext = isSealed ? file.pathExtension + Self.sealedSuffix : file.pathExtension
                 let path = ExportNaming.unique(item.displayTitle, ext: ext, in: folder, taken: &taken)
                 record.file = path
                 job.entries.append(.init(path: path, source: .file(file), modified: item.modifiedAt))
             }
-            if item.kind == .link, let copy = localPageCopy(for: item) {
-                let path = ExportNaming.unique(item.displayTitle, ext: "webarchive", in: folder, taken: &taken)
+            if item.kind == .link,
+               let copy = isSealed ? storedCopy(item.archivePath, synced: item.archiveData) : localPageCopy(for: item) {
+                let path = ExportNaming.unique(item.displayTitle, ext: "webarchive" + (isSealed ? Self.sealedSuffix : ""),
+                                               in: folder, taken: &taken)
                 record.pageCopy = path
                 job.entries.append(.init(path: path, source: .file(copy), modified: item.archivedAt ?? item.modifiedAt))
             }
@@ -143,7 +160,10 @@ extension Library {
                 let picturesFolder = ExportNaming.unique(item.displayTitle + " files", ext: "", in: folder, taken: &taken)
                 var paths: [String: String] = [:]
                 for attachment in attachments {
-                    guard let url = pictureURL(Self.attachmentScheme + attachment.fileName, in: item) else { continue }
+                    let source = isSealed
+                        ? storedCopy("\(item.uuid.uuidString)/Attachments/\(attachment.fileName)", synced: attachment.data)
+                        : pictureURL(Self.attachmentScheme + attachment.fileName, in: item)
+                    guard let url = source else { continue }
                     let path = picturesFolder + "/" + attachment.fileName
                     job.entries.append(.init(path: path, source: .file(url), modified: attachment.createdAt))
                     paths[attachment.fileName] = path
@@ -156,7 +176,7 @@ extension Library {
                 record.attachments = paths
             }
             // A document only needs a Markdown file for what's said about it.
-            if item.kind != .document || !item.body.isEmpty || !record.highlights.isEmpty {
+            if !isSealed, item.kind != .document || !item.body.isEmpty || !record.highlights.isEmpty {
                 let path = ExportNaming.unique(item.displayTitle + (item.kind == .document ? " (notes)" : ""),
                                                ext: "md", in: folder, taken: &taken)
                 record.markdown = path
@@ -165,8 +185,26 @@ extension Library {
             }
             manifest.items.append(record)
         }
+        if !usedVaults.isEmpty {
+            manifest.vaults = try context.fetch(FetchDescriptor<Vault>()).filter { usedVaults.contains($0.uuid) }.compactMap { vault in
+                guard let salt = vault.salt, let wrapped = vault.wrappedKey else { return nil }
+                return .init(id: vault.uuid, salt: salt, rounds: vault.rounds, wrappedKey: wrapped, createdAt: vault.createdAt)
+            }
+        }
         job.entries.append(.init(path: BackupManifest.fileName, source: .data(try manifest.encoded()), modified: .now))
         return job
+    }
+
+    /// Added to an encrypted file's name in an export, so nothing takes it
+    /// for the real thing.
+    static let sealedSuffix = ".sealed"
+
+    /// The file as kept (for a locked item, encrypted), written out from its
+    /// synced copy if it isn't on this device yet.
+    private func storedCopy(_ path: String?, synced: Data?) -> URL? {
+        guard let path else { return nil }
+        if !files.exists(path), let synced { try? files.write(synced, to: path) }
+        return files.exists(path) ? files.url(for: path) : nil
     }
 
     /// Adds whatever in the export isn't in the library already. Items that
@@ -229,6 +267,35 @@ extension Library {
             context.insert(filter)
         }
 
+        // The keys locked items need, still under their passwords.
+        let existingVaults = Set(try context.fetch(FetchDescriptor<Vault>()).map(\.uuid))
+        for record in manifest.vaults ?? [] where !existingVaults.contains(record.id) {
+            let vault = Vault(salt: record.salt, rounds: record.rounds, wrappedKey: record.wrappedKey)
+            vault.uuid = record.id
+            vault.createdAt = record.createdAt
+            context.insert(vault)
+        }
+
+        // Feeds already followed (by address) aren't added again.
+        var feedsByID: [UUID: Feed] = [:]
+        let existingFeeds = try context.fetch(FetchDescriptor<Feed>())
+        for record in manifest.feeds ?? [] {
+            if let existing = existingFeeds.first(where: { $0.uuid == record.id || $0.urlString == record.url }) {
+                existing.markSeen(record.seenIDs.split(separator: "\n").map(String.init).reversed())
+                feedsByID[record.id] = existing
+                continue
+            }
+            guard let url = URL(string: record.url) else { continue }
+            let feed = Feed(title: record.title, url: url)
+            feed.uuid = record.id
+            feed.siteURLString = record.siteURL
+            feed.categoryID = record.category
+            feed.seenIDs = record.seenIDs
+            feed.addedAt = record.addedAt
+            context.insert(feed)
+            feedsByID[record.id] = feed
+        }
+
         let existingRules = Set(try context.fetch(FetchDescriptor<SmartRule>()).map(\.uuid))
         for record in manifest.rules ?? [] where !existingRules.contains(record.id) {
             let rule = SmartRule(name: record.name)
@@ -265,8 +332,12 @@ extension Library {
             item.extractedText = record.extractedText
             item.readingPosition = record.readingPosition
             item.isTemplate = record.isTemplate ?? false
+            item.feedEntryID = record.feedEntryID ?? ""
+            item.sealedData = record.sealed
+            item.sealedVaultID = record.sealedVault
             context.insert(item)
             item.category = record.category.flatMap { categories[$0] }
+            item.feed = record.feed.flatMap { feedsByID[$0] }
 
             if let file = record.file, !failed.contains(file) {
                 item.storedFilePath = "\(record.id.uuidString)/" + Self.fileName(file)
@@ -322,7 +393,8 @@ extension Library {
     }
 
     private static func fileName(_ path: String) -> String {
-        path.split(separator: "/").last.map(String.init) ?? path
+        let name = path.split(separator: "/").last.map(String.init) ?? path
+        return name.hasSuffix(sealedSuffix) ? String(name.dropLast(sealedSuffix.count)) : name
     }
 }
 

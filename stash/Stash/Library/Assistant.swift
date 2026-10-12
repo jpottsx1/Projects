@@ -40,12 +40,12 @@ enum Assistant {
 
     /// What the model reads about an item: its title, notes, and the text
     /// of its page or document.
-    static func text(of item: Item) -> String {
+    static func text(of item: Item, limit: Int = textLimit) -> String {
         var parts = [item.displayTitle]
         if !item.summary.isEmpty { parts.append(item.summary) }
         if !item.body.isEmpty { parts.append(MarkdownStyling.plainText(item.body)) }
         if !item.extractedText.isEmpty { parts.append(item.extractedText) }
-        return String(parts.joined(separator: "\n\n").prefix(textLimit))
+        return String(parts.joined(separator: "\n\n").prefix(limit))
     }
 
     struct Suggestions: Equatable {
@@ -81,6 +81,19 @@ enum Assistant {
                 say so plainly. Keep it short.
                 """)
             return try await session.respond(to: "Item:\n\(text)\n\nQuestion: \(question)").content
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        #endif
+        throw Failure.unavailable
+    }
+
+    /// A question about the library, answered from the sources given, which
+    /// it cites by number.
+    static func answer(_ question: String, from sources: [LibraryQuestion.Source]) async throws -> String {
+        #if canImport(FoundationModels)
+        if #available(iOS 26, macOS 26, *) {
+            let session = LanguageModelSession(instructions: LibraryQuestion.instructions)
+            return try await session.respond(to: LibraryQuestion.prompt(question: question, sources: sources)).content
                 .trimmingCharacters(in: .whitespacesAndNewlines)
         }
         #endif

@@ -14,6 +14,11 @@ public struct BackupManifest: Codable, Equatable {
     public var smartFilters: [SmartFilterRecord]
     /// Nil in exports made before rules existed.
     public var rules: [RuleRecord]?
+    /// Feed subscriptions; nil in exports made before feeds.
+    public var feeds: [FeedRecord]?
+    /// The keys locked items are encrypted with, each still under its
+    /// password; nil when nothing exported is locked.
+    public var vaults: [VaultRecord]?
     public var items: [ItemRecord]
 
     public init(exportedAt: Date, categories: [Category] = [], smartFilters: [SmartFilterRecord] = [],
@@ -47,6 +52,43 @@ public struct BackupManifest: Codable, Equatable {
             self.name = name
             self.query = query
             self.createdAt = createdAt
+        }
+    }
+
+    public struct VaultRecord: Codable, Equatable {
+        public var id: UUID
+        public var salt: Data
+        public var rounds: Int
+        public var wrappedKey: Data
+        public var createdAt: Date
+
+        public init(id: UUID, salt: Data, rounds: Int, wrappedKey: Data, createdAt: Date) {
+            self.id = id
+            self.salt = salt
+            self.rounds = rounds
+            self.wrappedKey = wrappedKey
+            self.createdAt = createdAt
+        }
+    }
+
+    public struct FeedRecord: Codable, Equatable {
+        public var id: UUID
+        public var title: String
+        public var url: String
+        public var siteURL: String?
+        public var category: UUID?
+        /// The posts already seen, so they don't come back after restoring.
+        public var seenIDs: String
+        public var addedAt: Date
+
+        public init(id: UUID, title: String, url: String, siteURL: String?, category: UUID?, seenIDs: String, addedAt: Date) {
+            self.id = id
+            self.title = title
+            self.url = url
+            self.siteURL = siteURL
+            self.category = category
+            self.seenIDs = seenIDs
+            self.addedAt = addedAt
         }
     }
 
@@ -137,6 +179,13 @@ public struct BackupManifest: Codable, Equatable {
         public var attachments: [String: String]?
         /// Whether it's a template (nil in exports made before templates).
         public var isTemplate: Bool?
+        /// A locked item's encrypted text (`SealedContents`), and the vault
+        /// it's encrypted with. Its files in the export are encrypted too.
+        public var sealed: Data?
+        public var sealedVault: UUID?
+        /// The feed it came from, and what the feed called it.
+        public var feed: UUID?
+        public var feedEntryID: String?
 
         public init(id: UUID, kind: String, title: String, createdAt: Date, modifiedAt: Date) {
             self.id = id

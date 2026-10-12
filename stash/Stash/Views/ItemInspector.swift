@@ -1,6 +1,11 @@
 import SwiftUI
 import SwiftData
 import StashCore
+#if os(macOS)
+import AppKit
+#else
+import UIKit
+#endif
 
 /// The item's category, its links both ways, and when it was made.
 struct ItemInspector: View {
@@ -115,6 +120,16 @@ struct ItemInspector: View {
                     }
                     ForEach(highlights) { highlight in
                         HighlightRow(highlight: highlight)
+                    }
+                    if !highlights.isEmpty {
+                        HStack {
+                            Button("Make Note") { library.makeHighlightsNote(for: item) }
+                                .help("A note of these highlights and their notes, linked to this item")
+                            Spacer()
+                            Button("Copy") { copyToClipboard(library.highlightsMarkdown(for: item)) }
+                                .help("Copy the highlights as Markdown")
+                        }
+                        .buttonStyle(.borderless)
                     }
                 } header: {
                     Text("Highlights")
@@ -454,4 +469,15 @@ struct HighlightNoteEditor: View {
         }
         .sheetSize(minWidth: 380, minHeight: 380)
     }
+}
+
+/// Puts text on the clipboard.
+@MainActor
+func copyToClipboard(_ text: String) {
+    #if os(macOS)
+    NSPasteboard.general.clearContents()
+    NSPasteboard.general.setString(text, forType: .string)
+    #else
+    UIPasteboard.general.string = text
+    #endif
 }

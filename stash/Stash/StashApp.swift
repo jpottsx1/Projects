@@ -95,6 +95,16 @@ struct StashApp: App {
             SettingsView()
         }
 
+        // An item in a window (or tab) of its own: double-click it, or
+        // Open in New Window.
+        WindowGroup("Item", id: "item", for: UUID.self) { $id in
+            ItemWindow(id: id)
+                .environment(library)
+                .environment(sync)
+        }
+        .modelContainer(container)
+        .defaultSize(width: 860, height: 680)
+
         Window("Link Graph", id: "graph") {
             LinkGraphView()
                 .environment(library)
@@ -115,6 +125,11 @@ struct StashApp: App {
 #if os(macOS)
 struct StashCommands: Commands {
     let library: Library
+    @FocusedValue(\.windowItem) private var windowItem
+    @Environment(\.openWindow) private var openWindow
+
+    /// What the menus act on: an item window's item, or the main window's selection.
+    private var chosenItems: [Item] { windowItem.map { [$0] } ?? library.selectedItems }
 
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
@@ -122,6 +137,8 @@ struct StashCommands: Commands {
                 .keyboardShortcut("n")
             Button("Today’s Note") { library.openToday() }
                 .keyboardShortcut("t", modifiers: [.command, .shift])
+            Button("New Voice Note") { library.isRecording = true }
+                .keyboardShortcut("r", modifiers: [.command, .shift])
             Menu("New from Template") {
                 // Read on every change of selection, which making a template is.
                 let _ = library.selection
@@ -136,29 +153,38 @@ struct StashCommands: Commands {
             Button("Index Folder…") { library.isChoosingFolderToIndex = true }
         }
         CommandGroup(replacing: .printItem) {
-            Button("Print…") { library.printRequest = library.selection }
+            Button("Print…") { library.printRequest = windowItem ?? library.selection }
                 .keyboardShortcut("p")
-                .disabled(library.selection == nil)
-            Button("Save as PDF…") { library.pdfRequest = library.selection }
-                .disabled(library.selection == nil)
+                .disabled(windowItem == nil && library.selection == nil)
+            Button("Save as PDF…") { library.pdfRequest = windowItem ?? library.selection }
+                .disabled(windowItem == nil && library.selection == nil)
         }
         CommandGroup(replacing: .importExport) {
             Button("Import from Evernote…") { library.isImportingEvernote = true }
             Button("Import Notes Folder…") { library.isImportingNotesFolder = true }
+            Button("Import Mailbox…") { library.isImportingMailbox = true }
             Divider()
-            Button(library.selectedItems.count > 1 ? "Export Items…" : "Export Item…") {
-                let chosen = library.selectedItems
+            Button(chosenItems.count > 1 ? "Export Items…" : "Export Item…") {
+                let chosen = chosenItems
                 let name = chosen.count == 1 ? chosen[0].displayTitle : "\(chosen.count) Items"
                 library.exportRequest = .items(chosen, name: name)
             }
             .keyboardShortcut("e", modifiers: [.command, .shift])
-            .disabled(library.selectedItems.isEmpty)
+            .disabled(chosenItems.isEmpty)
             Button("Export Everything…") { library.exportRequest = .everything }
+            Button("Export All Highlights…") { library.exportRequest = .highlights }
             Divider()
             Button("Restore from Backup…") { library.isRestoring = true }
         }
         CommandMenu("Item") {
-            let chosen = library.selectedItems
+            let chosen = chosenItems
+            Button("Open in New Window") { for item in chosen { openWindow.item(item, asTab: false) } }
+                .keyboardShortcut("o", modifiers: [.command, .option])
+                .disabled(chosen.isEmpty || windowItem != nil)
+            Button("Open in New Tab") { for item in chosen { openWindow.item(item, asTab: true) } }
+                .keyboardShortcut("t", modifiers: [.command, .option, .shift])
+                .disabled(chosen.isEmpty || windowItem != nil)
+            Divider()
             let live = chosen.filter { !$0.isTrashed }
             let allFavorite = !live.isEmpty && live.allSatisfy(\.isFavorite)
             Button(allFavorite ? "Remove from Favorites" : "Add to Favorites") {
@@ -193,6 +219,8 @@ struct StashCommands: Commands {
                 Button("Save as Template") { library.saveAsTemplate(notes[0]) }
                     .disabled(notes.count != 1)
             }
+            Button("Make Note from Highlights") { if let item = chosen.first { library.makeHighlightsNote(for: item) } }
+                .disabled(chosen.count != 1 || (chosen.first?.highlights ?? []).isEmpty)
             Divider()
             Button("Check Feeds Now") { Task { await library.checkFeeds(all: true) } }
                 .keyboardShortcut("k", modifiers: [.command, .shift])
@@ -201,6 +229,14 @@ struct StashCommands: Commands {
                 .keyboardShortcut("g", modifiers: [.command, .option])
             Button("Smart Rules…") { library.isEditingRules = true }
                 .keyboardShortcut("r", modifiers: [.command, .option])
+        }
+        CommandMenu("Go") {
+            Button("Back") { library.goBack() }
+                .keyboardShortcut("[")
+                .disabled(!library.canGoBack)
+            Button("Forward") { library.goForward() }
+                .keyboardShortcut("]")
+                .disabled(!library.canGoForward)
         }
     }
 }

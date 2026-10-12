@@ -35,6 +35,7 @@ struct NoteEditor: View {
     /// The selection as character offsets, for the formatting buttons.
     @State private var selection: Range<Int>?
     @State private var isChoosingPicture = false
+    @State private var isRecording = false
     #if os(iOS)
     @State private var photo: PhotosPickerItem?
     #endif
@@ -256,6 +257,20 @@ struct NoteEditor: View {
             }
         }
         #endif
+        Button {
+            isRecording = true
+        } label: {
+            Label("Record", systemImage: "mic").labelStyle(.iconOnly)
+        }
+        .help("Record, and put what you say here")
+        .sheet(isPresented: $isRecording) {
+            RecordingSheet(note: item) { words, recording in
+                // What was said, then a link to the recording itself.
+                let link = "🎙 [[\(recording.title)]]"
+                insertOwnLine(words.isEmpty ? link : words + "\n\n" + link)
+                library.didEdit(item)
+            }
+        }
         Menu {
             Button("Insert Table") { insertOwnLine(MarkdownTable.template()) }
             Button("Tidy Table") { tidyTable() }

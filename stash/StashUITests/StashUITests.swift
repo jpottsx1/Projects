@@ -343,5 +343,148 @@ final class StashUITests: XCTestCase {
         XCTAssertTrue(posts.firstMatch.waitForExistence(timeout: 10))
         XCTAssertGreaterThan(posts.count, 2)
     }
+    // MARK: - Voice, email, highlights and windows
+
+    func testImportedRecordingIsTranscribed() throws {
+        let folder = try fixtureFolder("Audio")
+        let file = folder.appendingPathComponent("Reminder.m4a")
+        let say = Process()
+        say.executableURL = URL(fileURLWithPath: "/usr/bin/say")
+        say.arguments = ["-o", file.path, "--data-format=aac",
+                         "Remember to water the tomatoes on Saturday morning. Then call the plumber about the kitchen sink."]
+        try say.run()
+        say.waitUntilExit()
+        try XCTSkipUnless(FileManager.default.fileExists(atPath: file.path), "Couldn't make a recording.")
+
+        app.typeKey("i", modifierFlags: [.command, .shift])
+        choose(file)
+        XCTAssertTrue(listRow("Reminder").waitForExistence(timeout: 10))
+        listRow("Reminder").click()
+        XCTAssertTrue(app.buttons["playButton"].waitForExistence(timeout: 10))
+        // The first time, the language's speech model may need downloading.
+        let words = app.buttons.matching(identifier: "transcriptSegment")
+            .matching(NSPredicate(format: "label CONTAINS[c] 'tomatoes'")).firstMatch
+        if !words.waitForExistence(timeout: 180) {
+            let failed = app.staticTexts["No Transcript"].exists
+            throw XCTSkip(failed ? "Speech recognition isn't available here." : "Transcribing took too long.")
+        }
+        // Searchable by what was said.
+        let search = app.searchFields.firstMatch
+        search.click()
+        search.typeText("plumber")
+        XCTAssertTrue(listRow("Reminder").waitForExistence(timeout: 5))
+    }
+
+    private let email = """
+        From: Sam Lee <sam@example.com>
+        To: Jo <jo@example.com>
+        Subject: Garden plans
+        Date: Mon, 12 Oct 2026 08:30:00 +0000
+        Message-ID: <garden-1@example.com>
+        MIME-Version: 1.0
+        Content-Type: multipart/mixed; boundary="b1"
+
+        --b1
+        Content-Type: text/plain; charset=utf-8
+
+        Let's plant the bulbs this weekend.
+        --b1
+        Content-Type: text/plain; name="list.txt"
+        Content-Disposition: attachment; filename="list.txt"
+
+        tulips, daffodils
+        --b1--
+        """
+
+    func testImportingAnEmail() throws {
+        let folder = try fixtureFolder("Mail")
+        let file = folder.appendingPathComponent("message.eml")
+        try email.write(to: file, atomically: true, encoding: .utf8)
+        app.typeKey("i", modifierFlags: [.command, .shift])
+        choose(file)
+        // Titled with its subject once it's been read.
+        XCTAssertTrue(listRow("Garden plans").waitForExistence(timeout: 10))
+        listRow("Garden plans").click()
+        XCTAssertTrue(app.staticTexts["Let's plant the bulbs this weekend."].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Sam Lee <sam@example.com>"].exists)
+        app.buttons["Add to Stash"].firstMatch.click()
+        XCTAssertTrue(app.textFields["itemTitle"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.textFields["itemTitle"].value as? String, "list")
+    }
+
+    func testImportingAMailboxSkipsWhatsThere() throws {
+        let folder = try fixtureFolder("Mailboxes")
+        let file = folder.appendingPathComponent("Family.mbox")
+        let second = email.replacingOccurrences(of: "garden-1", with: "garden-2")
+            .replacingOccurrences(of: "Garden plans", with: "Garden plans, again")
+        try ("From sam@example.com Mon Oct 12 08:30:00 2026\n" + email + "\n\nFrom sam@example.com Mon Oct 12 09:30:00 2026\n" + second + "\n")
+            .write(to: file, atomically: true, encoding: .utf8)
+        for _ in 0..<2 {
+            menuItem("File", "Import Mailbox…").click()
+            choose(file)
+            XCTAssertTrue(app.staticTexts["Import Finished"].waitForExistence(timeout: 20))
+            app.typeKey(.return, modifierFlags: [])
+        }
+        XCTAssertTrue(app.outlines.staticTexts["Family"].waitForExistence(timeout: 5))
+        XCTAssertTrue(listRow("Garden plans").waitForExistence(timeout: 5))
+        XCTAssertTrue(listRow("Garden plans, again").exists)
+        // Imported twice, there once.
+        XCTAssertEqual(app.outlines.element(boundBy: 1).staticTexts.matching(NSPredicate(format: "label == 'Garden plans' OR value == 'Garden plans'")).count, 1)
+    }
+
+    func testHighlightsBecomeANote() throws {
+        let folder = try fixtureFolder("Reading")
+        let file = folder.appendingPathComponent("Essay.pdf")
+        let page = NSTextView(frame: NSRect(x: 0, y: 0, width: 400, height: 200))
+        page.string = "Attention is the beginning of devotion."
+        page.font = .systemFont(ofSize: 18)
+        try page.dataWithPDF(inside: page.bounds).write(to: file)
+
+        app.typeKey("i", modifierFlags: [.command, .shift])
+        choose(file)
+        XCTAssertTrue(listRow("Essay").waitForExistence(timeout: 10))
+        listRow("Essay").click()
+        // Select the page's words, then Highlight.
+        sleep(2)
+        app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.55, dy: 0.4)).click()
+        app.typeKey("a", modifierFlags: .command)
+        let highlight = app.descendants(matching: .any)["highlightButton"].firstMatch
+        XCTAssertTrue(highlight.waitForExistence(timeout: 5))
+        // The highlighter, not the arrow beside it (a menu of colours).
+        highlight.coordinate(withNormalizedOffset: CGVector(dx: 0.25, dy: 0.5)).click()
+        if app.menuItems["Yellow"].waitForExistence(timeout: 1) { app.menuItems["Yellow"].click() }
+
+        let makeNote = app.buttons["Make Note"]
+        XCTAssertTrue(makeNote.waitForExistence(timeout: 5), "No highlight was made")
+        makeNote.click()
+        let title = app.textFields["itemTitle"]
+        XCTAssertTrue(title.waitForExistence(timeout: 5))
+        XCTAssertEqual(title.value as? String, "Highlights: Essay")
+        let text = app.textViews["noteEditor"].value as? String ?? ""
+        XCTAssertTrue(text.hasPrefix("From [[Essay]]"), text)
+        XCTAssertTrue(text.contains("> 🟨 Attention is the beginning of devotion."), text)
+        XCTAssertTrue(text.contains("_p. 1_"), text)
+    }
+
+    func testBackForwardAndItemWindows() {
+        newNote(title: "First Page", text: "one")
+        newNote(title: "Second Page", text: "two")
+        let title = app.textFields["itemTitle"]
+        app.typeKey("[", modifierFlags: .command)
+        XCTAssertEqual(title.firstMatch.value as? String, "First Page")
+        app.typeKey("]", modifierFlags: .command)
+        XCTAssertEqual(title.firstMatch.value as? String, "Second Page")
+
+        menuItem("Item", "Open in New Window").click()
+        XCTAssertTrue(app.windows["Second Page"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.windows["Second Page"].textFields["itemTitle"].value as? String, "Second Page")
+        app.windows["Second Page"].typeKey("w", modifierFlags: .command)
+
+        listRow("First Page").click()
+        menuItem("Item", "Open in New Tab").click()
+        XCTAssertTrue(app.windows["First Page"].waitForExistence(timeout: 5))
+        // A tab of the main window: the two share a tab bar.
+        XCTAssertTrue(app.tabGroups.firstMatch.waitForExistence(timeout: 5) || app.radioButtons["First Page"].exists)
+    }
     #endif
 }

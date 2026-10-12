@@ -115,6 +115,7 @@ struct SidebarView: View {
             ToolbarItem {
                 Menu {
                     Button("Today’s Note") { library.openToday() }
+                    Button("New Voice Note") { library.isRecording = true }
                     Button("Link Graph") { library.isShowingGraph = true }
                     Button("Smart Rules…") { library.isEditingRules = true }
                     Divider()
@@ -127,6 +128,8 @@ struct SidebarView: View {
                     Divider()
                     Button("Import from Evernote…") { library.isImportingEvernote = true }
                     Button("Import Notes Folder…") { library.isImportingNotesFolder = true }
+                    Button("Import Mailbox…") { library.isImportingMailbox = true }
+                    Button("Export All Highlights…") { library.exportRequest = .highlights }
                     Button("Export Everything…") { library.exportRequest = .everything }
                     Button("Restore from Backup…") { library.isRestoring = true }
                 } label: {

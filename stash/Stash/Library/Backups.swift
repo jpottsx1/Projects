@@ -330,9 +330,12 @@ extension Library {
 enum ExportRequest: Identifiable {
     case items([Item], name: String)
     case everything
+    /// Every highlight in the library, as one Markdown file.
+    case highlights
 
     var id: String {
         switch self {
+        case .highlights: "highlights"
         case .items(let items, let name): name + items.map(\.uuid.uuidString).joined()
         case .everything: "everything"
         }

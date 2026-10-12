@@ -87,14 +87,16 @@ Capabilities* for each target, find App Groups, and tick
 | **Notes** | Written in Markdown. *Write* shows it formatted as you type, as Typora does: headings large, bold bold, links tinted, with the Markdown marks tucked away except on the line you're editing. *Source* shows the plain Markdown, *Preview* the finished page, and *Split* (on a Mac or iPad) source and preview side by side. Formatting buttons above the note (on a Mac, with Cmd-B, Cmd-I and Cmd-K) or above the keyboard mark up the selected text: bold, italics, code, links, headings, lists, checkboxes, quotes. Ticking a `- [ ]` box in the preview ticks it in the note. |
 | **Templates** | Notes kept under *Templates* in the sidebar to make others from: *New Note* there makes one, or *Save as Template* copies any note. *New from Template* (the + menu, or *File* on a Mac) makes a note from one, filling in `{{date}}`, `{{time}}`, `{{weekday}}`, `{{yesterday}}`, `{{tomorrow}}`, `{{title}}`, `{{clipboard}}`, and `{{date:EEEE d MMMM}}` in any date format, in its title and text. Its pictures, tags and category come along. |
 | **Daily notes** | *Today's Note* (the + menu or the sidebar's ⋯ menu; Shift-Cmd-T on a Mac) opens the day's note, titled `2026-10-12`, making it the first time in the *Daily Notes* category. Tick *Daily Note* on a template to make each day's note from it. On a Mac, *Stash › Settings* changes the title's date format. |
+| **Voice notes** | *New Voice Note* (the + menu; Shift-Cmd-R on a Mac) records from the microphone; the microphone button above a note records into it, putting what you said at the cursor with a link to the recording. What's said is turned into text on the device (SpeechAnalyzer on iOS and macOS 26), so recordings are searchable, and imported audio and video under an hour are transcribed too (*Transcribe* does longer ones). Playing one shows the transcript following along; choosing a line plays from there. |
 | **Note history** | Each time you finish editing a note (and every ten minutes during a long session) the version before is kept, up to fifty. *History* in the side panel shows them; any can be put back, and what was there is kept as a version too. |
 | **Documents** | Any file: PDFs and EPUB books open in place, other files show a Quick Look preview. Each is copied into the app, so moving or deleting the original doesn't lose it. Books remember where you stopped reading, on every device. |
 | **Scanning** | On an iPhone or iPad, *Scan Documents* in the + menu photographs paper pages into one PDF. On a Mac, *File › Import from iPhone or iPad* does the same with Continuity Camera. Scans have their words laid invisibly over the pictures, so they can be searched, selected and highlighted. PDFs scanned elsewhere without any text are read the same way for search. |
-| **Highlights** | Select text in a PDF, a book or a saved article and choose *Highlight* (or a colour, or *Highlight and Add Note*). Highlights are listed in the side panel, where choosing one scrolls to it; tapping one in the document opens its note. Highlights and notes are searchable, and the file itself is left untouched. |
+| **Highlights** | Select text in a PDF, a book or a saved article and choose *Highlight* (or a colour, or *Highlight and Add Note*). Highlights are listed in the side panel, where choosing one scrolls to it; tapping one in the document opens its note. Highlights and notes are searchable, and the file itself is left untouched. *Make Note* (in the side panel) gathers an item's highlights and notes into a note linked to it, with their pages, as DEVONthink's annotation files do; doing it again brings the note up to date. *Copy* puts them on the clipboard as Markdown, and *Export All Highlights…* writes every one in the library to a Markdown file. |
 | **Links** | Paste or type a web address. The page's title and description are fetched, and a full copy of the page (text, pictures and styles) is saved, so you can read it offline exactly as it was. Pages with an article also get a clean copy of just the article, without menus, ads or comments, shown by default (*Article* / *Full Page* above it). Its words are there offline; its pictures load from the web. Links saved before this get one when you choose *Refresh*. Search covers the page's words, including text the page adds itself once it has loaded. *Refresh* fetches it all again. |
 | **Feeds** | *Subscribe to Feed…* takes a feed's address or just the site's (Stash finds the feed). RSS, Atom and JSON Feed. New posts arrive as unread links under the feed in the sidebar, saved with a clean article like any link; a post you've deleted doesn't come back. Feeds are checked when Stash opens and every hour while it's open (the ⋯ menu or *Settings* changes how often). Right-click a feed to check it, mark it read, rename it, file its new posts in a category, or unsubscribe. |
 | **Indexed folders** | *Index Folder…* shows a folder's documents in Stash while the files stay where they are, as DEVONthink does. It gets a category, with one inside for each folder in it. Files added, changed, renamed, moved or deleted there are followed: at once on a Mac, when Stash comes to the front on an iPhone or iPad. A moved file keeps its tags, notes and highlights. Indexed files are only read, never changed; deleting one in Stash leaves the file alone. The folder belongs to the device that indexed it: others see its items, but not the files. *Indexed Folders…* lists them. |
 | **Importing notes** | *Import from Evernote…* takes `.enex` exports: each becomes a category, with its notes' text, tags, dates, to-dos, tables, pictures (in the note) and other attachments (as documents linked from it). *Import Notes Folder…* takes a folder of Markdown, text and HTML files, as Obsidian, Bear, iA Writer and Apple Notes exporters make: front-matter titles, tags and dates are kept, pictures they show go into the notes, other files come in as documents, and folders become categories. |
+| **Email** | Import `.eml` files like any document, drag messages in from Mail, or *Import Mailbox…* for an `.mbox` (Mail's *Export Mailbox* makes one). Each message is kept as it was, titled with its subject and dated when it was sent; it shows its sender, recipients, text and attachments (*Add to Stash* takes one in as a document, linked to the email). Search covers who it's from and to, and `kind:email` finds them. A message already in the library isn't imported twice. |
 | **Linking items** | Type `[[` in a note and pick from the suggestions (arrows and Return or Tab on a keyboard, or tap one), or type `[[Title]]` in full, or use *Link to Item…* in the side panel for any kind of item. Each item lists what it links to and what links to it. Renaming an item updates the `[[links]]` that point at it. Tapping a link to an item that doesn't exist yet creates it. |
 | **Categories** | One per item, and they can nest. Choosing a category also shows everything in the categories inside it. |
 | **Tags** | As many per item as you like. Type them separated by commas. Tags are single words: "to read" becomes `to-read`. |
@@ -117,6 +119,7 @@ Capabilities* for each target, find App Groups, and tick
 | **Markup** | Draw, write, add shapes and sign on PDFs and pictures (*Mark Up* above them): Quick Look's markup on an iPhone or iPad, Preview on a Mac (changes are picked up when you come back to Stash). The file as first imported is kept on that device, and *Revert to Original* puts it back. |
 | **Printing and PDF** | *Print…* (Cmd-P on a Mac) or *Save as PDF…* from an item's menu: notes, articles and saved pages laid out with their title, tags, notes and highlights; PDFs and pictures as they are. |
 | **Widgets** | Recent items, favorites or reminders on the Home Screen or the Mac desktop, with a New Note button. They need the same App Group as sharing (`SHARE_EXTENSION`), since widgets can't open the library and read what the app writes there. |
+| **Windows and tabs** | On a Mac, double-click an item (or *Item › Open in New Window*, Option-Cmd-O) to open it in a window of its own, or *Open in New Tab* to add it as a tab. *Go › Back* and *Forward* (Cmd-[ and Cmd-], or the arrows above the item) move between items you've looked at. |
 | **Favorites** | Star an item from its toolbar, its menu, a swipe, or Cmd-D on a Mac. |
 | **Trash** | Deleted items go to the Trash, where they can be put back, for 30 days. |
 | **Sorting** | By date modified, date created, title or kind, either way round. Search results always come best match first. |
@@ -151,7 +154,8 @@ StashCore/              no-interface logic, with tests
                         tag names, web page text, ZIP files, EPUB books,
                         highlight anchors, the backup format, templates,
                         feeds (RSS, Atom, JSON Feed), HTML to Markdown,
-                        Evernote exports, indexed-folder changes
+                        Evernote exports, indexed-folder changes,
+                        transcripts, email (MIME and mbox), highlight summaries
 ```
 
 - **Data** is kept with SwiftData in the app's own storage. Imported files
@@ -203,6 +207,14 @@ StashCore/              no-interface logic, with tests
 - **Importing** turns HTML into Markdown with `HTMLMarkdown` (StashCore),
   which reads Evernote's ENML too; Evernote names attachments by their MD5,
   worked out by `MD5`.
+- **Transcripts** (`Transcriber`) come from SpeechAnalyzer's
+  SpeechTranscriber on iOS and macOS 26, which downloads the language's
+  model the first time, and SFSpeechRecognizer on earlier iPhones. Each is
+  kept on its item as a `Transcript` (StashCore): phrases with their times.
+- **Email** stays as the original `.eml` file; `MIMEMessage` (StashCore)
+  reads its headers, text and attachments when it's shown or searched.
+  HTML mail is shown as Markdown, so no scripts run and no pictures load
+  from the sender's servers.
 - `Config/Stash.xcconfig` holds both switches. The entitlements files next
   to it are chosen from them, and none is used when both are off.
 

@@ -19,6 +19,10 @@ public struct BackupManifest: Codable, Equatable {
     /// The keys locked items are encrypted with, each still under its
     /// password; nil when nothing exported is locked.
     public var vaults: [VaultRecord]?
+    /// Lists, with their order; nil in exports made before lists.
+    public var lists: [ListRecord]?
+    /// Your own fields; nil in exports made before them.
+    public var fields: [FieldRecord]?
     public var items: [ItemRecord]
 
     public init(exportedAt: Date, categories: [Category] = [], smartFilters: [SmartFilterRecord] = [],
@@ -52,6 +56,36 @@ public struct BackupManifest: Codable, Equatable {
             self.name = name
             self.query = query
             self.createdAt = createdAt
+        }
+    }
+
+    public struct ListRecord: Codable, Equatable {
+        public var id: UUID
+        public var name: String
+        public var order: [UUID]
+        public var createdAt: Date
+
+        public init(id: UUID, name: String, order: [UUID], createdAt: Date) {
+            self.id = id
+            self.name = name
+            self.order = order
+            self.createdAt = createdAt
+        }
+    }
+
+    public struct FieldRecord: Codable, Equatable {
+        public var id: UUID
+        public var name: String
+        public var kind: String
+        public var choices: String
+        public var order: Int
+
+        public init(id: UUID, name: String, kind: String, choices: String, order: Int) {
+            self.id = id
+            self.name = name
+            self.kind = kind
+            self.choices = choices
+            self.order = order
         }
     }
 
@@ -183,6 +217,12 @@ public struct BackupManifest: Codable, Equatable {
         /// it's encrypted with. Its files in the export are encrypted too.
         public var sealed: Data?
         public var sealedVault: UUID?
+        /// The lists it's in, its own fields' values (`CustomField.encode`),
+        /// and the reading queue.
+        public var lists: [UUID]?
+        public var customFields: String?
+        public var readLaterAt: Date?
+        public var readingProgress: Double?
         /// The feed it came from, and what the feed called it.
         public var feed: UUID?
         public var feedEntryID: String?

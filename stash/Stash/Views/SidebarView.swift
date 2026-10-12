@@ -31,6 +31,11 @@ struct SidebarView: View {
                 Label("Reminders", systemImage: "bell")
                     .badge(items.filter { $0.isDue && !$0.isTrashed }.count)
                     .tag(SidebarSelection.reminders)
+                Label("Read Later", systemImage: "book")
+                    .badge(items.filter { $0.readLaterAt != nil && !$0.isTrashed && $0.readingProgress < 0.98 }.count)
+                    .tag(SidebarSelection.readLater)
+                Label("Timeline", systemImage: "calendar")
+                    .tag(SidebarSelection.timeline)
                 ForEach(ItemKind.allCases) { kind in
                     Label(kind.pluralName, systemImage: kind.systemImage)
                         .tag(SidebarSelection.kind(kind))
@@ -48,6 +53,8 @@ struct SidebarView: View {
             }
 
             FeedsSection()
+
+            ListsSection()
 
             Section("Smart Filters") {
                 ForEach(smartFilters) { filter in

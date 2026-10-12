@@ -18,7 +18,15 @@ struct PDFReader: View {
     var body: some View {
         let highlights = item.sortedHighlights
         PDFKitView(url: url, controller: controller)
-            .onAppear { controller.onTap = { id in open(id) } }
+            .onAppear {
+                controller.onTap = { id in open(id) }
+                controller.onPageChanged = { page, count in
+                    library.setReadingProgress(item, Double(page + 1) / Double(max(count, 1)), position: "pdf|\(page)")
+                }
+                if item.readingPosition.hasPrefix("pdf|"), let page = Int(item.readingPosition.dropFirst(4)) {
+                    controller.open(atPage: page)
+                }
+            }
             .onChange(of: Self.signature(highlights), initial: true) {
                 controller.show(highlights)
             }
@@ -99,6 +107,13 @@ extension HighlightColor {
 final class PDFController: NSObject {
     weak var view: PDFView?
     var onTap: (UUID) -> Void = { _ in }
+    /// The page showing (from 0), and how many there are.
+    var onPageChanged: (Int, Int) -> Void = { _, _ in }
+    /// Where to open, once the document's in.
+    private var startPage: Int?
+    /// When the view was set up: page changes just after are its own
+    /// settling in, not reading, and mustn't overwrite where you'd got to.
+    private var attachedAt = Date.distantPast
     private var drawn: [PDFAnnotation] = []
     private var waiting: [Highlight]?
     private static let prefix = "stash:"
@@ -111,9 +126,33 @@ final class PDFController: NSObject {
 
     func attach(_ view: PDFView) {
         self.view = view
+        attachedAt = .now
         NotificationCenter.default.addObserver(self, selector: #selector(annotationHit(_:)),
                                                name: .PDFViewAnnotationHit, object: view)
+        NotificationCenter.default.addObserver(self, selector: #selector(pageChanged(_:)),
+                                               name: .PDFViewPageChanged, object: view)
         if let waiting { show(waiting) }
+        goToStartPage()
+    }
+
+    /// Opens at a page (from 0): where reading stopped last time.
+    func open(atPage page: Int) {
+        startPage = page
+        goToStartPage()
+    }
+
+    private func goToStartPage() {
+        guard let page = startPage, let view, let document = view.document,
+              page > 0, page < document.pageCount, let target = document.page(at: page) else { return }
+        startPage = nil
+        // Once it's laid out, or the go is lost.
+        DispatchQueue.main.async { view.go(to: target) }
+    }
+
+    @objc private func pageChanged(_ notification: Notification) {
+        guard startPage == nil, Date.now.timeIntervalSince(attachedAt) > 1,
+              let view, let document = view.document, let page = view.currentPage else { return }
+        onPageChanged(document.index(for: page), document.pageCount)
     }
 
     func documentChanged() {

@@ -22,19 +22,24 @@ struct ItemListView: View {
     #endif
     /// Where a Shift-click range starts in the grid.
     @State private var anchor: Item?
+    @Query(sort: \FieldDefinition.order) private var fields: [FieldDefinition]
 
     var body: some View {
         @Bindable var library = library
         let items = library.visibleItems(from: allItems)
         Group {
-            switch sizeClass == .compact ? .list : library.layout {
-            case .grid: grid(items)
-            case .table: table(items)
-            case .list: list(items)
+            if library.sidebar == .timeline {
+                LibraryTimeline(items: allItems)
+            } else {
+                switch sizeClass == .compact ? .list : library.layout {
+                case .grid: grid(items)
+                case .table: table(items)
+                case .list: list(items)
+                }
             }
         }
         .overlay {
-            if items.isEmpty { emptyState }
+            if items.isEmpty, library.sidebar != .timeline { emptyState }
         }
         .navigationTitle(library.sidebarTitle)
         .searchable(text: $library.searchText, prompt: "Search, #tag, kind:pdf…")
@@ -145,6 +150,7 @@ struct ItemListView: View {
             ForEach(items) { item in
                 ItemRow(item: item)
                     .tag(item)
+                    .accessibilityIdentifier("row-\(item.displayTitle)")
                     .swipeActions(edge: .trailing) {
                         if item.isTrashed {
                             Button("Delete", role: .destructive) { confirmingDelete = [item] }
@@ -163,6 +169,8 @@ struct ItemListView: View {
                         }
                     }
             }
+            // A list's own order, dragged into place (not while searching).
+            .onMove(perform: reorderableList.map { list in { library.move(in: list, showing: items, from: $0, to: $1) } })
         }
         #if os(iOS)
         .environment(\.editMode, $editMode)
@@ -179,6 +187,12 @@ struct ItemListView: View {
             for item in chosen { openWindow.item(item, asTab: false) }
             #endif
         }
+    }
+
+    /// The list showing, when its items can be dragged into order.
+    private var reorderableList: ItemList? {
+        guard case .list(let list) = library.sidebar, library.searchText.isEmpty else { return nil }
+        return list
     }
 
     @ViewBuilder
@@ -267,6 +281,14 @@ struct ItemListView: View {
                 Text(item.createdAt, format: .dateTime.day().month().year()).foregroundStyle(.secondary)
             }
             .width(min: 80, ideal: 100)
+            // Your own fields.
+            TableColumnForEach(fields) { field in
+                TableColumn(field.name) { item in
+                    Text(CustomField.display(library.value(of: field, for: item), kind: field.kind))
+                        .foregroundStyle(.secondary)
+                }
+                .width(min: 60, ideal: 100)
+            }
         }
         .contextMenu(forSelectionType: PersistentIdentifier.self) { ids in
             let chosen = ids.compactMap { byID[$0] }
@@ -351,6 +373,7 @@ struct ItemListView: View {
             Button("Open in New Tab") { openWindow.item(item, asTab: true) }
             Divider()
             #endif
+            ListMenus(items: [item])
             if !(item.highlights ?? []).isEmpty {
                 Button("Make Note from Highlights") { library.makeHighlightsNote(for: item) }
             }
@@ -515,6 +538,16 @@ struct ItemRow: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
+                // In the reading queue: how far through it you are.
+                if item.readLaterAt != nil, item.readingProgress > 0 {
+                    HStack(spacing: 6) {
+                        ProgressView(value: item.readingProgress)
+                            .frame(maxWidth: 120)
+                        Text(item.readingProgress >= 0.98 ? "Finished" : item.readingProgress.formatted(.percent.precision(.fractionLength(0))))
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
             }
         }
         .padding(.vertical, 2)

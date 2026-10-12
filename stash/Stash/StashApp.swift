@@ -17,7 +17,7 @@ final class StashStore {
         || ProcessInfo.processInfo.environment["STASH_TEST_LIBRARY"] != nil
 
     private init() {
-        let schema = Schema([Item.self, Tag.self, ItemCategory.self, SmartFilter.self, Highlight.self, SmartRule.self, NoteVersion.self, NoteAttachment.self, Feed.self, IndexedFolder.self, Vault.self])
+        let schema = Schema([Item.self, Tag.self, ItemCategory.self, SmartFilter.self, Highlight.self, SmartRule.self, NoteVersion.self, NoteAttachment.self, Feed.self, IndexedFolder.self, Vault.self, ItemList.self, FieldDefinition.self])
         // Syncs through the iCloud container named in the entitlements,
         // which only exist when ICLOUD_SYNC is on (Config/Stash.xcconfig).
         // Said explicitly either way: left to itself SwiftData syncs
@@ -214,6 +214,10 @@ struct StashCommands: Commands {
                 .keyboardShortcut("t", modifiers: [.command, .option])
                 .disabled(live.isEmpty)
             Button("Remind Me…") { library.remindingItems = live }
+                .disabled(live.isEmpty)
+            let allQueued = !live.isEmpty && live.allSatisfy { $0.readLaterAt != nil }
+            Button(allQueued ? "Remove from Read Later" : "Read Later") { library.setReadLater(live, !allQueued) }
+                .keyboardShortcut("r", modifiers: [.command, .control])
                 .disabled(live.isEmpty)
             let allLocked = !live.isEmpty && live.allSatisfy(\.isLocked)
             Button(allLocked ? "Remove Lock…" : "Lock") {

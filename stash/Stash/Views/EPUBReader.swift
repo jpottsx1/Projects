@@ -279,10 +279,10 @@ final class EPUBController: NSObject, WKNavigationDelegate, WKScriptMessageHandl
     private func savePosition(_ fraction: Double) {
         guard let item, let library, let path = chapterPath else { return }
         let position = "\(path)|\((fraction * 1000).rounded() / 1000)"
-        if item.readingPosition != position {
-            item.readingPosition = position
-            library.save()
-        }
+        // Through the book: whole chapters before this one, and this one's part.
+        let chapters = max(document?.book.chapters.count ?? 1, 1)
+        let index = document?.book.chapterIndex(for: path) ?? 0
+        library.setReadingProgress(item, (Double(index) + fraction) / Double(chapters), position: position)
     }
 
     /// The book's layout, and reporting how far through a chapter you are.

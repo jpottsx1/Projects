@@ -145,7 +145,7 @@ public enum MarkdownBlocks {
     }
 
     /// `![alt](source)`, alone on its line.
-    static func image(_ line: String) -> (alt: String, source: String)? {
+    public static func image(_ line: String) -> (alt: String, source: String)? {
         guard line.hasPrefix("!["), line.hasSuffix(")"),
               let middle = line.range(of: "]("), line.distance(from: line.startIndex, to: middle.lowerBound) >= 2 else { return nil }
         let alt = String(line[line.index(line.startIndex, offsetBy: 2)..<middle.lowerBound])

@@ -46,7 +46,7 @@ public struct SearchQuery: Equatable {
     }
 
     public enum Flag: String, Equatable {
-        case favorite, unread, read, inbox, untagged, uncategorized, due, reminder
+        case favorite, unread, read, inbox, untagged, uncategorized, due, reminder, readLater
 
         init?(typed: String) {
             switch typed.lowercased() {
@@ -58,6 +58,7 @@ public struct SearchQuery: Equatable {
             case "reminder", "reminders", "remind": self = .reminder
             case "untagged": self = .untagged
             case "uncategorized", "uncategorised": self = .uncategorized
+            case "readlater", "later", "queue", "queued": self = .readLater
             default: return nil
             }
         }
@@ -122,6 +123,20 @@ public struct SearchQuery: Equatable {
     public private(set) var minimumRating: Int?
     public private(set) var after: Day?
     public private(set) var before: Day?
+    /// List names, lowercased; items in any one of these.
+    public private(set) var lists: [String] = []
+    public struct FieldFilter: Equatable {
+        /// The field's name, as defined.
+        public var name: String
+        /// What it must match: words, or `>`, `<`, `>=`, `<=` and a number or date.
+        public var value: String
+    }
+
+    /// Custom fields, and what each must match.
+    public private(set) var fieldFilters: [FieldFilter] = []
+    /// The custom fields there are, by lowercased name, so `Name:value`
+    /// can tell a field from a word with a colon in it.
+    private var fieldNames: [String: String] = [:]
 
     /// Every word and phrase that's searched for, in order.
     public var terms: [Term] { groups.flatMap { $0 } }
@@ -133,11 +148,16 @@ public struct SearchQuery: Equatable {
         var quoted: Bool
     }
 
-    private static let filterKeys: Set<String> = ["kind", "type", "in", "is", "after", "before", "label", "rating"]
+    private static let filterKeys: Set<String> = ["kind", "type", "in", "is", "after", "before", "label", "rating", "list"]
 
-    public init(_ text: String) {
+    /// `fields`: the names of the custom fields there are.
+    public init(_ text: String, fields: [String] = []) {
+        for name in fields {
+            fieldNames[Self.fieldKey(name)] = name
+        }
         var orPending = false
-        for token in Self.tokens(in: text) {
+        let names = fieldNames
+        for token in Self.tokens(in: text, isFilter: { names[Self.fieldKey($0)] != nil }) {
             var value = token.text
             var negated = false
             if token.quoted {
@@ -190,7 +210,7 @@ public struct SearchQuery: Equatable {
     /// Splits the text at spaces outside quotes. A quote also ends the word
     /// before it, unless that word is `-` or a filter like `in:`, which then
     /// applies to the quoted phrase.
-    private static func tokens(in text: String) -> [Token] {
+    private static func tokens(in text: String, isFilter: (String) -> Bool) -> [Token] {
         var tokens: [Token] = []
         var current = ""
         var prefix = ""
@@ -202,7 +222,7 @@ public struct SearchQuery: Equatable {
                     tokens.append(Token(prefix: prefix, text: current, quoted: true))
                     prefix = ""
                 } else {
-                    if isPhrasePrefix(current) {
+                    if isPhrasePrefix(current, isFilter: isFilter) {
                         prefix = current
                     } else if !current.isEmpty {
                         tokens.append(Token(text: current, quoted: false))
@@ -225,10 +245,16 @@ public struct SearchQuery: Equatable {
         return tokens
     }
 
-    private static func isPhrasePrefix(_ text: String) -> Bool {
+    private static func isPhrasePrefix(_ text: String, isFilter: (String) -> Bool) -> Bool {
         if text == "-" { return true }
         guard text.hasSuffix(":") else { return false }
-        return filterKeys.contains(text.dropLast().lowercased())
+        let key = String(text.dropLast())
+        return filterKeys.contains(key.lowercased()) || isFilter(key)
+    }
+
+    /// A field's name as typed: case doesn't matter, and `_` stands for a space.
+    static func fieldKey(_ name: String) -> String {
+        name.lowercased().replacingOccurrences(of: " ", with: "_")
     }
 
     /// Whether `key:value` is a filter; if so, it's added.
@@ -258,8 +284,13 @@ public struct SearchQuery: Equatable {
         case "before":
             guard let day = Day(typed: value) else { return false }
             before = day
+        case "list":
+            let name = value.trimmingCharacters(in: .whitespaces).lowercased()
+            guard !name.isEmpty else { return false }
+            if !lists.contains(name) { lists.append(name) }
         default:
-            return false
+            guard let name = fieldNames[Self.fieldKey(key)] else { return false }
+            fieldFilters.append(FieldFilter(name: name, value: value.trimmingCharacters(in: .whitespaces)))
         }
         return true
     }
@@ -267,7 +298,7 @@ public struct SearchQuery: Equatable {
     public var isEmpty: Bool {
         groups.isEmpty && excludedTerms.isEmpty && tags.isEmpty && excludedTags.isEmpty
             && kinds.isEmpty && categories.isEmpty && flags.isEmpty && after == nil && before == nil
-            && labels.isEmpty && minimumRating == nil
+            && labels.isEmpty && minimumRating == nil && lists.isEmpty && fieldFilters.isEmpty
     }
 
     /// An SQLite FTS5 `MATCH` expression for the words and phrases, or nil

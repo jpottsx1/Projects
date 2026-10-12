@@ -60,6 +60,7 @@ struct ContentView: View {
         .sheet(item: $library.passwordRequest) { request in
             PasswordSheet(request: request)
         }
+        .modifier(NewListPrompt())
         .sheet(isPresented: $library.isManagingIndexedFolders) {
             IndexedFoldersView()
         }

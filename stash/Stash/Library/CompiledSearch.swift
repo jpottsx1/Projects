@@ -16,9 +16,13 @@ struct CompiledSearch {
     let usesIndex: Bool
     private let after: Date?
     private let before: Date?
+    /// The custom fields searched, by name.
+    private let fields: [String: (id: UUID, kind: CustomField.Kind)]
 
-    init(_ query: SearchQuery, index: SearchIndex?, now: Date = .now, calendar: Calendar = .current) {
+    init(_ query: SearchQuery, index: SearchIndex?, fields: [FieldDefinition] = [],
+         now: Date = .now, calendar: Calendar = .current) {
         self.query = query
+        self.fields = Dictionary(fields.map { ($0.name, ($0.uuid, $0.kind)) }, uniquingKeysWith: { first, _ in first })
         usesIndex = index != nil
         if let index, let expression = query.ftsExpression {
             var ranks: [UUID: Int] = [:]
@@ -68,6 +72,18 @@ struct CompiledSearch {
             case .reminder: if item.remindAt == nil { return false }
             case .untagged: if !(item.tags ?? []).isEmpty { return false }
             case .uncategorized: if item.category != nil { return false }
+            case .readLater: if item.readLaterAt == nil { return false }
+            }
+        }
+        if !query.lists.isEmpty {
+            let names = Set((item.lists ?? []).map { $0.name.lowercased() })
+            if !query.lists.contains(where: names.contains) { return false }
+        }
+        if !query.fieldFilters.isEmpty {
+            let values = CustomField.decode(item.customFields)
+            for filter in query.fieldFilters {
+                guard let field = fields[filter.name],
+                      CustomField.matches(values[field.id] ?? "", kind: field.kind, filter: filter.value) else { return false }
             }
         }
         if !query.labels.isEmpty, !query.labels.contains(item.label) { return false }

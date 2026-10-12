@@ -17,7 +17,7 @@ final class StashStore {
         || ProcessInfo.processInfo.environment["STASH_TEST_LIBRARY"] != nil
 
     private init() {
-        let schema = Schema([Item.self, Tag.self, ItemCategory.self, SmartFilter.self, Highlight.self, SmartRule.self, NoteVersion.self, NoteAttachment.self])
+        let schema = Schema([Item.self, Tag.self, ItemCategory.self, SmartFilter.self, Highlight.self, SmartRule.self, NoteVersion.self, NoteAttachment.self, Feed.self, IndexedFolder.self])
         // Syncs through the iCloud container named in the entitlements,
         // which only exist when ICLOUD_SYNC is on (Config/Stash.xcconfig).
         // Said explicitly either way: left to itself SwiftData syncs
@@ -120,10 +120,20 @@ struct StashCommands: Commands {
         CommandGroup(replacing: .newItem) {
             Button("New Note") { library.newNote() }
                 .keyboardShortcut("n")
+            Button("Today’s Note") { library.openToday() }
+                .keyboardShortcut("t", modifiers: [.command, .shift])
+            Menu("New from Template") {
+                // Read on every change of selection, which making a template is.
+                let _ = library.selection
+                TemplateMenuItems(library: library, templates: library.templates())
+            }
+            Divider()
             Button("Add Link…") { library.isAddingLink = true }
                 .keyboardShortcut("l", modifiers: [.command, .shift])
+            Button("Subscribe to Feed…") { library.isAddingFeed = true }
             Button("Import Documents…") { library.isImporting = true }
                 .keyboardShortcut("i", modifiers: [.command, .shift])
+            Button("Index Folder…") { library.isChoosingFolderToIndex = true }
         }
         CommandGroup(replacing: .printItem) {
             Button("Print…") { library.printRequest = library.selection }
@@ -133,6 +143,9 @@ struct StashCommands: Commands {
                 .disabled(library.selection == nil)
         }
         CommandGroup(replacing: .importExport) {
+            Button("Import from Evernote…") { library.isImportingEvernote = true }
+            Button("Import Notes Folder…") { library.isImportingNotesFolder = true }
+            Divider()
             Button(library.selectedItems.count > 1 ? "Export Items…" : "Export Item…") {
                 let chosen = library.selectedItems
                 let name = chosen.count == 1 ? chosen[0].displayTitle : "\(chosen.count) Items"
@@ -173,6 +186,17 @@ struct StashCommands: Commands {
             Button("Put Back") { library.restore(chosen.filter(\.isTrashed)) }
                 .disabled(!chosen.contains(where: \.isTrashed))
             Divider()
+            let notes = live.filter { $0.kind == .note }
+            if notes.count == 1, notes[0].isTemplate {
+                Button("New Note from Template") { library.newNote(from: notes[0]) }
+            } else {
+                Button("Save as Template") { library.saveAsTemplate(notes[0]) }
+                    .disabled(notes.count != 1)
+            }
+            Divider()
+            Button("Check Feeds Now") { Task { await library.checkFeeds(all: true) } }
+                .keyboardShortcut("k", modifiers: [.command, .shift])
+            Button("Indexed Folders…") { library.isManagingIndexedFolders = true }
             Button("Link Graph") { library.isShowingGraph = true }
                 .keyboardShortcut("g", modifiers: [.command, .option])
             Button("Smart Rules…") { library.isEditingRules = true }

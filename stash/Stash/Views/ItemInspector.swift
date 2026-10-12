@@ -200,7 +200,22 @@ struct ItemInspector: View {
             }
 
             Section("Info") {
-                LabeledContent("Kind", value: item.kind.rawValue.capitalized)
+                LabeledContent("Kind", value: item.isTemplate ? "Template" : item.kind.rawValue.capitalized)
+                if let feed = item.feed {
+                    LabeledContent("Feed", value: feed.title)
+                }
+                if let folder = item.indexedFolder {
+                    LabeledContent("Indexed In") {
+                        Text((folder.name as NSString).appendingPathComponent(item.indexedPath ?? ""))
+                            .lineLimit(2)
+                            .truncationMode(.middle)
+                    }
+                    #if os(macOS)
+                    Button("Show in Finder") { library.showInFinder(item) }
+                        .buttonStyle(.borderless)
+                        .disabled(library.localFile(for: item) == nil)
+                    #endif
+                }
                 LabeledContent("Created", value: item.createdAt.formatted(date: .abbreviated, time: .shortened))
                 LabeledContent("Modified", value: item.modifiedAt.formatted(date: .abbreviated, time: .shortened))
             }

@@ -55,5 +55,11 @@ SwiftData, one multiplatform target. Read README.md first.
   every device makes the same choice.
 - **`[[Title]]` links are read from the note's text, never stored.**
   Hand-made links (`Item.linksTo`) are stored. Backlinks combine both.
+- **Templates are notes with `isTemplate` set.** `Library.isInSidebar`
+  keeps them out of every list but Templates; anything else that walks all
+  items (the graph, widgets, `[[link]]` lookup, See Also) skips them too.
+- **Indexed documents' files are never written** (bookmarks are read-only),
+  and they're reached only through `Library.localFile(for:)`, never
+  `storedFilePath`, which they don't have.
 - The search index can always be rebuilt from the library. Never store
   anything in it that exists nowhere else.

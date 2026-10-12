@@ -25,6 +25,10 @@ enum SidebarSelection: Hashable {
     /// Pages saved more than once, and files imported more than once.
     case duplicates
     case trash
+    /// Notes to make other notes from.
+    case templates
+    /// A web feed's posts.
+    case feed(Feed)
 }
 
 /// The library and the window's state. Every change to items goes through
@@ -109,6 +113,11 @@ final class Library {
     var pdfRequest: Item?
     var isScanning = false
     var isImporting = false
+    var isImportingEvernote = false
+    var isImportingNotesFolder = false
+    var isChoosingFolderToIndex = false
+    var isManagingIndexedFolders = false
+    var isAddingFeed = false
     var importError: String?
 
     private var query = ""
@@ -138,7 +147,7 @@ final class Library {
     }
     /// Goes up whenever something that links or backlinks depend on changes,
     /// so the views showing them redraw.
-    private(set) var revision = 0
+    var revision = 0
 
     @ObservationIgnored private var storeObserver: NSObjectProtocol?
     @ObservationIgnored private var shareObserver: NSObjectProtocol?
@@ -149,6 +158,18 @@ final class Library {
     /// Items that arrived this session and haven't been read yet: rules run
     /// on them again once their page or document text is in.
     @ObservationIgnored private var awaitingRules: Set<UUID> = []
+    /// Feeds being checked right now, for the sidebar to show it.
+    var checkingFeeds: Set<UUID> = []
+    /// Checks feeds every so often while Stash is open.
+    @ObservationIgnored var feedTimer: Task<Void, Never>?
+    /// Indexed folders open this session, by the folder's uuid, and what's
+    /// watching them for changes.
+    @ObservationIgnored var indexedFolderURLs: [UUID: URL] = [:]
+    @ObservationIgnored var folderWatchers: [UUID: FolderWatcher] = [:]
+    /// Folders being read right now, for the views to show it.
+    var scanningFolders: Set<UUID> = []
+    /// Folders that changed again while being read.
+    @ObservationIgnored var pendingRescans: Set<UUID> = []
 
     /// Set by `SHARE_EXTENSION` in Config/Stash.xcconfig.
     #if SHARE_EXTENSION
@@ -167,6 +188,8 @@ final class Library {
         index = SearchIndex(url: support.appendingPathComponent("SearchIndex.sqlite"))
         refreshAfterStoreChange()
         importSharedItems()
+        openIndexedFolders()
+        startCheckingFeeds()
 
         if inbox != nil {
             // The share extension signals as it saves, so something shared
@@ -298,7 +321,7 @@ final class Library {
 
     /// A new item lands where you're looking: in the selected category or
     /// tag, and visible in the list.
-    private func insert(_ item: Item, select: Bool = true) {
+    func insert(_ item: Item, select: Bool = true) {
         context.insert(item)
         switch sidebar {
         case .category(let category):
@@ -307,6 +330,10 @@ final class Library {
             item.tags = [tag]
         case .favorites:
             item.isFavorite = true
+        case .templates where item.kind == .note:
+            item.isTemplate = true
+        case .templates, .feed:
+            sidebar = .all
         case .kind(let kind) where kind != item.kind:
             sidebar = .all
         case .smartFilter, .duplicates, .trash:
@@ -391,7 +418,7 @@ final class Library {
     /// Items that link or are linked to, and the links between them (as
     /// pairs of indices): hand-made links and `[[links]]` in notes.
     func linkGraph() -> (items: [Item], links: [(Int, Int)]) {
-        let all = ((try? context.fetch(FetchDescriptor<Item>())) ?? []).filter { !$0.isTrashed }
+        let all = ((try? context.fetch(FetchDescriptor<Item>())) ?? []).filter { !$0.isTrashed && !$0.isTemplate }
         var byTitle: [String: Item] = [:]
         for item in all where !item.title.isEmpty {
             let key = WikiLinks.key(item.title)
@@ -434,7 +461,9 @@ final class Library {
 
     /// Whether markup is offered: PDFs and pictures.
     static func canMarkUp(_ item: Item) -> Bool {
-        item.kind == .document && (item.isPDF || item.contentType?.conforms(to: .image) == true)
+        // Files in an indexed folder are only read, never written.
+        item.kind == .document && item.indexedFolder == nil
+            && (item.isPDF || item.contentType?.conforms(to: .image) == true)
     }
 
     /// Keeps the file as first imported, the first time it's marked up.
@@ -809,6 +838,7 @@ final class Library {
     /// is written out the first time it's asked for; nil until it has
     /// finished downloading from iCloud (or if it was too big to sync).
     func localFile(for item: Item) -> URL? {
+        if item.indexedFolder != nil { return indexedFile(for: item) }
         guard let path = item.storedFilePath else { return nil }
         if !files.exists(path), let data = item.fileData {
             try? files.write(data, to: path)
@@ -921,14 +951,14 @@ final class Library {
     // MARK: - Smart rules
 
     /// Runs the rules on something that has just come in.
-    private func arrived(_ item: Item) {
+    func arrived(_ item: Item) {
         awaitingRules.insert(item.uuid)
         applyRules(to: item)
     }
 
     /// Runs the rules again on an item that arrived this session, now its
     /// page or document has been read.
-    private func finishedReading(_ item: Item) {
+    func finishedReading(_ item: Item) {
         guard awaitingRules.remove(item.uuid) != nil, isAlive(item) else { return }
         applyRules(to: item)
     }
@@ -1056,6 +1086,8 @@ final class Library {
         for item in items {
             if selection == item { selection = nil }
             if let path = item.storedFilePath ?? item.archivePath { files.remove(path) }
+            // The file stays in its folder, and mustn't come straight back.
+            if let folder = item.indexedFolder, let path = item.indexedPath { folder.ignore(path) }
             index?.remove(item.uuid)
             context.delete(item)
         }
@@ -1244,7 +1276,7 @@ final class Library {
         guard !trimmed.isEmpty else { return nil }
         let key = WikiLinks.key(trimmed)
         let descriptor = FetchDescriptor<Item>(predicate: #Predicate { $0.title.localizedStandardContains(trimmed) })
-        let named = ((try? context.fetch(descriptor)) ?? []).filter { WikiLinks.key($0.title) == key }
+        let named = ((try? context.fetch(descriptor)) ?? []).filter { WikiLinks.key($0.title) == key && !$0.isTemplate }
         // One in the Trash is only the answer when there's nothing else.
         return named.first { !$0.isTrashed } ?? named.first
     }
@@ -1301,6 +1333,8 @@ final class Library {
         case .smartFilter(let filter): filter.name
         case .duplicates: "Duplicates"
         case .trash: "Trash"
+        case .templates: "Templates"
+        case .feed(let feed): feed.title
         }
     }
 
@@ -1321,8 +1355,11 @@ final class Library {
         let selection = sidebar ?? .all
         if selection == .trash { return item.isTrashed }
         guard !item.isTrashed else { return false }
+        // Templates keep to themselves.
+        if item.isTemplate || selection == .templates { return item.isTemplate && selection == .templates }
         switch selection {
-        case .all, .trash, .duplicates: return true
+        case .all, .trash, .duplicates, .templates: return true
+        case .feed(let feed): return item.feed == feed
         case .inbox: return item.inInbox
         case .favorites: return item.isFavorite
         case .reminders: return item.remindAt != nil
@@ -1409,7 +1446,7 @@ final class Library {
         guard !ids.isEmpty else { return [] }
         let found = (try? context.fetch(FetchDescriptor<Item>(predicate: #Predicate { ids.contains($0.uuid) }))) ?? []
         let byID = Dictionary(found.map { ($0.uuid, $0) }, uniquingKeysWith: { first, _ in first })
-        return ids.compactMap { byID[$0] }.filter { !$0.isTrashed && !$0.isLocked }.prefix(limit).map { $0 }
+        return ids.compactMap { byID[$0] }.filter { !$0.isTrashed && !$0.isLocked && !$0.isTemplate }.prefix(limit).map { $0 }
     }
 
     // MARK: - Shortcuts and Spotlight
@@ -1431,6 +1468,8 @@ final class Library {
     func show(_ item: Item) {
         if item.isTrashed {
             sidebar = .trash
+        } else if item.isTemplate {
+            sidebar = .templates
         } else if !isInSidebar(item) {
             sidebar = .all
         }
@@ -1564,17 +1603,15 @@ final class Library {
     /// Makes a document's thumbnail, if it hasn't one yet.
     func fillThumbnail(of item: Item) async {
         guard item.kind == .document, item.thumbnailData == nil, thumbnailsTried.insert(item.uuid).inserted,
-              let path = item.storedFilePath, files.exists(path) else { return }
-        guard let data = await Thumbnails.make(forFileAt: files.url(for: path)), isAlive(item) else { return }
+              let url = localFile(for: item) else { return }
+        guard let data = await Thumbnails.make(forFileAt: url), isAlive(item) else { return }
         item.thumbnailData = data
         save()
     }
 
     /// Works out a document's hash, for finding duplicates, if it hasn't been yet.
     func fillContentHash(of item: Item) async {
-        guard item.kind == .document, item.contentHash.isEmpty,
-              let path = item.storedFilePath, files.exists(path) else { return }
-        let url = files.url(for: path)
+        guard item.kind == .document, item.contentHash.isEmpty, let url = localFile(for: item) else { return }
         let hash = await Task.detached(priority: .utility) { FileStore.sha256(of: url) }.value
         guard let hash, isAlive(item) else { return }
         item.contentHash = hash
@@ -1610,7 +1647,7 @@ final class Library {
     func publishWidgets() {
         guard let widgetFolder,
               let items = try? context.fetch(FetchDescriptor<Item>(sortBy: [SortDescriptor(\.modifiedAt, order: .reverse)])) else { return }
-        let live = items.filter { !$0.isTrashed }
+        let live = items.filter { !$0.isTrashed && !$0.isTemplate }
         func entry(_ item: Item) -> WidgetSnapshot.Entry {
             WidgetSnapshot.Entry(id: item.uuid, title: item.displayTitle, kind: item.kindRaw,
                                  subtitle: item.isLocked ? "Locked" : item.listSubtitle, date: item.remindAt)
@@ -1644,7 +1681,7 @@ final class Library {
 
     /// False once an item has been deleted -- checked after anything slow,
     /// like a download, before writing to it.
-    private func isAlive(_ item: Item) -> Bool {
+    func isAlive(_ item: Item) -> Bool {
         item.modelContext != nil && !item.isDeleted
     }
 }

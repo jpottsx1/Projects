@@ -27,6 +27,13 @@ struct DocumentDetail: View {
                         .id(library.fileRevision(of: item))
                 } else if !hasLooked {
                     ProgressView()
+                } else if let folder = item.indexedFolder {
+                    ContentUnavailableView(
+                        library.isHere(folder) ? "File Not Found" : "In a Folder on Another Device",
+                        systemImage: "folder.badge.questionmark",
+                        description: Text(library.isHere(folder)
+                            ? "It’s no longer at “\(item.indexedPath ?? "")” in \(folder.name)."
+                            : "This document stays in “\(folder.name)” on \(folder.deviceName.isEmpty ? "the device that indexed it" : folder.deviceName)."))
                 } else {
                     ContentUnavailableView(
                         "Not on This Device Yet", systemImage: "icloud.and.arrow.down",

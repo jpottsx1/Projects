@@ -135,6 +135,8 @@ public struct BackupManifest: Codable, Equatable {
         /// A note's pictures: each one's name, and where it is in the export.
         /// Nil in exports made before notes had pictures.
         public var attachments: [String: String]?
+        /// Whether it's a template (nil in exports made before templates).
+        public var isTemplate: Bool?
 
         public init(id: UUID, kind: String, title: String, createdAt: Date, modifiedAt: Date) {
             self.id = id

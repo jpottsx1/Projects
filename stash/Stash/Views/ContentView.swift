@@ -38,6 +38,12 @@ struct ContentView: View {
         .sheet(isPresented: $library.isAddingLink) {
             AddLinkSheet()
         }
+        .sheet(isPresented: $library.isAddingFeed) {
+            AddFeedSheet()
+        }
+        .sheet(isPresented: $library.isManagingIndexedFolders) {
+            IndexedFoldersView()
+        }
         // A widget's item or New Note.
         .onOpenURL { url in
             if url.scheme == Library.linkScheme { library.open(stashURL: url) }
@@ -53,6 +59,10 @@ struct ContentView: View {
             if phase == .active {
                 library.importSharedItems()
                 library.checkFilesEditedElsewhere()
+                Task {
+                    await library.rescanIndexedFolders()
+                    await library.checkFeeds()
+                }
             } else {
                 // Away from the app, locked items lock again.
                 library.relockAll()
@@ -70,6 +80,7 @@ struct ContentView: View {
         // A Mac's scene phase doesn't follow the app in and out of the front.
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             library.checkFilesEditedElsewhere()
+            Task { await library.checkFeeds() }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in
             library.relockAll()
@@ -130,6 +141,7 @@ struct ContentView: View {
         // file panel per view, and the documents importer has this one.
         .background { BackupPanels() }
         .background { PrintPanels() }
+        .background { ImportPanels() }
         .alert("Couldn’t Import", isPresented: Binding(
             get: { library.importError != nil },
             set: { if !$0 { library.importError = nil } })
@@ -150,11 +162,22 @@ struct AddMenu: View {
             Button { library.newNote() } label: {
                 Label("New Note", systemImage: "square.and.pencil")
             }
+            Button { library.openToday() } label: {
+                Label("Today’s Note", systemImage: "calendar")
+            }
+            Menu {
+                TemplateMenuItems(library: library, templates: library.templates())
+            } label: {
+                Label("New from Template", systemImage: "doc.on.doc")
+            }
             Button { library.isAddingLink = true } label: {
                 Label("Add Link…", systemImage: "link.badge.plus")
             }
             Button { library.isImporting = true } label: {
                 Label("Import Documents…", systemImage: "doc.badge.plus")
+            }
+            Button { library.isAddingFeed = true } label: {
+                Label("Subscribe to Feed…", systemImage: "dot.radiowaves.up.forward")
             }
             #if os(iOS)
             if DocumentScanner.isAvailable {

@@ -331,6 +331,16 @@ struct ItemListView: View {
             } else {
                 Button("Lock") { library.lock([item]) }
             }
+            if item.isTemplate {
+                Button("New Note from Template") { library.newNote(from: item) }
+            } else if item.kind == .note {
+                Button("Save as Template") { library.saveAsTemplate(item) }
+            }
+            #if os(macOS)
+            if item.indexedFolder != nil {
+                Button("Show in Finder") { library.showInFinder(item) }
+            }
+            #endif
             Divider()
             Button("Print…") { library.printRequest = item }
             Button("Save as PDF…") { library.pdfRequest = item }

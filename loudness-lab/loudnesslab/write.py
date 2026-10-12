@@ -93,7 +93,11 @@ def write(path: Path, x: np.ndarray, rate: int, source: Path | None = None,
     """
     if fmt not in FORMATS:
         raise ValueError(f"unknown format {fmt!r}; one of {', '.join(FORMATS)}")
-    target = path.with_suffix("." + extension(fmt))
+    # Appended, not `with_suffix`: `path` never carries an extension, and
+    # with_suffix cuts at the LAST dot -- "012 - Sheila E. - A Love Bizarre
+    # -- A original" became "012 - Sheila E.mp3", B landed on the same name
+    # and overwrote A, and "-- B sub+10.8dB" came out as "-- B sub+10".
+    target = path.with_name(path.name + "." + extension(fmt))
     target.parent.mkdir(parents=True, exist_ok=True)
 
     # MP3 out of MP3 takes the original tag wholesale rather than letting

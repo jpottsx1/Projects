@@ -30,6 +30,12 @@ enum SidebarSelection: Hashable {
     case templates
     /// A web feed's posts.
     case feed(Feed)
+    /// Items put in a list by hand, in its order.
+    case list(ItemList)
+    /// Things saved to read, oldest first.
+    case readLater
+    /// What was added and changed, day by day.
+    case timeline
 }
 
 /// The library and the window's state. Every change to items goes through
@@ -343,6 +349,11 @@ final class Library {
             item.isFavorite = true
         case .templates where item.kind == .note:
             item.isTemplate = true
+        case .list(let list):
+            item.lists = [list]
+            list.order = list.order + [item.uuid]
+        case .readLater:
+            item.readLaterAt = .now
         case .templates, .feed:
             sidebar = .all
         case .kind(let kind) where kind != item.kind:
@@ -388,6 +399,8 @@ final class Library {
         attachment.item = item
         try? files.write(data, to: "\(item.uuid.uuidString)/Attachments/\(name)")
         save()
+        // Words in the picture can be searched for.
+        recognizeText(inPicture: name, of: item)
         return "![](\(Self.attachmentScheme)\(name))"
     }
 
@@ -420,7 +433,10 @@ final class Library {
             }
             // A locked note's text is sealed, so it can't be read to see what it shows.
             if item.isSealed { continue }
-            if !item.body.contains(Self.attachmentScheme + attachment.fileName) {
+            // A sketch's drawing stays while its picture does.
+            var shown = attachment.fileName
+            if shown.hasSuffix(".drawing") { shown = String(shown.dropLast(8)) + ".png" }
+            if !item.body.contains(Self.attachmentScheme + shown) {
                 try? FileManager.default.removeItem(at: files.url(for: "\(item.uuid.uuidString)/Attachments/\(attachment.fileName)"))
                 context.delete(attachment)
             }
@@ -431,6 +447,8 @@ final class Library {
 
     var isShowingGraph = false
     var isAskingLibrary = false
+    /// Items waiting for a new list to be named, from a menu.
+    var newListItems: [Item]?
 
     /// Items that link or are linked to, and the links between them (as
     /// pairs of indices): hand-made links and `[[links]]` in notes.
@@ -1090,7 +1108,7 @@ final class Library {
 
     private func applyRules(to item: Item) {
         guard !item.isTrashed else { return }
-        for rule in enabledRules() where CompiledSearch(SearchQuery(rule.query), index: index).matches(item) {
+        for rule in enabledRules() where compile(rule.query).matches(item) {
             apply(rule, to: item)
         }
     }
@@ -1099,7 +1117,7 @@ final class Library {
     /// it, and says how many that was.
     @discardableResult
     func apply(_ rule: SmartRule, toExisting: Bool) -> Int {
-        let search = CompiledSearch(SearchQuery(rule.query), index: index)
+        let search = compile(rule.query)
         let items = ((try? context.fetch(FetchDescriptor<Item>())) ?? []).filter { !$0.isTrashed && search.matches($0) }
         for item in items { apply(rule, to: item) }
         save()
@@ -1455,6 +1473,9 @@ final class Library {
         case .trash: "Trash"
         case .templates: "Templates"
         case .feed(let feed): feed.title
+        case .list(let list): list.name
+        case .readLater: "Read Later"
+        case .timeline: "Timeline"
         }
     }
 
@@ -1468,6 +1489,15 @@ final class Library {
         if sidebar == .reminders {
             return result.sorted { ($0.remindAt ?? .distantFuture) < ($1.remindAt ?? .distantFuture) }
         }
+        // A list in its own order; the reading queue oldest first.
+        if case .list(let list) = sidebar {
+            let order = list.orderedItems.map(\.uuid)
+            let position = Dictionary(order.enumerated().map { ($1, $0) }, uniquingKeysWith: { first, _ in first })
+            return result.sorted { position[$0.uuid, default: .max] < position[$1.uuid, default: .max] }
+        }
+        if sidebar == .readLater {
+            return result.sorted { ($0.readLaterAt ?? .distantPast) < ($1.readLaterAt ?? .distantPast) }
+        }
         return sort.sorted(result, ascending: sortAscending)
     }
 
@@ -1478,8 +1508,10 @@ final class Library {
         // Templates keep to themselves.
         if item.isTemplate || selection == .templates { return item.isTemplate && selection == .templates }
         switch selection {
-        case .all, .trash, .duplicates, .templates: return true
+        case .all, .trash, .duplicates, .templates, .timeline: return true
         case .feed(let feed): return item.feed == feed
+        case .list(let list): return (item.lists ?? []).contains(list)
+        case .readLater: return item.readLaterAt != nil
         case .inbox: return item.inInbox
         case .favorites: return item.isFavorite
         case .reminders: return item.remindAt != nil
@@ -1508,14 +1540,14 @@ final class Library {
         return sameKind.filter { $0 != item && !$0.isTrashed && $0.duplicateKey == key }
     }
 
-    private func runSearch() {
-        search = CompiledSearch(SearchQuery(query), index: index)
+    func runSearch() {
+        search = compile(query)
         compileSmartFilter()
     }
 
     private func compileSmartFilter() {
         if case .smartFilter(let filter) = sidebar {
-            smartFilterSearch = CompiledSearch(SearchQuery(filter.query), index: index)
+            smartFilterSearch = compile(filter.query)
         } else {
             smartFilterSearch = nil
         }
@@ -1579,7 +1611,7 @@ final class Library {
 
     /// Items matching search text, as typed in the search field, best first.
     func find(_ text: String, limit: Int = 50) -> [Item] {
-        let compiled = CompiledSearch(SearchQuery(text), index: index)
+        let compiled = compile(text)
         let all = (try? context.fetch(FetchDescriptor<Item>(sortBy: [SortDescriptor(\.modifiedAt, order: .reverse)]))) ?? []
         return Array(compiled.rank(all.filter { !$0.isTrashed && compiled.matches($0) }).prefix(limit))
     }
@@ -1699,6 +1731,12 @@ final class Library {
         if !query.isEmpty { runSearch() }
     }
 
+    /// A search as typed, knowing the custom fields there are.
+    func compile(_ text: String) -> CompiledSearch {
+        let fields = fieldDefinitions()
+        return CompiledSearch(SearchQuery(text, fields: fields.map(\.name)), index: index, fields: fields)
+    }
+
     private func entry(for item: Item) -> SearchIndex.Entry {
         // A locked item is found by its title and tags only.
         if item.isLocked {
@@ -1717,7 +1755,10 @@ final class Library {
             title: item.title,
             body: body,
             tags: item.sortedTags.map(\.name).joined(separator: " "),
-            extra: [item.urlString ?? "", fileName, item.extractedText].joined(separator: "\n"))
+            extra: ([item.urlString ?? "", fileName, item.extractedText]
+                    // Your own fields' values, and the words in sketches and pictures.
+                    + CustomField.decode(item.customFields).values
+                    + (item.attachments ?? []).map(\.recognizedText)).joined(separator: "\n"))
     }
 
     /// Makes a document's thumbnail, if it hasn't one yet.

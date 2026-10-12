@@ -132,7 +132,15 @@ final class Item {
 
     /// Locked with encryption, rather than only hidden.
     var isSealed: Bool { sealedData != nil }
+    /// Values of your own fields (`CustomField.encode`): field uuid to value.
+    var customFields: String = ""
+    /// In the Read Later queue since then; nil when it isn't.
+    var readLaterAt: Date?
+    /// How far through it you've read, 0 to 1.
+    var readingProgress: Double = 0
     @Relationship(inverse: \Tag.items) var tags: [Tag]? = []
+    /// The lists it's been put in, besides its category.
+    @Relationship(inverse: \ItemList.items) var lists: [ItemList]? = []
     /// Items this one has been linked to by hand. `[[Title]]` links written
     /// in a note are read from its text instead, so they can't go stale.
     @Relationship(inverse: \Item.linkedFrom) var linksTo: [Item]? = []

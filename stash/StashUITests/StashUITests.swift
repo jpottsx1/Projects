@@ -13,7 +13,10 @@ final class StashUITests: XCTestCase {
         #else
         continueAfterFailure = false
         app = XCUIApplication()
-        app.launchArguments += ["-StashTestLibrary", "YES", "-StashResetTestLibrary", "YES"]
+        // No windows brought back from the last run: an item window left
+        // open by one test would take the keyboard from the next.
+        app.launchArguments += ["-StashTestLibrary", "YES", "-StashResetTestLibrary", "YES",
+                                "-ApplePersistenceIgnoreState", "YES"]
         app.launch()
         XCTAssertTrue(app.windows.firstMatch.waitForExistence(timeout: 10))
         #endif
@@ -565,6 +568,114 @@ final class StashUITests: XCTestCase {
         XCTAssertTrue((answer.value as? String ?? answer.label).localizedCaseInsensitiveContains("Ray"))
         let source = app.buttons.matching(identifier: "librarySource").matching(NSPredicate(format: "label CONTAINS 'Boiler'")).firstMatch
         XCTAssertTrue(source.exists)
+    }
+    // MARK: - Sketches, lists, fields, timeline and reading queue
+
+    private func row(_ title: String) -> XCUIElement {
+        app.outlines.element(boundBy: 1).descendants(matching: .any)["row-\(title)"]
+    }
+
+    func testListsKeepTheirOwnOrder() {
+        newNote(title: "Alpha", text: "a")
+        newNote(title: "Bravo", text: "b")
+        newNote(title: "Charlie", text: "c")
+        app.outlines.buttons["New List"].click()
+        app.typeText("Reading\r")
+        XCTAssertTrue(app.outlines.staticTexts["Reading"].waitForExistence(timeout: 5))
+
+        app.outlines.staticTexts["All Items"].click()
+        for title in ["Charlie", "Alpha"] {
+            listRow(title).rightClick()
+            app.menuItems["Add to List"].click()
+            app.menuItems["Reading"].click()
+        }
+        app.outlines.staticTexts["Reading"].click()
+        // In the order they were added, not by date.
+        let titles = app.outlines.element(boundBy: 1).staticTexts.allElementsBoundByIndex
+            .compactMap { ($0.value as? String) ?? $0.label }.filter { ["Alpha", "Bravo", "Charlie"].contains($0) }
+        XCTAssertEqual(titles, ["Charlie", "Alpha"])
+
+        app.outlines.staticTexts["All Items"].click()
+        let search = app.searchFields.firstMatch
+        search.click()
+        search.typeText("list:reading")
+        XCTAssertTrue(listRow("Alpha").waitForExistence(timeout: 5))
+        XCTAssertFalse(listRow("Bravo").exists)
+    }
+
+    func testCustomFieldsAreSearchable() {
+        newNote(title: "Lamp", text: "desk lamp")
+        newNote(title: "Sofa", text: "big sofa")
+        app.buttons["Edit Fields…"].firstMatch.click()
+        let name = app.textFields["newFieldName"]
+        XCTAssertTrue(name.waitForExistence(timeout: 5))
+        name.click()
+        name.typeText("Price")
+        app.popUpButtons["newFieldKind"].click()
+        app.menuItems["Number"].click()
+        app.buttons["Add Field"].click()
+        app.buttons["Done"].firstMatch.click()
+
+        for (title, price) in [("Lamp", "35"), ("Sofa", "1,200")] {
+            listRow(title).click()
+            let field = app.textFields["field-Price"]
+            XCTAssertTrue(field.waitForExistence(timeout: 5))
+            field.click()
+            field.typeText(price + "\r")
+        }
+        let search = app.searchFields.firstMatch
+        search.click()
+        search.typeText("Price:>100")
+        XCTAssertTrue(listRow("Sofa").waitForExistence(timeout: 5))
+        XCTAssertFalse(listRow("Lamp").exists)
+        search.typeKey("a", modifierFlags: .command)
+        search.typeText("Price:<100")
+        XCTAssertTrue(listRow("Lamp").waitForExistence(timeout: 5))
+        XCTAssertFalse(listRow("Sofa").exists)
+    }
+
+    func testReadLaterAndTimeline() {
+        newNote(title: "Long Read", text: "later")
+        app.typeKey("r", modifierFlags: [.command, .control])
+        app.outlines.staticTexts["Read Later"].click()
+        XCTAssertTrue(listRow("Long Read").waitForExistence(timeout: 5))
+        app.outlines.staticTexts["Timeline"].click()
+        // Today is chosen, and what was added today is listed.
+        XCTAssertTrue(app.buttons["Today"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Long Read"].waitForExistence(timeout: 5))
+    }
+
+    /// Words in a picture (a pasted one here; a sketch's handwriting goes the same way) are found by search.
+    func testWordsInPicturesAreSearchable() {
+        let editor = newNote(title: "Whiteboard", text: "Photo of the board\n")
+        let image = NSImage(size: NSSize(width: 520, height: 140), flipped: false) { rect in
+            NSColor.white.setFill()
+            rect.fill()
+            ("Quarterly zebra review" as NSString).draw(at: NSPoint(x: 20, y: 50),
+                                                        withAttributes: [.font: NSFont.systemFont(ofSize: 44)])
+            return true
+        }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.writeObjects([image])
+        editor.typeKey("v", modifierFlags: .command)
+        sleep(3)
+        let search = app.searchFields.firstMatch
+        search.click()
+        search.typeText("zebra")
+        XCTAssertTrue(listRow("Whiteboard").waitForExistence(timeout: 10))
+    }
+
+    func testSketchingInANote() {
+        let editor = newNote(title: "Doodle", text: "Below is a sketch\n")
+        app.buttons["sketchButton"].click()
+        let canvas = app.descendants(matching: .any)["sketchCanvas"].firstMatch
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        let start = canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.4))
+        start.press(forDuration: 0.1, thenDragTo: canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.7, dy: 0.6)))
+        app.buttons["sketchDone"].click()
+        XCTAssertTrue((editor.value as? String)?.contains("![Sketch](attachment:sketch-") == true)
+        editor.typeKey(.upArrow, modifierFlags: .command)
+        XCTAssertTrue(app.images["notePicture"].waitForExistence(timeout: 5))
     }
     #endif
 }

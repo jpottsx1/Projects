@@ -87,6 +87,12 @@ extension Library {
         if everything {
             manifest.smartFilters = try context.fetch(FetchDescriptor<SmartFilter>())
                 .map { .init(id: $0.uuid, name: $0.name, query: $0.query, createdAt: $0.createdAt) }
+            manifest.lists = try context.fetch(FetchDescriptor<ItemList>()).map {
+                .init(id: $0.uuid, name: $0.name, order: $0.orderedItems.map(\.uuid), createdAt: $0.createdAt)
+            }
+            manifest.fields = try context.fetch(FetchDescriptor<FieldDefinition>()).map {
+                .init(id: $0.uuid, name: $0.name, kind: $0.kindRaw, choices: $0.choices, order: $0.order)
+            }
             manifest.feeds = try context.fetch(FetchDescriptor<Feed>()).map {
                 .init(id: $0.uuid, title: $0.title, url: $0.urlString, siteURL: $0.siteURLString,
                       category: $0.categoryID, seenIDs: $0.seenIDs, addedAt: $0.addedAt)
@@ -122,6 +128,11 @@ extension Library {
             record.readingPosition = item.readingPosition
             record.isTemplate = item.isTemplate ? true : nil
             record.feed = item.feed?.uuid
+            let listIDs = (item.lists ?? []).map(\.uuid)
+            record.lists = listIDs.isEmpty ? nil : listIDs
+            record.customFields = item.customFields.isEmpty ? nil : item.customFields
+            record.readLaterAt = item.readLaterAt
+            record.readingProgress = item.readingProgress > 0 ? item.readingProgress : nil
             record.feedEntryID = item.feedEntryID.isEmpty ? nil : item.feedEntryID
             record.archivedAt = item.archivedAt
             record.highlights = item.sortedHighlights.map {
@@ -267,6 +278,25 @@ extension Library {
             context.insert(filter)
         }
 
+        // Fields and lists, before the items that use them.
+        let existingFields = Set(try context.fetch(FetchDescriptor<FieldDefinition>()).map(\.uuid))
+        for record in manifest.fields ?? [] where !existingFields.contains(record.id) {
+            let field = FieldDefinition(name: record.name, kind: CustomField.Kind(rawValue: record.kind) ?? .text, order: record.order)
+            field.uuid = record.id
+            field.choices = record.choices
+            context.insert(field)
+        }
+        var listsByID = Dictionary(try context.fetch(FetchDescriptor<ItemList>()).map { ($0.uuid, $0) },
+                                   uniquingKeysWith: { first, _ in first })
+        for record in manifest.lists ?? [] where listsByID[record.id] == nil {
+            let list = ItemList(name: record.name)
+            list.uuid = record.id
+            list.order = record.order
+            list.createdAt = record.createdAt
+            context.insert(list)
+            listsByID[record.id] = list
+        }
+
         // The keys locked items need, still under their passwords.
         let existingVaults = Set(try context.fetch(FetchDescriptor<Vault>()).map(\.uuid))
         for record in manifest.vaults ?? [] where !existingVaults.contains(record.id) {
@@ -338,6 +368,10 @@ extension Library {
             context.insert(item)
             item.category = record.category.flatMap { categories[$0] }
             item.feed = record.feed.flatMap { feedsByID[$0] }
+            item.lists = (record.lists ?? []).compactMap { listsByID[$0] }
+            item.customFields = record.customFields ?? ""
+            item.readLaterAt = record.readLaterAt
+            item.readingProgress = record.readingProgress ?? 0
 
             if let file = record.file, !failed.contains(file) {
                 item.storedFilePath = "\(record.id.uuidString)/" + Self.fileName(file)

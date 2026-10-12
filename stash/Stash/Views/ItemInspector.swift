@@ -80,6 +80,8 @@ struct ItemInspector: View {
                 }
             }
 
+            FieldsSection(item: item)
+            ListsAndReadingSection(item: item)
             if !item.isLocked { AssistantSection(item: item) }
 
             Section("Reminder") {

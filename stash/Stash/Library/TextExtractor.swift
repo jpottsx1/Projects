@@ -61,6 +61,21 @@ enum TextExtractor {
         return recognized.count > text.count ? recognized : text
     }
 
+    /// Words in a picture: printed, or written by hand.
+    static func recognizeText(inImage data: Data) -> String {
+        let request = VNRecognizeTextRequest()
+        request.recognitionLevel = .accurate
+        request.usesLanguageCorrection = true
+        do {
+            try VNImageRequestHandler(data: data).perform([request])
+        } catch {
+            return ""
+        }
+        return (request.results ?? [])
+            .compactMap { $0.topCandidates(1).first?.string }
+            .joined(separator: "\n")
+    }
+
     private static func recognizeText(inImageAt url: URL) -> String {
         let request = VNRecognizeTextRequest()
         request.recognitionLevel = .accurate

@@ -248,11 +248,34 @@ final class ArticleController: NSObject, WKNavigationDelegate, WKScriptMessageHa
         configuration.userContentController.add(WeakMessageHandler(self), name: "stash")
         configuration.userContentController.addUserScript(
             WKUserScript(source: WebHighlights.script, injectionTime: .atDocumentEnd, forMainFrameOnly: true))
+        configuration.userContentController.addUserScript(
+            WKUserScript(source: Self.progressScript, injectionTime: .atDocumentEnd, forMainFrameOnly: true))
         let view = WKWebView(frame: .zero, configuration: configuration)
         view.navigationDelegate = self
         webView = view
         return view
     }
+
+    /// Reports how far down the article you've scrolled, and scrolls back there.
+    static let progressScript = #"""
+    (function () {
+      window.stashScrollTo = (fraction) => {
+        setTimeout(() => {
+          const height = document.documentElement.scrollHeight - window.innerHeight;
+          window.scrollTo(0, Math.max(0, fraction * height));
+        }, 60);
+      };
+      let timer;
+      window.addEventListener('scroll', () => {
+        clearTimeout(timer);
+        timer = setTimeout(() => {
+          const height = document.documentElement.scrollHeight - window.innerHeight;
+          window.webkit.messageHandlers.stash.postMessage(
+            { type: 'position', value: height > 0 ? Math.min(1, window.scrollY / height) : 1 });
+        }, 800);
+      });
+    })();
+    """#
 
     /// Loads the article, unless it's the one already showing.
     func show(html: String, baseURL: URL?) {
@@ -287,6 +310,11 @@ final class ArticleController: NSObject, WKNavigationDelegate, WKScriptMessageHa
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         loaded = true
         showHighlights()
+        // Back where reading stopped.
+        if let item, item.readingPosition.hasPrefix("article|"), let fraction = Double(item.readingPosition.dropFirst(8)),
+           fraction > 0.01, revealAfterLoad == nil {
+            webView.evaluateJavaScript("stashScrollTo(\(fraction))")
+        }
         if let id = revealAfterLoad {
             revealAfterLoad = nil
             // After the highlights are marked, which is a moment's work.
@@ -310,7 +338,13 @@ final class ArticleController: NSObject, WKNavigationDelegate, WKScriptMessageHa
     }
 
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
-        guard let body = message.body as? [String: Any], body["type"] as? String == "tap",
+        guard let body = message.body as? [String: Any] else { return }
+        if body["type"] as? String == "position", let item, let fraction = (body["value"] as? NSNumber)?.doubleValue {
+            let rounded = (fraction * 1000).rounded() / 1000
+            library?.setReadingProgress(item, fraction, position: "article|\(rounded)")
+            return
+        }
+        guard body["type"] as? String == "tap",
               let id = (body["id"] as? String).flatMap(UUID.init(uuidString:)) else { return }
         library?.editingHighlight = item?.highlights?.first { $0.uuid == id }
     }

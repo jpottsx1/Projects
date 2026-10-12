@@ -1,3 +1,4 @@
+import PencilKit
 import SwiftUI
 import SwiftData
 import UniformTypeIdentifiers
@@ -36,6 +37,8 @@ struct NoteEditor: View {
     @State private var selection: Range<Int>?
     @State private var isChoosingPicture = false
     @State private var isRecording = false
+    /// The sketch being drawn: a new one, or the one on the cursor's line.
+    @State private var sketching: SketchEditing?
     #if os(iOS)
     @State private var photo: PhotosPickerItem?
     #endif
@@ -65,6 +68,28 @@ struct NoteEditor: View {
             }
         }
         .onChange(of: item.body) { library.didEdit(item) }
+        // Here, not on their buttons: a sheet on a button in the formatting
+        // bar (a toolbar above the keyboard on an iPhone) never appears.
+        .sheet(item: $sketching) { editing in
+            SketchEditor(drawing: editing.drawing) { drawing in
+                guard let markdown = library.saveSketch(drawing, in: item) else { return }
+                if let old = editing.replacing, let range = item.body.range(of: old) {
+                    item.body.replaceSubrange(range, with: markdown)
+                } else {
+                    insertOwnLine(markdown)
+                }
+                library.didEdit(item)
+            }
+        }
+        .sheet(isPresented: $isRecording) {
+            RecordingSheet(note: item) { words, recording in
+                // What was said, then a link to the recording itself.
+                let link = "🎙 [[\(recording.title)]]"
+                insertOwnLine(words.isEmpty ? link : words + "\n\n" + link)
+                library.didEdit(item)
+            }
+        }
+
         .onChange(of: mode) {
             completion = nil
             preferredMode = mode.rawValue
@@ -258,19 +283,18 @@ struct NoteEditor: View {
         }
         #endif
         Button {
+            sketching = sketchAtCursor() ?? SketchEditing(drawing: PKDrawing(), replacing: nil)
+        } label: {
+            Label("Sketch", systemImage: "pencil.and.scribble").labelStyle(.iconOnly)
+        }
+        .help("Draw a sketch, or change the one on the cursor’s line")
+        .accessibilityIdentifier("sketchButton")
+        Button {
             isRecording = true
         } label: {
             Label("Record", systemImage: "mic").labelStyle(.iconOnly)
         }
         .help("Record, and put what you say here")
-        .sheet(isPresented: $isRecording) {
-            RecordingSheet(note: item) { words, recording in
-                // What was said, then a link to the recording itself.
-                let link = "🎙 [[\(recording.title)]]"
-                insertOwnLine(words.isEmpty ? link : words + "\n\n" + link)
-                library.didEdit(item)
-            }
-        }
         Menu {
             Button("Insert Table") { insertOwnLine(MarkdownTable.template()) }
             Button("Tidy Table") { tidyTable() }
@@ -295,6 +319,18 @@ struct NoteEditor: View {
         selection = end..<end
         let index = item.body.index(item.body.startIndex, offsetBy: min(end, item.body.count))
         select = index..<index
+    }
+
+    /// The sketch on the cursor's line, to change.
+    private func sketchAtCursor() -> SketchEditing? {
+        let offset = min(selection?.lowerBound ?? item.body.count, item.body.count)
+        let lineStart = item.body.prefix(offset).lastIndex(of: "\n").map { item.body.index(after: $0) } ?? item.body.startIndex
+        let lineEnd = item.body[lineStart...].firstIndex(of: "\n") ?? item.body.endIndex
+        let line = String(item.body[lineStart..<lineEnd]).trimmingCharacters(in: .whitespaces)
+        guard let picture = MarkdownBlocks.image(line), picture.source.hasPrefix(Library.attachmentScheme) else { return nil }
+        let name = String(picture.source.dropFirst(Library.attachmentScheme.count))
+        guard let drawing = library.sketchDrawing(name, in: item) else { return nil }
+        return SketchEditing(drawing: drawing, replacing: line)
     }
 
     /// Lines up the columns of the table the cursor is in.
@@ -544,4 +580,12 @@ struct PictureView: View {
         .frame(maxWidth: 600, maxHeight: 420, alignment: .leading)
         .clipShape(RoundedRectangle(cornerRadius: 6))
     }
+}
+
+/// A sketch open to draw: the drawing, and the Markdown it replaces when
+/// it's one already in the note.
+struct SketchEditing: Identifiable {
+    let id = UUID()
+    var drawing: PKDrawing
+    var replacing: String?
 }

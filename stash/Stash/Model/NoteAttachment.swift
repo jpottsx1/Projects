@@ -12,6 +12,8 @@ final class NoteAttachment {
     var fileName: String = ""
     @Attribute(.externalStorage) var data: Data?
     var createdAt: Date = Date()
+    /// Words read from it (handwriting in a sketch, text in a picture), for search.
+    var recognizedText: String = ""
 
     init(fileName: String, data: Data) {
         self.fileName = fileName

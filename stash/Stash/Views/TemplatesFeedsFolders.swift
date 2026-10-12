@@ -178,6 +178,7 @@ struct FeedsSection: View {
                     Button("Unsubscribe…", role: .destructive) { unsubscribing = feed }
                 }
             }
+            // The dialogs hang off this button: a sidebar section can't show them.
             Button {
                 library.isAddingFeed = true
             } label: {
@@ -185,7 +186,19 @@ struct FeedsSection: View {
                     .foregroundStyle(.secondary)
             }
             .buttonStyle(.plain)
+            .modifier(FeedDialogs(renaming: $renaming, nameDraft: $nameDraft, unsubscribing: $unsubscribing))
         }
+    }
+}
+
+private struct FeedDialogs: ViewModifier {
+    @Environment(Library.self) private var library
+    @Binding var renaming: Feed?
+    @Binding var nameDraft: String
+    @Binding var unsubscribing: Feed?
+
+    func body(content: Content) -> some View {
+        content
         .alert("Rename Feed", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
             TextField("Name", text: $nameDraft)
             Button("Cancel", role: .cancel) {}

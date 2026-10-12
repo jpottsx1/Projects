@@ -106,7 +106,7 @@ struct SidebarView: View {
             }
         }
         .listStyle(.sidebar)
-        .navigationTitle("Stash")
+        .navigationTitle(StashStore.isTestLibrary ? "Stash (Test Library)" : "Stash")
         .toolbar {
             ToolbarItem {
                 Menu {

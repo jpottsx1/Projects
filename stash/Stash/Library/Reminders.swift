@@ -25,7 +25,11 @@ final class Reminders: NSObject, UNUserNotificationCenterDelegate {
         _ = try? await center.requestAuthorization(options: [.alert, .sound, .badge])
     }
 
+    /// Off for the test library.
+    private let isEnabled = !StashStore.isTestLibrary
+
     func schedule(_ item: Item) {
+        guard isEnabled else { return }
         let id = Self.prefix + item.uuid.uuidString
         center.removePendingNotificationRequests(withIdentifiers: [id])
         guard let date = item.remindAt, date > .now, !item.isTrashed else { return }
@@ -33,10 +37,12 @@ final class Reminders: NSObject, UNUserNotificationCenterDelegate {
     }
 
     func cancel(_ items: [Item]) {
+        guard isEnabled else { return }
         center.removePendingNotificationRequests(withIdentifiers: items.map { Self.prefix + $0.uuid.uuidString })
     }
 
     func replaceAll(with items: [Item]) {
+        guard isEnabled else { return }
         let requests = items.compactMap { item -> UNNotificationRequest? in
             guard let date = item.remindAt, date > .now, !item.isTrashed else { return nil }
             return Self.request(id: Self.prefix + item.uuid.uuidString, item: item, date: date)

@@ -35,6 +35,7 @@ struct ItemDetailView: View {
             }
             VStack(alignment: .leading, spacing: 8) {
                 TextField("Title", text: $item.title)
+                    .accessibilityIdentifier("itemTitle")
                     .font(.title2.bold())
                     .textFieldStyle(.plain)
                     .focused($titleFocused)

@@ -161,7 +161,8 @@ final class Library {
 
     init(context: ModelContext) {
         self.context = context
-        let support = URL.applicationSupportDirectory.appendingPathComponent("Stash", isDirectory: true)
+        let support = URL.applicationSupportDirectory
+            .appendingPathComponent(StashStore.isTestLibrary ? "StashTest" : "Stash", isDirectory: true)
         files = FileStore(root: support.appendingPathComponent("Files", isDirectory: true))
         index = SearchIndex(url: support.appendingPathComponent("SearchIndex.sqlite"))
         refreshAfterStoreChange()
@@ -1508,7 +1509,7 @@ final class Library {
 
     @ObservationIgnored private var pendingWidgetUpdate: Task<Void, Never>?
     /// Where the widgets read from; nil without an App Group.
-    @ObservationIgnored private let widgetFolder = WidgetSnapshot.folder()
+    @ObservationIgnored private let widgetFolder = StashStore.isTestLibrary ? nil : WidgetSnapshot.folder()
 
     /// Saves come in bursts while typing; the widgets are told once it settles.
     private func scheduleWidgetUpdate() {

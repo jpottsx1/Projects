@@ -192,6 +192,7 @@ extension LiveMarkdownEditor: NSViewRepresentable {
         let scrollView = NSTextView.scrollableTextView()
         guard let textView = scrollView.documentView as? NSTextView else { return scrollView }
         textView.delegate = context.coordinator
+        textView.setAccessibilityIdentifier("noteEditor")
         textView.isRichText = false
         textView.allowsUndo = true
         textView.isAutomaticQuoteSubstitutionEnabled = false
@@ -248,6 +249,7 @@ extension LiveMarkdownEditor: UIViewRepresentable {
     func makeUIView(context: Context) -> UITextView {
         let textView = UITextView()
         textView.delegate = context.coordinator
+        textView.accessibilityIdentifier = "noteEditor"
         textView.backgroundColor = .clear
         textView.textContainerInset = UIEdgeInsets(top: 12, left: 8, bottom: 12, right: 8)
         textView.smartQuotesType = .no

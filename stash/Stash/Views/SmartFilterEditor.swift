@@ -48,7 +48,7 @@ struct SmartFilterEditor: View {
                 }
             }
         }
-        .frame(minWidth: 380, minHeight: 300)
+        .sheetSize(minWidth: 380, minHeight: 300)
     }
 
     private func save() {

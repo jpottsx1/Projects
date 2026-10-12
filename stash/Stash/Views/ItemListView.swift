@@ -13,7 +13,9 @@ struct ItemListView: View {
     @State private var confirmingDelete: [Item] = []
     @Environment(\.horizontalSizeClass) private var sizeClass
     #if os(iOS)
-    @Environment(\.editMode) private var editMode
+    /// Kept here rather than read from the environment: this view sits
+    /// above the list the Edit button changes, so it wouldn't see the change.
+    @State private var editMode: EditMode = .inactive
     #endif
     /// Where a Shift-click range starts in the grid.
     @State private var anchor: Item?
@@ -36,17 +38,20 @@ struct ItemListView: View {
         .toolbar {
             ToolbarItem(placement: .primaryAction) { AddMenu() }
             #if os(iOS)
-            ToolbarItem(placement: .topBarLeading) { EditButton() }
-            if editMode?.wrappedValue.isEditing == true {
-                ToolbarItemGroup(placement: .bottomBar) {
+            ToolbarItem(placement: .topBarLeading) {
+                Button(editMode.isEditing ? "Done" : "Edit") {
+                    withAnimation { editMode = editMode.isEditing ? .inactive : .active }
+                }
+            }
+            // In the top bar, not a bottom bar: from iOS 26 the search
+            // field takes the bottom of the screen.
+            if editMode.isEditing {
+                ToolbarItem(placement: .topBarLeading) {
                     let chosen = library.selectedItems
-                    Text(chosen.isEmpty ? "Select Items" : "\(chosen.count) Selected")
-                        .font(.callout)
-                    Spacer()
                     Menu {
                         bulkMenu(for: chosen)
                     } label: {
-                        Label("Actions", systemImage: "ellipsis.circle")
+                        Text(chosen.isEmpty ? "Actions" : "Actions (\(chosen.count))")
                     }
                     .disabled(chosen.isEmpty)
                 }
@@ -116,6 +121,16 @@ struct ItemListView: View {
 
     private func list(_ items: [Item]) -> some View {
         List(selection: Binding(get: { library.listSelection }, set: { library.select($0) })) {
+            #if os(iOS)
+            // While searching an iPhone hides the toolbar, and its button with it.
+            if !library.searchText.isEmpty, sizeClass == .compact {
+                Button {
+                    savingSearch = library.searchText
+                } label: {
+                    Label("Save as Smart Filter", systemImage: "line.3.horizontal.decrease.circle.badge.plus")
+                }
+            }
+            #endif
             ForEach(items) { item in
                 ItemRow(item: item)
                     .tag(item)
@@ -138,6 +153,9 @@ struct ItemListView: View {
                     }
             }
         }
+        #if os(iOS)
+        .environment(\.editMode, $editMode)
+        #endif
         .contextMenu(forSelectionType: Item.self) { chosen in
             if chosen.count == 1, let item = chosen.first {
                 menu(for: item)
@@ -170,7 +188,7 @@ struct ItemListView: View {
             return
         }
         #else
-        let adding = editMode?.wrappedValue.isEditing == true
+        let adding = editMode.isEditing
         #endif
         if adding {
             if chosen.contains(item) { chosen.remove(item) } else { chosen.insert(item) }

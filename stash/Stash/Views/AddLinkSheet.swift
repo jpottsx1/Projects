@@ -5,6 +5,7 @@ struct AddLinkSheet: View {
     @Environment(Library.self) private var library
     @Environment(\.dismiss) private var dismiss
     @State private var address = ""
+    @FocusState private var focused: Bool
 
     var body: some View {
         NavigationStack {
@@ -15,6 +16,7 @@ struct AddLinkSheet: View {
                     .textInputAutocapitalization(.never)
                     #endif
                     .autocorrectionDisabled()
+                    .focused($focused)
                     .onSubmit(add)
                 PasteButton(payloadType: URL.self) { urls in
                     guard let url = urls.first else { return }
@@ -33,7 +35,8 @@ struct AddLinkSheet: View {
                 }
             }
         }
-        .frame(minWidth: 400, minHeight: 200)
+        .sheetSize(minWidth: 400, minHeight: 200)
+        .onAppear { focused = true }
     }
 
     private var url: URL? { WebAddress.url(from: address) }

@@ -329,6 +329,10 @@ struct StashCommands: Commands {
                 .disabled(chosen.isEmpty || windowItem != nil)
             Divider()
             let live = chosen.filter { !$0.isTrashed }
+            if live.count == 1 {
+                ImageSearchMenu(item: live[0])
+                    .environment(library)
+            }
             let allFavorite = !live.isEmpty && live.allSatisfy(\.isFavorite)
             Button(allFavorite ? "Remove from Favorites" : "Add to Favorites") {
                 library.setFavorite(live, !allFavorite)

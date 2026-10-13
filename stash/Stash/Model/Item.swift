@@ -149,6 +149,10 @@ final class Item {
     var lastViewedAt: Date?
     /// A document's file size in bytes, for `size:` searches; 0 until known.
     var fileSize: Int = 0
+    /// The web address a document (a picture, say) came from, when known:
+    /// the Mac's "Where from" on a download, or the page it was dragged out
+    /// of. Image searches use it.
+    var sourceAddress: String?
     @Relationship(inverse: \Tag.items) var tags: [Tag]? = []
     /// The lists it's been put in, besides its category.
     @Relationship(inverse: \ItemList.items) var lists: [ItemList]? = []

@@ -36,6 +36,14 @@ extension Library {
             if provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier),
                let url = await Self.load(URL.self, from: provider), url.isFileURL {
                 importFiles([url])
+            } else if provider.hasItemConformingToTypeIdentifier(UTType.image.identifier),
+                      provider.hasItemConformingToTypeIdentifier(UTType.url.identifier),
+                      let file = await Self.copyFile(of: .image, from: provider) {
+                // A picture dragged out of a web page: the picture, remembering
+                // where it came from, rather than a link to it.
+                let address = await Self.load(URL.self, from: provider).flatMap { WebAddress.url(from: $0.absoluteString) }
+                importFiles([file], source: address)
+                try? FileManager.default.removeItem(at: file.deletingLastPathComponent())
             } else if provider.hasItemConformingToTypeIdentifier(UTType.url.identifier),
                       let url = await Self.load(URL.self, from: provider), let web = WebAddress.url(from: url.absoluteString) {
                 addLink(web)

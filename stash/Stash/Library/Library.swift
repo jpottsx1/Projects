@@ -157,6 +157,8 @@ final class Library {
     var isManagingIndexedFolders = false
     var isAddingFeed = false
     var importError: String?
+    /// Said after an image with no web address is copied for searching.
+    var imageSearchNotice: String?
 
     private var query = ""
     /// What's typed in the search field. Searching happens as it changes.
@@ -307,10 +309,13 @@ final class Library {
         return item
     }
 
-    func importFiles(_ urls: [URL]) {
+    /// `source`: the web address they came from, when known; otherwise each
+    /// file's own "Where from", if it was downloaded.
+    func importFiles(_ urls: [URL], source: URL? = nil) {
         var last: Item?
         for url in urls {
             let item = Item(kind: .document, title: url.deletingPathExtension().lastPathComponent)
+            item.sourceAddress = source?.absoluteString ?? Self.whereFrom(url)
             do {
                 item.storedFilePath = try files.importFile(at: url, for: item.uuid)
             } catch {

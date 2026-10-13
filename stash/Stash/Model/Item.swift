@@ -143,6 +143,8 @@ final class Item {
     var calendarEventID: String = ""
     var calendarEventTitle: String = ""
     var calendarEventStart: Date?
+    /// A note shown as a mind map (`MindMap`): its text is the map's outline.
+    var isMindMap: Bool = false
     @Relationship(inverse: \Tag.items) var tags: [Tag]? = []
     /// The lists it's been put in, besides its category.
     @Relationship(inverse: \ItemList.items) var lists: [ItemList]? = []

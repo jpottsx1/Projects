@@ -54,6 +54,7 @@ struct ItemDetailView: View {
                 SealedItemView(item: item)
             } else {
                 switch item.kind {
+                case .note where item.isMindMap: MindMapDetail(item: item)
                 case .note: NoteEditor(item: item)
                 case .link: LinkDetail(item: item)
                 case .document: DocumentDetail(item: item)

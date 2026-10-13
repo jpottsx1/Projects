@@ -174,6 +174,7 @@ final class Library {
 
     @ObservationIgnored private var storeObserver: NSObjectProtocol?
     @ObservationIgnored private var shareObserver: NSObjectProtocol?
+    @ObservationIgnored var finderObserver: NSObjectProtocol?
     @ObservationIgnored private var pendingRefresh: Task<Void, Never>?
     /// Documents Quick Look has been asked for a thumbnail of this session,
     /// so files it can't picture aren't asked about after every sync.
@@ -224,10 +225,12 @@ final class Library {
         spotlight = SpotlightIndex(enabled: isMain)
         inbox = isMain && Library.sharingEnabled ? SharedInbox.forAppGroup() : nil
         widgetFolder = isMain && !StashStore.isTestLibrary ? WidgetSnapshot.folder() : nil
+        finder = isMain && Library.sharingEnabled && !StashStore.isTestLibrary ? FinderShare.forAppGroup() : nil
         files = FileStore(root: support.appendingPathComponent("Files", isDirectory: true))
         index = SearchIndex(url: support.appendingPathComponent("SearchIndex.sqlite"))
         refreshAfterStoreChange()
         importSharedItems()
+        startFinder()
         openIndexedFolders()
         startCheckingFeeds()
         if Self.requestedTestItems > 0 { generateTestItems(Self.requestedTestItems) }
@@ -262,7 +265,7 @@ final class Library {
         for url in indexedFolderURLs.values { url.stopAccessingSecurityScopedResource() }
         indexedFolderURLs = [:]
         relockAll()
-        for observer in [storeObserver, shareObserver].compactMap({ $0 }) {
+        for observer in [storeObserver, shareObserver, finderObserver].compactMap({ $0 }) {
             NotificationCenter.default.removeObserver(observer)
         }
         save()
@@ -1422,6 +1425,12 @@ final class Library {
             item.isUnread = true
             context.insert(item)
             item.category = entry.categoryID.flatMap { id in categories.first { $0.uuid == id } }
+            // A category made in the share sheet: "Work › Clients" or "Work/Clients".
+            if item.category == nil, let path = entry.newCategory, !path.isEmpty {
+                let names = path.components(separatedBy: CharacterSet(charactersIn: "›/"))
+                    .map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+                item.category = names.reduce(nil as ItemCategory?) { parent, name in importCategory(named: name, in: parent) ?? parent }
+            }
             item.inInbox = item.category == nil
             if !entry.tags.isEmpty { addTags(from: entry.tags.joined(separator: ","), to: item) }
             save()
@@ -1755,7 +1764,70 @@ final class Library {
 
         let categories = (try? context.fetch(FetchDescriptor<ItemCategory>())) ?? []
         mergeDuplicates(among: categories.filter { $0.parent == nil })
+        mergeDuplicateLists()
+        mergeDuplicateFields()
+        mergeDuplicateFeeds()
         save()
+    }
+
+    /// Lists of the same name, made on two devices: one, with both's items,
+    /// the survivor's order first.
+    private func mergeDuplicateLists() {
+        let lists = (try? context.fetch(FetchDescriptor<ItemList>())) ?? []
+        for group in Dictionary(grouping: lists, by: { $0.name.lowercased() }).values where group.count > 1 {
+            let ordered = group.sorted { $0.uuid.uuidString < $1.uuid.uuidString }
+            let keeper = ordered[0]
+            var order = keeper.orderedItems.map(\.uuid)
+            for duplicate in ordered.dropFirst() {
+                for item in duplicate.orderedItems where !(item.lists ?? []).contains(keeper) {
+                    item.lists = (item.lists ?? []) + [keeper]
+                    order.append(item.uuid)
+                }
+                if sidebar == .list(duplicate) { sidebar = .list(keeper) }
+                context.delete(duplicate)
+            }
+            keeper.order = order
+        }
+    }
+
+    /// Fields of the same name and kind: one, with the values moved over
+    /// (an item with both keeps the survivor's).
+    private func mergeDuplicateFields() {
+        let fields = (try? context.fetch(FetchDescriptor<FieldDefinition>())) ?? []
+        for group in Dictionary(grouping: fields, by: { $0.name.lowercased() + "|" + $0.kindRaw }).values where group.count > 1 {
+            let ordered = group.sorted { $0.uuid.uuidString < $1.uuid.uuidString }
+            let keeper = ordered[0]
+            let gone = Set(ordered.dropFirst().map(\.uuid))
+            let items = (try? context.fetch(FetchDescriptor<Item>(predicate: #Predicate { !$0.customFields.isEmpty }))) ?? []
+            for item in items {
+                var values = CustomField.decode(item.customFields)
+                var changed = false
+                for id in gone {
+                    guard let value = values.removeValue(forKey: id) else { continue }
+                    if values[keeper.uuid, default: ""].isEmpty { values[keeper.uuid] = value }
+                    changed = true
+                }
+                if changed { item.customFields = CustomField.encode(values) }
+            }
+            keeper.choiceList = Array(NSOrderedSet(array: ordered.flatMap(\.choiceList))) as? [String] ?? keeper.choiceList
+            for duplicate in ordered.dropFirst() { context.delete(duplicate) }
+        }
+    }
+
+    /// The same feed subscribed to on two devices: one, with both's posts,
+    /// and what either has seen.
+    private func mergeDuplicateFeeds() {
+        let feeds = (try? context.fetch(FetchDescriptor<Feed>())) ?? []
+        for group in Dictionary(grouping: feeds, by: \.urlString).values where group.count > 1 {
+            let ordered = group.sorted { $0.uuid.uuidString < $1.uuid.uuidString }
+            let keeper = ordered[0]
+            for duplicate in ordered.dropFirst() {
+                for item in duplicate.items ?? [] { item.feed = keeper }
+                keeper.markSeen(duplicate.seenIDs.split(separator: "\n").map(String.init).reversed())
+                if sidebar == .feed(duplicate) { sidebar = .feed(keeper) }
+                context.delete(duplicate)
+            }
+        }
     }
 
     /// Same-named categories side by side become one, holding the items and
@@ -1847,6 +1919,7 @@ final class Library {
         try? context.save()
         storeVersion += 1
         scheduleWidgetUpdate()
+        scheduleFinderUpdate()
     }
 
     /// Goes up with every save, so counts worked out from the store (the
@@ -1894,6 +1967,9 @@ final class Library {
     @ObservationIgnored private var pendingWidgetUpdate: Task<Void, Never>?
     /// Where the widgets read from; nil without an App Group.
     @ObservationIgnored private let widgetFolder: URL?
+    /// What the Finder shows (see FinderPublishing); nil when sharing is off.
+    @ObservationIgnored let finder: FinderShare?
+    @ObservationIgnored var pendingFinderUpdate: Task<Void, Never>?
 
     /// Saves come in bursts while typing; the widgets are told once it settles.
     private func scheduleWidgetUpdate() {

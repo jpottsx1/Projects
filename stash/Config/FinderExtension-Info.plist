@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Stash in the Finder sidebar, Files, and Open and Save dialogs: a
+	     File Provider extension serving what the app publishes (see FinderShare). -->
+	<key>NSExtension</key>
+	<dict>
+		<key>NSExtensionPointIdentifier</key>
+		<string>com.apple.fileprovider-nonui</string>
+		<key>NSExtensionPrincipalClass</key>
+		<string>$(PRODUCT_MODULE_NAME).FileProviderExtension</string>
+		<key>NSExtensionFileProviderDocumentGroup</key>
+		<string>$(APP_GROUP)</string>
+		<key>NSExtensionFileProviderSupportsEnumeration</key>
+		<true/>
+	</dict>
+	<key>StashAppGroup</key>
+	<string>$(APP_GROUP)</string>
+</dict>
+</plist>

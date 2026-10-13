@@ -1,0 +1,9 @@
+// The Finder extension's settings: everything in Stash.xcconfig (change
+// things there, not here). It reads what the app publishes in the App Group,
+// so it uses the share extension's entitlements, switched on by SHARE_EXTENSION.
+#include "Stash.xcconfig"
+
+STASH_FINDER_ENTITLEMENTS_YES = Config/ShareExtension.entitlements
+CODE_SIGN_ENTITLEMENTS[sdk=iphoneos*] = $(STASH_FINDER_ENTITLEMENTS_$(SHARE_EXTENSION))
+CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*] = $(STASH_FINDER_ENTITLEMENTS_$(SHARE_EXTENSION))
+CODE_SIGN_ENTITLEMENTS[sdk=macosx*] = $(STASH_FINDER_ENTITLEMENTS_$(SHARE_EXTENSION))

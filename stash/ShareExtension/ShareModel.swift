@@ -42,6 +42,23 @@ final class ShareModel {
     var notes = ""
     var tagsText = ""
     var categoryID: UUID?
+    /// What's typed to find a category, or to name a new one.
+    var categorySearch = ""
+    /// A new category to make, instead of an existing one.
+    var newCategory: String?
+
+    /// The categories whose path has what's typed in it.
+    var matchingCategories: [SharedCategory] {
+        let text = categorySearch.trimmingCharacters(in: .whitespaces)
+        guard !text.isEmpty else { return [] }
+        return categories.filter { $0.path.localizedStandardContains(text) }.prefix(6).map { $0 }
+    }
+
+    /// The category chosen, to show: an existing one's path, or the new one's.
+    var chosenCategory: String? {
+        if let newCategory { return newCategory + " (new)" }
+        return categoryID.flatMap { id in categories.first { $0.id == id }?.path }
+    }
 
     private let context: NSExtensionContext?
     private let inbox: SharedInbox?
@@ -206,8 +223,10 @@ final class ShareModel {
                     url: draft.url?.absoluteString,
                     text: entryText,
                     tags: tags,
-                    categoryID: categoryID)
-                try inbox.add(entry, file: draft.file)
+                    categoryID: newCategory == nil ? categoryID : nil)
+                var filed = entry
+                filed.newCategory = newCategory
+                try inbox.add(filed, file: draft.file)
             }
         } catch {
             phase = .failed(error.localizedDescription)

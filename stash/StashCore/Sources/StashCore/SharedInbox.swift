@@ -18,6 +18,9 @@ public struct SharedEntry: Codable, Equatable {
     public var tags: [String]
     /// `ItemCategory.uuid`, chosen from the list the app publishes.
     public var categoryID: UUID?
+    /// A category to make and file it in, as a path ("Work › Clients"),
+    /// when none of the existing ones would do. Nil from older extensions.
+    public var newCategory: String?
     public var createdAt: Date
 
     public init(id: UUID = UUID(), kind: Kind, title: String, url: String? = nil, text: String = "",

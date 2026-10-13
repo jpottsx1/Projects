@@ -1,0 +1,22 @@
+{
+    "manifest_version": 3,
+    "name": "Save to Stash",
+    "description": "Saves the page you're on to Stash with one click.",
+    "version": "1.0",
+    "icons": {
+        "48": "icon-48.png",
+        "96": "icon-96.png",
+        "128": "icon-128.png"
+    },
+    "background": {
+        "service_worker": "background.js"
+    },
+    "action": {
+        "default_title": "Save to Stash",
+        "default_icon": {
+            "16": "toolbar-16.png",
+            "32": "toolbar-32.png"
+        }
+    },
+    "permissions": ["nativeMessaging", "activeTab"]
+}

@@ -120,11 +120,15 @@ struct SidebarView: View {
             }
         }
         .listStyle(.sidebar)
-        .navigationTitle(StashStore.isTestLibrary ? "Stash (Test Library)" : "Stash")
+        .navigationTitle(sidebarTitle)
         .toolbar {
             ToolbarItem {
                 Menu {
+                    Menu("Library") { LibraryMenuItems() }
+                    Divider()
                     Button("Today’s Note") { library.openToday() }
+                    Button("Note for Event…") { library.eventPicking = .newNote }
+                    DailyEventsToggle()
                     Button("New Voice Note") { library.isRecording = true }
                     Button("Ask Your Library…") { library.isAskingLibrary = true }
                     Button("Link Graph") { library.isShowingGraph = true }
@@ -164,6 +168,13 @@ struct SidebarView: View {
             Button("Cancel", role: .cancel) {}
             Button("Save") { finishNaming() }
         }
+    }
+
+    /// The open library's name; "Stash" when there's only the one.
+    private var sidebarTitle: String {
+        let store = StashStore.shared
+        let name = store.libraries.count > 1 ? store.current.name : "Stash"
+        return StashStore.isTestLibrary ? name + " (Test Library)" : name
     }
 
     private var namingTitle: String {

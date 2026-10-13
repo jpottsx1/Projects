@@ -12,9 +12,13 @@ import UniformTypeIdentifiers
 @MainActor
 final class SpotlightIndex {
     private let index = CSSearchableIndex.default()
-    /// Off for the test library, which would otherwise replace the real
-    /// library's entries.
-    private let isEnabled = !StashStore.isTestLibrary
+    /// Off for the test library and for any library but the main one,
+    /// which would otherwise replace the main library's entries.
+    private let isEnabled: Bool
+
+    init(enabled: Bool = true) {
+        isEnabled = enabled && !StashStore.isTestLibrary
+    }
     private var waiting: [UUID: Item] = [:]
     private var flush: Task<Void, Never>?
     /// Spotlight only needs enough to find an item by.

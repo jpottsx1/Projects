@@ -10,6 +10,7 @@ import Foundation
 /// - `{{weekday}}`: Monday
 /// - `{{title}}`: the new note's title
 /// - `{{clipboard}}`: the text on the clipboard
+/// - `{{events}}`: the day's calendar events, one per line
 ///
 /// Names are matched ignoring case; anything else in braces is left alone.
 public enum NoteTemplate {
@@ -17,6 +18,8 @@ public enum NoteTemplate {
         public var date: Date
         public var title: String
         public var clipboard: String
+        /// The day's events, a line each, when calendar access is on.
+        public var events: String = ""
         public var calendar: Calendar
         public var locale: Locale
 
@@ -75,6 +78,8 @@ public enum NoteTemplate {
             return values.title
         case "clipboard":
             return values.clipboard
+        case "events":
+            return values.events
         default:
             return nil
         }

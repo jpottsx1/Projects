@@ -61,6 +61,10 @@ SwiftData, one multiplatform target. Read README.md first.
 - **Give a sheet its minimum size with `.sheetSize(minWidth:minHeight:)`**,
   never `.frame(minWidth:)`: on an iPhone a minimum wider than the screen
   pushes the sheet's content off the side.
+- **There can be several libraries** (`StashStore.libraries`); only the main
+  one (`Library.isMain`) syncs, and only it touches what's shared by the
+  whole app: Spotlight, reminder notifications, widgets, the share inbox.
+  Anything new of that kind checks `isMain` too.
 - **Templates are notes with `isTemplate` set.** `Library.isInSidebar`
   keeps them out of every list but Templates; anything else that walks all
   items (the graph, widgets, `[[link]]` lookup, See Also) skips them too.

@@ -133,13 +133,7 @@ struct AddToTodaysNoteIntent: AppIntent {
 
     @MainActor
     func perform() async throws -> some IntentResult & ReturnsValue<ItemEntity> {
-        let library = StashStore.shared.library
-        let note = library.openToday()
-        let line = asListItem ? "- " + text : text
-        note.body = note.body.isEmpty ? line : note.body.trimmingCharacters(in: .newlines) + (asListItem ? "\n" : "\n\n") + line
-        library.didEdit(note)
-        library.save()
-        return .result(value: ItemEntity(note))
+        .result(value: ItemEntity(StashStore.shared.library.appendToToday(text, asListItem: asListItem)))
     }
 }
 

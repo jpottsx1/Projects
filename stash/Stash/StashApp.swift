@@ -1,53 +1,157 @@
 import SwiftUI
 import SwiftData
 
-/// The library, made once. Shortcuts can start the app without showing it,
-/// so it can't wait for the window to be made.
+/// One of the libraries: the main one (synced, if sync is on) or another
+/// kept on this device, as DEVONthink keeps several databases.
+struct LibraryInfo: Codable, Identifiable, Equatable, Hashable {
+    var id: UUID
+    var name: String
+    var createdAt: Date
+
+    /// The main library's id: it was the only one before there were others.
+    static let mainID = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
+
+    var isMain: Bool { id == Self.mainID }
+}
+
+/// The open library, made at launch and whenever another is chosen.
+/// Shortcuts can start the app without showing it, so it can't wait for
+/// the window to be made.
 @MainActor
+@Observable
 final class StashStore {
     static let shared = StashStore()
 
-    let container: ModelContainer
-    let library: Library
+    private(set) var container: ModelContainer
+    private(set) var library: Library
+    /// Every library, the main one first.
+    private(set) var libraries: [LibraryInfo]
+    private(set) var current: LibraryInfo
 
     /// Launched with `-StashTestLibrary YES` (or `STASH_TEST_LIBRARY` set):
     /// a separate library to try things in, never synced, kept out of
     /// Spotlight, notifications and widgets, leaving the real one alone.
-    static let isTestLibrary = UserDefaults.standard.bool(forKey: "StashTestLibrary")
+    nonisolated static let isTestLibrary = UserDefaults.standard.bool(forKey: "StashTestLibrary")
         || ProcessInfo.processInfo.environment["STASH_TEST_LIBRARY"] != nil
 
+    static let schema = Schema([Item.self, Tag.self, ItemCategory.self, SmartFilter.self, Highlight.self, SmartRule.self,
+                                NoteVersion.self, NoteAttachment.self, Feed.self, IndexedFolder.self, Vault.self,
+                                ItemList.self, FieldDefinition.self])
+
+    private static var librariesKey: String { isTestLibrary ? "testLibraries" : "libraries" }
+    private static var currentKey: String { isTestLibrary ? "testCurrentLibrary" : "currentLibrary" }
+
+    /// Where libraries other than the main one are kept, a folder each.
+    static var otherLibrariesFolder: URL {
+        URL.applicationSupportDirectory.appendingPathComponent(isTestLibrary ? "StashTest Libraries" : "Stash Libraries",
+                                                                 isDirectory: true)
+    }
+
     private init() {
-        let schema = Schema([Item.self, Tag.self, ItemCategory.self, SmartFilter.self, Highlight.self, SmartRule.self, NoteVersion.self, NoteAttachment.self, Feed.self, IndexedFolder.self, Vault.self, ItemList.self, FieldDefinition.self])
-        // Syncs through the iCloud container named in the entitlements,
-        // which only exist when ICLOUD_SYNC is on (Config/Stash.xcconfig).
-        // Said explicitly either way: left to itself SwiftData syncs
-        // whenever it finds an iCloud entitlement.
-        #if ICLOUD_SYNC
-        var configuration = ModelConfiguration(schema: schema, cloudKitDatabase: .automatic)
-        #else
-        var configuration = ModelConfiguration(schema: schema, cloudKitDatabase: .none)
-        #endif
-        if Self.isTestLibrary {
-            let folder = URL.applicationSupportDirectory.appendingPathComponent("StashTest", isDirectory: true)
+        if Self.isTestLibrary, UserDefaults.standard.bool(forKey: "StashResetTestLibrary") {
             // UI tests start each run from nothing.
-            if UserDefaults.standard.bool(forKey: "StashResetTestLibrary") {
-                try? FileManager.default.removeItem(at: folder)
-            }
-            try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-            configuration = ModelConfiguration(schema: schema, url: folder.appendingPathComponent("Library.store"),
-                                               cloudKitDatabase: .none)
+            try? FileManager.default.removeItem(at: Library.mainSupportFolder)
+            try? FileManager.default.removeItem(at: Self.otherLibrariesFolder)
+            UserDefaults.standard.removeObject(forKey: Self.librariesKey)
+            UserDefaults.standard.removeObject(forKey: Self.currentKey)
         }
-        do {
-            container = try ModelContainer(for: schema, configurations: configuration)
-        } catch {
-            fatalError("Couldn't open the library: \(error)")
-        }
-        library = Library(context: container.mainContext)
-        // Choosing a reminder's notification opens its item.
-        Reminders.shared.onOpen = { [library] id in
+        let saved = UserDefaults.standard.data(forKey: Self.librariesKey)
+            .flatMap { try? JSONDecoder().decode([LibraryInfo].self, from: $0) } ?? []
+        var libraries = saved.filter { !$0.isMain }
+        let main = saved.first(where: \.isMain) ?? LibraryInfo(id: LibraryInfo.mainID, name: "Stash", createdAt: .distantPast)
+        libraries.insert(main, at: 0)
+        let chosen = UserDefaults.standard.string(forKey: Self.currentKey).flatMap(UUID.init(uuidString:))
+        let current = libraries.first { $0.id == chosen } ?? main
+        let opened = Self.open(current)
+        self.libraries = libraries
+        self.current = current
+        container = opened.container
+        library = opened.library
+        // Choosing a reminder's notification opens its item (reminders are the main library's).
+        Reminders.shared.onOpen = { id in
+            let library = StashStore.shared.library
             if let item = library.items(withIDs: [id]).first { library.show(item) }
         }
         Reminders.shared.start()
+    }
+
+    private static func open(_ info: LibraryInfo) -> (container: ModelContainer, library: Library) {
+        let configuration: ModelConfiguration
+        let support: URL
+        if info.isMain {
+            support = Library.mainSupportFolder
+            if isTestLibrary {
+                try? FileManager.default.createDirectory(at: support, withIntermediateDirectories: true)
+                configuration = ModelConfiguration(schema: schema, url: support.appendingPathComponent("Library.store"),
+                                                   cloudKitDatabase: .none)
+            } else {
+                // Syncs through the iCloud container named in the entitlements,
+                // which only exist when ICLOUD_SYNC is on (Config/Stash.xcconfig).
+                // Said explicitly either way: left to itself SwiftData syncs
+                // whenever it finds an iCloud entitlement.
+                #if ICLOUD_SYNC
+                configuration = ModelConfiguration(schema: schema, cloudKitDatabase: .automatic)
+                #else
+                configuration = ModelConfiguration(schema: schema, cloudKitDatabase: .none)
+                #endif
+            }
+        } else {
+            // Other libraries stay on this device.
+            support = otherLibrariesFolder.appendingPathComponent(info.id.uuidString, isDirectory: true)
+            try? FileManager.default.createDirectory(at: support, withIntermediateDirectories: true)
+            configuration = ModelConfiguration(info.id.uuidString, schema: schema, url: support.appendingPathComponent("Library.store"),
+                                               cloudKitDatabase: .none)
+        }
+        let container: ModelContainer
+        do {
+            container = try ModelContainer(for: schema, configurations: configuration)
+        } catch {
+            fatalError("Couldn't open the library “\(info.name)”: \(error)")
+        }
+        return (container, Library(context: container.mainContext, support: support, isMain: info.isMain))
+    }
+
+    // MARK: - Managing
+
+    func switchTo(_ info: LibraryInfo) {
+        guard info != current, libraries.contains(info) else { return }
+        library.close()
+        let opened = Self.open(info)
+        container = opened.container
+        library = opened.library
+        current = info
+        UserDefaults.standard.set(info.id.uuidString, forKey: Self.currentKey)
+    }
+
+    @discardableResult
+    func createLibrary(named name: String) -> LibraryInfo? {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let info = LibraryInfo(id: UUID(), name: trimmed, createdAt: .now)
+        libraries.append(info)
+        saveList()
+        return info
+    }
+
+    func rename(_ info: LibraryInfo, to name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, let index = libraries.firstIndex(of: info) else { return }
+        libraries[index].name = trimmed
+        if current.id == info.id { current = libraries[index] }
+        saveList()
+    }
+
+    /// Deletes a library other than the main one, and everything in it.
+    func delete(_ info: LibraryInfo) {
+        guard !info.isMain, libraries.contains(info) else { return }
+        if current.id == info.id, let main = libraries.first { switchTo(main) }
+        libraries.removeAll { $0.id == info.id }
+        saveList()
+        try? FileManager.default.removeItem(at: Self.otherLibrariesFolder.appendingPathComponent(info.id.uuidString))
+    }
+
+    private func saveList() {
+        UserDefaults.standard.set(try? JSONEncoder().encode(libraries), forKey: Self.librariesKey)
     }
 }
 
@@ -56,16 +160,14 @@ struct StashApp: App {
     #if os(iOS)
     @UIApplicationDelegateAdaptor(StashAppDelegate.self) private var appDelegate
     #else
+    @NSApplicationDelegateAdaptor(StashMacAppDelegate.self) private var appDelegate
     @AppStorage("showMenuBarExtra") private var showMenuBarExtra = true
     #endif
-    private let container: ModelContainer
-    @State private var library: Library
+    @State private var store = StashStore.shared
     @State private var sync = SyncMonitor()
 
-    init() {
-        container = StashStore.shared.container
-        _library = State(initialValue: StashStore.shared.library)
-    }
+    private var container: ModelContainer { store.container }
+    private var library: Library { store.library }
 
     var body: some Scene {
         #if os(macOS)
@@ -75,6 +177,8 @@ struct StashApp: App {
             ContentView()
                 .environment(library)
                 .environment(sync)
+                // Another library: everything showing starts again.
+                .id(store.current.id)
         }
         .modelContainer(container)
         .commands {
@@ -87,6 +191,7 @@ struct StashApp: App {
         MenuBarExtra("Stash", systemImage: "tray.and.arrow.down", isInserted: $showMenuBarExtra) {
             QuickCaptureView()
                 .environment(library)
+                .id(store.current.id)
                 .modelContainer(container)
         }
         .menuBarExtraStyle(.window)
@@ -100,6 +205,7 @@ struct StashApp: App {
         WindowGroup("Item", id: "item", for: UUID.self) { $id in
             ItemWindow(id: id)
                 .environment(library)
+                .id(store.current.id)
                 .environment(sync)
         }
         .modelContainer(container)
@@ -108,6 +214,7 @@ struct StashApp: App {
         Window("Ask Your Library", id: "ask") {
             AskLibraryView(showsDone: false)
                 .environment(library)
+                .id(store.current.id)
                 .modelContainer(container)
         }
         .defaultSize(width: 560, height: 640)
@@ -115,6 +222,7 @@ struct StashApp: App {
         Window("Link Graph", id: "graph") {
             LinkGraphView()
                 .environment(library)
+                .id(store.current.id)
                 .modelContainer(container)
         }
         .defaultSize(width: 800, height: 600)
@@ -123,11 +231,23 @@ struct StashApp: App {
             ContentView()
                 .environment(library)
                 .environment(sync)
+                // Another library: everything showing starts again.
+                .id(store.current.id)
         }
         .modelContainer(container)
         .backgroundTask(.appRefresh(FeedRefresh.identifier)) {
             await FeedRefresh.run()
         }
+        .commands { PadCommands(library: library) }
+
+        // An item in a window of its own, beside another on an iPad.
+        WindowGroup("Item", id: "item", for: UUID.self) { $id in
+            ItemWindow(id: id)
+                .environment(library)
+                .environment(sync)
+                .id(store.current.id)
+        }
+        .modelContainer(container)
         #endif
     }
 }
@@ -149,6 +269,7 @@ struct StashCommands: Commands {
                 .keyboardShortcut("t", modifiers: [.command, .shift])
             Button("New Voice Note") { library.isRecording = true }
                 .keyboardShortcut("r", modifiers: [.command, .shift])
+            Button("New Note for Event…") { library.eventPicking = .newNote }
             Menu("New from Template") {
                 // Read on every change of selection, which making a template is.
                 let _ = library.selection
@@ -262,6 +383,10 @@ struct StashCommands: Commands {
             Button("Smart Rules…") { library.isEditingRules = true }
                 .keyboardShortcut("r", modifiers: [.command, .option])
         }
+        CommandMenu("Library") {
+            LibraryMenuItems(withShortcuts: true)
+                .environment(library)
+        }
         CommandMenu("Go") {
             Button("Back") { library.goBack() }
                 .keyboardShortcut("[")
@@ -269,6 +394,69 @@ struct StashCommands: Commands {
             Button("Forward") { library.goForward() }
                 .keyboardShortcut("]")
                 .disabled(!library.canGoForward)
+        }
+    }
+}
+#endif
+
+#if os(iOS)
+/// Keyboard shortcuts on an iPad with a keyboard, in its menu bar.
+struct PadCommands: Commands {
+    let library: Library
+
+    var body: some Commands {
+        CommandGroup(replacing: .newItem) {
+            Button("New Note") { library.newNote() }
+                .keyboardShortcut("n")
+            Button("Today’s Note") { library.openToday() }
+                .keyboardShortcut("t", modifiers: [.command, .shift])
+            Button("New Voice Note") { library.isRecording = true }
+                .keyboardShortcut("r", modifiers: [.command, .shift])
+            Button("Add Link…") { library.isAddingLink = true }
+                .keyboardShortcut("l", modifiers: [.command, .shift])
+            Button("Import Documents…") { library.isImporting = true }
+                .keyboardShortcut("i", modifiers: [.command, .shift])
+        }
+        CommandMenu("Item") {
+            let live = library.selectedItems.filter { !$0.isTrashed }
+            let allFavorite = !live.isEmpty && live.allSatisfy(\.isFavorite)
+            Button(allFavorite ? "Remove from Favorites" : "Add to Favorites") { library.setFavorite(live, !allFavorite) }
+                .keyboardShortcut("d")
+                .disabled(live.isEmpty)
+            let allQueued = !live.isEmpty && live.allSatisfy { $0.readLaterAt != nil }
+            Button(allQueued ? "Remove from Read Later" : "Read Later") { library.setReadLater(live, !allQueued) }
+                .keyboardShortcut("r", modifiers: [.command, .control])
+                .disabled(live.isEmpty)
+            Button("Add Tags…") { library.taggingItems = live }
+                .keyboardShortcut("t", modifiers: [.command, .option])
+                .disabled(live.isEmpty)
+            Button("Print…") { library.printRequest = library.selection }
+                .keyboardShortcut("p")
+                .disabled(library.selection == nil)
+            Divider()
+            Button("Move to Trash") { library.moveToTrash(live) }
+                .keyboardShortcut(.delete)
+                .disabled(live.isEmpty)
+            Divider()
+            Button("Ask Your Library…") { library.isAskingLibrary = true }
+                .keyboardShortcut("a", modifiers: [.command, .option])
+            Button("Link Graph") { library.isShowingGraph = true }
+                .keyboardShortcut("g", modifiers: [.command, .option])
+        }
+        CommandMenu("Go") {
+            Button("Back") { library.goBack() }
+                .keyboardShortcut("[")
+                .disabled(!library.canGoBack)
+            Button("Forward") { library.goForward() }
+                .keyboardShortcut("]")
+                .disabled(!library.canGoForward)
+            Divider()
+            Button("Inbox") { library.sidebar = .inbox }
+                .keyboardShortcut("1")
+            Button("All Items") { library.sidebar = .all }
+                .keyboardShortcut("2")
+            Button("Read Later") { library.sidebar = .readLater }
+                .keyboardShortcut("3")
         }
     }
 }

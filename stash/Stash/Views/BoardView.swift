@@ -137,6 +137,9 @@ struct BoardView: View {
                             .onTapGesture { library.select([item]) }
                             .contextMenu { menu(item) }
                             .draggable(item.uuid.uuidString)
+                            #if os(iOS)
+                            .hoverEffect(.lift)
+                            #endif
                     }
                 }
                 .padding(.bottom, 40)

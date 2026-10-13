@@ -27,7 +27,9 @@ enum TextExtractor {
             } else if type?.conforms(to: .epub) == true {
                 text = (try? EPUBDocument(url: url))?.text(limit: TextExtractor.maxLength) ?? ""
             } else if type?.conforms(to: .image) == true {
-                text = TextExtractor.recognizeText(inImageAt: url)
+                // Its words, then what it's a picture of, so "dog" finds a photo of one.
+                text = [TextExtractor.recognizeText(inImageAt: url),
+                        TextExtractor.contents(of: VNImageRequestHandler(url: url))].filter { !$0.isEmpty }.joined(separator: "\n")
             } else {
                 text = ""
             }
@@ -61,8 +63,26 @@ enum TextExtractor {
         return recognized.count > text.count ? recognized : text
     }
 
-    /// Words in a picture: printed, or written by hand.
+    /// What a picture shows, as words ("dog", "beach", "document"): the
+    /// things Vision is fairly sure of. Searched like any other text.
+    static func contents(of handler: VNImageRequestHandler) -> String {
+        let request = VNClassifyImageRequest()
+        guard (try? handler.perform([request])) != nil else { return "" }
+        return (request.results ?? [])
+            .filter { $0.confidence > 0.35 }
+            .prefix(10)
+            .map { $0.identifier.replacingOccurrences(of: "_", with: " ") }
+            .joined(separator: ", ")
+    }
+
+    /// Words in a picture: printed, or written by hand; then what it shows.
     static func recognizeText(inImage data: Data) -> String {
+        let shows = contents(of: VNImageRequestHandler(data: data))
+        let words = readWords(inImage: data)
+        return [words, shows].filter { !$0.isEmpty }.joined(separator: "\n")
+    }
+
+    private static func readWords(inImage data: Data) -> String {
         let request = VNRecognizeTextRequest()
         request.recognitionLevel = .accurate
         request.usesLanguageCorrection = true

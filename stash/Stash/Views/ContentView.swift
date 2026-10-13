@@ -375,6 +375,9 @@ private struct LibrarySheets: ViewModifier {
         .sheet(item: $library.eventPicking) { purpose in
             EventPickerView(purpose: purpose)
         }
+        .sheet(item: $library.quickOpen) { mode in
+            QuickOpenView(mode: mode)
+        }
         .sheet(item: Binding(get: { library.renamingItems.map(ItemGroup.init) },
                              set: { library.renamingItems = $0?.items })) { group in
             BatchRenameView(items: group.items)

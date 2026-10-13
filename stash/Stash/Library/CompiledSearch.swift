@@ -73,6 +73,8 @@ struct CompiledSearch {
             case .untagged: if !(item.tags ?? []).isEmpty { return false }
             case .uncategorized: if item.category != nil { return false }
             case .readLater: if item.readLaterAt == nil { return false }
+            case .checklist: if item.isLocked || !Self.hasChecklist(item.body) { return false }
+            case .highlighted: if (item.highlights ?? []).isEmpty { return false }
             }
         }
         if !query.lists.isEmpty {
@@ -99,6 +101,11 @@ struct CompiledSearch {
         let contains = { (term: SearchQuery.Term) in text.contains { $0.localizedStandardContains(term.text) } }
         return query.groups.allSatisfy { $0.contains(where: contains) }
             && !query.excludedTerms.contains(where: contains)
+    }
+
+    /// Whether a note has a `- [ ]` or `- [x]` line.
+    static func hasChecklist(_ text: String) -> Bool {
+        text.range(of: #"(?m)^\s*[-*+] \[[ xX]\]"#, options: .regularExpression) != nil
     }
 
     /// Best match first; items the index didn't rank last.

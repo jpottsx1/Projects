@@ -46,7 +46,7 @@ public struct SearchQuery: Equatable {
     }
 
     public enum Flag: String, Equatable {
-        case favorite, unread, read, inbox, untagged, uncategorized, due, reminder, readLater
+        case favorite, unread, read, inbox, untagged, uncategorized, due, reminder, readLater, checklist, highlighted
 
         init?(typed: String) {
             switch typed.lowercased() {
@@ -59,6 +59,8 @@ public struct SearchQuery: Equatable {
             case "untagged": self = .untagged
             case "uncategorized", "uncategorised": self = .uncategorized
             case "readlater", "later", "queue", "queued": self = .readLater
+            case "checklist", "checklists", "todo", "todos", "task", "tasks": self = .checklist
+            case "highlighted", "highlights", "highlight": self = .highlighted
             default: return nil
             }
         }

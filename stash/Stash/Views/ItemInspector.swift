@@ -386,7 +386,7 @@ struct HighlightRow: View {
         } label: {
             HStack(alignment: .top, spacing: 8) {
                 RoundedRectangle(cornerRadius: 1.5)
-                    .fill(highlight.color.swatch)
+                    .fill(highlight.displayColor)
                     .frame(width: 3)
                     .frame(maxHeight: .infinity)
                 VStack(alignment: .leading, spacing: 3) {

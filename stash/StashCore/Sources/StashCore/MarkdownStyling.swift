@@ -27,8 +27,9 @@ public enum MarkdownStyling {
         case task(done: Bool)
         /// A `---` line.
         case rule
-        /// A picture's whole `![alt](source)` line, and where it comes from.
-        case image(source: String)
+        /// A picture's whole `![alt](source)` line, where it comes from, and
+        /// the width it's limited to (`![alt|300](...)`), if any.
+        case image(source: String, width: Int? = nil)
         /// A line of a table, shown in fixed-width type so its columns line up.
         case tableRow
     }
@@ -84,7 +85,7 @@ public enum MarkdownStyling {
         let body = String(line.dropFirst(line.prefix { $0 == " " || $0 == "\t" }.count))
 
         if let picture = MarkdownBlocks.image(body.trimmingCharacters(in: .whitespaces)) {
-            return [Span(start..<(start + units), .image(source: picture.source))]
+            return [Span(start..<(start + units), .image(source: picture.source, width: MarkdownBlocks.pictureSize(picture.alt).width))]
         } else if MarkdownTable.isRow(body.trimmingCharacters(in: .whitespaces)) {
             return [Span(start..<(start + units), .tableRow)]
         } else if let (level, _) = MarkdownBlocks.heading(body) {

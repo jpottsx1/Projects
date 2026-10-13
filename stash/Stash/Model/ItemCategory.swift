@@ -9,6 +9,10 @@ final class ItemCategory {
     /// before syncing (see `Library.mergeDuplicates`).
     var uuid: UUID = UUID()
     var name: String = ""
+    /// An `ItemLabel`'s raw value, for its folder's colour; 0 for none.
+    var colorRaw: Int = 0
+    /// Its place among its siblings when moved by hand; equal ones go by name.
+    var order: Int = 0
     var parent: ItemCategory?
     @Relationship(deleteRule: .cascade, inverse: \ItemCategory.parent) var children: [ItemCategory]? = []
     @Relationship(deleteRule: .nullify, inverse: \Item.category) var items: [Item]? = []
@@ -23,8 +27,14 @@ final class ItemCategory {
     /// Nil rather than empty when there are none, which is what OutlineGroup
     /// needs to draw a row without a disclosure triangle.
     var subcategories: [ItemCategory]? {
-        let sorted = (children ?? []).sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        let sorted = (children ?? []).sorted(by: ItemCategory.inOrder)
         return sorted.isEmpty ? nil : sorted
+    }
+
+    /// By the order set by hand, then by name.
+    static func inOrder(_ a: ItemCategory, _ b: ItemCategory) -> Bool {
+        if a.order != b.order { return a.order < b.order }
+        return a.name.localizedStandardCompare(b.name) == .orderedAscending
     }
 
     /// "Work › Clients"

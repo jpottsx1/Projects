@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import StashCore
 
 struct SidebarView: View {
     @Environment(Library.self) private var library
@@ -60,16 +61,18 @@ struct SidebarView: View {
             ListsSection()
 
             Section("Smart Filters") {
-                ForEach(smartFilters) { filter in
+                ForEach(orderedSmartFilters) { filter in
                     Label(filter.name, systemImage: "line.3.horizontal.decrease.circle")
                         .tag(SidebarSelection.smartFilter(filter))
                         .help(filter.query)
                         .contextMenu {
                             Button("Edit…") { editingFilter = FilterEditing(filter: filter) }
+                            Button("Duplicate") { library.duplicate(filter) }
                             Divider()
                             Button("Delete Smart Filter", role: .destructive) { library.delete(filter) }
                         }
                 }
+                .onMove { library.moveSmartFilters(from: $0, to: $1) }
                 Button {
                     editingFilter = FilterEditing(filter: nil)
                 } label: {
@@ -80,12 +83,25 @@ struct SidebarView: View {
             }
 
             Section("Categories") {
-                OutlineGroup(rootCategories, children: \.subcategories) { category in
-                    Label(category.name, systemImage: "folder")
+                OutlineGroup(rootCategories.sorted(by: ItemCategory.inOrder), children: \.subcategories) { category in
+                    Label {
+                        Text(category.name)
+                    } icon: {
+                        Image(systemName: category.colorRaw == 0 ? "folder" : "folder.fill")
+                            .foregroundStyle(folderColor(category))
+                    }
                         .tag(SidebarSelection.category(category))
                         .contextMenu {
                             Button("New Category Inside…") { startNaming(.new(parent: category)) }
                             Button("Rename…") { startNaming(.rename(category)) }
+                            Menu("Color") {
+                                ForEach(ItemLabel.allCases) { label in
+                                    Button(label == .none ? "None" : label.name) { library.setColor(label, of: category) }
+                                }
+                            }
+                            Button("Move Up") { library.move(category, by: -1) }
+                            Button("Move Down") { library.move(category, by: 1) }
+                            Button("Duplicate") { library.duplicate(category) }
                             Button("Export…") {
                                 let inside = library.items(in: category)
                                 library.exportRequest = .items(inside, name: category.name)
@@ -124,6 +140,7 @@ struct SidebarView: View {
         .toolbar {
             ToolbarItem {
                 Menu {
+                    Button("Quick Open…") { library.quickOpen = .open }
                     Menu("Library") { LibraryMenuItems() }
                     Divider()
                     Button("Today’s Note") { library.openToday() }
@@ -145,6 +162,7 @@ struct SidebarView: View {
                     Button("Import from Evernote…") { library.isImportingEvernote = true }
                     Button("Import Notes Folder…") { library.isImportingNotesFolder = true }
                     Button("Import Mailbox…") { library.isImportingMailbox = true }
+                    Button("Import Bookmarks…") { library.isImportingBookmarks = true }
                     Button("Export All Highlights…") { library.exportRequest = .highlights }
                     Button("Export Everything…") { library.exportRequest = .everything }
                     Button("Restore from Backup…") { library.isRestoring = true }
@@ -169,6 +187,18 @@ struct SidebarView: View {
             Button("Cancel", role: .cancel) {}
             Button("Save") { finishNaming() }
         }
+    }
+
+    /// Smart filters in the order they've been dragged into, then by name.
+    private var orderedSmartFilters: [SmartFilter] {
+        smartFilters.sorted { a, b in
+            a.order != b.order ? a.order < b.order : a.name.localizedStandardCompare(b.name) == .orderedAscending
+        }
+    }
+
+    /// The colour a category's folder is shown in.
+    private func folderColor(_ category: ItemCategory) -> Color {
+        category.colorRaw == 0 ? .accentColor : (ItemLabel(rawValue: category.colorRaw) ?? .none).color
     }
 
     /// The open library's name; "Stash" when there's only the one.

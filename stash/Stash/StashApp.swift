@@ -277,6 +277,8 @@ struct StashCommands: Commands {
                 .keyboardShortcut("t", modifiers: [.command, .shift])
             Button("New Voice Note") { library.isRecording = true }
                 .keyboardShortcut("r", modifiers: [.command, .shift])
+            Button("Quick Open…") { library.quickOpen = .open }
+                .keyboardShortcut("o")
             Button("New Note for Event…") { library.eventPicking = .newNote }
             Menu("New from Template") {
                 // Read on every change of selection, which making a template is.
@@ -302,6 +304,7 @@ struct StashCommands: Commands {
             Button("Import from Evernote…") { library.isImportingEvernote = true }
             Button("Import Notes Folder…") { library.isImportingNotesFolder = true }
             Button("Import Mailbox…") { library.isImportingMailbox = true }
+            Button("Import Bookmarks…") { library.isImportingBookmarks = true }
             Divider()
             Button(chosenItems.count > 1 ? "Export Items…" : "Export Item…") {
                 let chosen = chosenItems
@@ -370,6 +373,11 @@ struct StashCommands: Commands {
             }
             Button(chosen.count > 1 ? "Rename Items…" : "Rename…") { library.renamingItems = live }
                 .disabled(live.isEmpty)
+            Button("Move to Category…") { library.quickOpen = .file(live) }
+                .keyboardShortcut("m", modifiers: [.command, .control])
+                .disabled(live.isEmpty)
+            Button("Duplicate") { library.duplicate(live) }
+                .disabled(!live.contains { !$0.isLocked })
             Menu("Convert To") {
                 ForEach(ConversionFormat.allCases) { format in
                     Button("\(format.name) Document") {
@@ -459,6 +467,10 @@ struct PadCommands: Commands {
             Button("Forward") { library.goForward() }
                 .keyboardShortcut("]")
                 .disabled(!library.canGoForward)
+            Button("Quick Open…") { library.quickOpen = .open }
+                .keyboardShortcut("o")
+            Button("Quick Open…") { library.quickOpen = .open }
+                .keyboardShortcut("o")
             Divider()
             Button("Inbox") { library.sidebar = .inbox }
                 .keyboardShortcut("1")

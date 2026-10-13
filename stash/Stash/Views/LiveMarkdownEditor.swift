@@ -32,6 +32,11 @@ struct LiveMarkdownEditor {
     var addPicture: (Data, String) -> String? = { _, _ in nil }
     /// Typora's focus mode: everything but the paragraph being written is dimmed.
     var focusMode = false
+    /// Room either side of the text.
+    var margin: CGFloat = 12
+    /// Tab (false) or Shift-Tab (true) on a Mac: indents a list line, if
+    /// the cursor's on one; returns whether it did.
+    var onIndent: ((Bool) -> Bool)?
 
     @MainActor func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -179,14 +184,14 @@ struct LiveMarkdownEditor {
             case .tableRow:
                 // Fixed-width, so the columns of a tidied table line up.
                 storage.addAttribute(.font, value: PlatformFont.monospacedSystemFont(ofSize: Self.bodySize * 0.92, weight: .regular), range: range)
-            case .image(let source):
+            case .image(let source, let width):
                 let onLine = range.location >= active.lowerBound && range.location < max(active.upperBound, active.lowerBound + 1)
                 guard !onLine, let image = image(for: source) else {
                     storage.addAttribute(.foregroundColor, value: PlatformColor.secondaryLabelColor, range: range)
                     return
                 }
                 // The Markdown tucked away, with room above it for the picture.
-                let size = fittedSize(of: image)
+                let size = fittedSize(of: image, limit: width)
                 let paragraph = NSMutableParagraphStyle()
                 paragraph.paragraphSpacingBefore = size.height + 6
                 storage.addAttribute(.paragraphStyle, value: paragraph, range: range)
@@ -208,10 +213,14 @@ struct LiveMarkdownEditor {
             return image
         }
 
-        private func fittedSize(of image: PlatformImage) -> CGSize {
+        /// The picture's size in the note: no wider than the text, or than
+        /// the width it's been limited to, and not too tall.
+        private func fittedSize(of image: PlatformImage, limit: Int? = nil) -> CGSize {
             let size = image.size
             guard size.width > 0, size.height > 0 else { return CGSize(width: 1, height: 1) }
-            let scale = min(1, max(availableWidth, 50) / size.width, 360 / size.height)
+            let widest = min(max(availableWidth, 50), limit.map(CGFloat.init) ?? .greatestFiniteMagnitude)
+            let tallest: CGFloat = limit == nil ? 360 : .greatestFiniteMagnitude
+            let scale = min(1, widest / size.width, tallest / size.height)
             return CGSize(width: size.width * scale, height: size.height * scale)
         }
 
@@ -389,7 +398,7 @@ extension LiveMarkdownEditor: NSViewRepresentable {
         textView.allowsUndo = true
         textView.isAutomaticQuoteSubstitutionEnabled = false
         textView.isAutomaticDashSubstitutionEnabled = false
-        textView.textContainerInset = NSSize(width: 12, height: 12)
+        textView.textContainerInset = NSSize(width: margin, height: 12)
         textView.drawsBackground = false
         textView.registerForDraggedTypes([.fileURL])
         textView.typingAttributes = Coordinator.baseAttributes
@@ -420,6 +429,13 @@ extension LiveMarkdownEditor: NSViewRepresentable {
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
         context.coordinator.parent = self
         guard let textView = scrollView.documentView as? PictureTextView, let storage = textView.textStorage else { return }
+        // The margins changed: pictures fit the new width.
+        if textView.textContainerInset.width != margin {
+            textView.textContainerInset = NSSize(width: margin, height: 12)
+            context.coordinator.availableWidth = textView.bounds.width - 2 * margin - 10
+            context.coordinator.restyle(storage, selection: textView.selectedRange())
+            context.coordinator.layoutPictures(in: textView)
+        }
         if context.coordinator.styledFocusMode != focusMode {
             context.coordinator.restyle(storage, selection: textView.selectedRange())
         }
@@ -440,6 +456,13 @@ extension LiveMarkdownEditor: NSViewRepresentable {
 }
 
 extension LiveMarkdownEditor.Coordinator: NSTextViewDelegate {
+    /// Tab and Shift-Tab on a list line nest it, as in other outliners.
+    func textView(_ textView: NSTextView, doCommandBy selector: Selector) -> Bool {
+        guard selector == #selector(NSResponder.insertTab(_:)) || selector == #selector(NSResponder.insertBacktab(_:)),
+              let onIndent = parent.onIndent else { return false }
+        return onIndent(selector == #selector(NSResponder.insertBacktab(_:)))
+    }
+
     func textDidChange(_ notification: Notification) {
         guard let textView = notification.object as? PictureTextView, let storage = textView.textStorage else { return }
         send(textView.string)
@@ -542,7 +565,7 @@ extension LiveMarkdownEditor: UIViewRepresentable {
         textView.delegate = context.coordinator
         textView.accessibilityIdentifier = "noteEditor"
         textView.backgroundColor = .clear
-        textView.textContainerInset = UIEdgeInsets(top: 12, left: 8, bottom: 12, right: 8)
+        textView.textContainerInset = UIEdgeInsets(top: 12, left: margin, bottom: 12, right: margin)
         textView.smartQuotesType = .no
         textView.smartDashesType = .no
         textView.alwaysBounceVertical = true
@@ -567,6 +590,10 @@ extension LiveMarkdownEditor: UIViewRepresentable {
 
     func updateUIView(_ textView: PictureTextView, context: Context) {
         context.coordinator.parent = self
+        if textView.textContainerInset.left != margin {
+            textView.textContainerInset = UIEdgeInsets(top: 12, left: margin, bottom: 12, right: margin)
+            textView.onWidthChange?()
+        }
         if context.coordinator.styledFocusMode != focusMode {
             context.coordinator.restyle(textView.textStorage, selection: textView.selectedRange)
         }

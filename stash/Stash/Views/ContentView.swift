@@ -56,6 +56,13 @@ struct ContentView: View {
         .onOpenURL { url in
             if url.scheme == Library.linkScheme { library.open(stashURL: url) }
         }
+        // Handoff: the item being looked at, to pick up on another device.
+        .userActivity(Library.handoffActivityType, isActive: library.handoffItem != nil) { activity in
+            if let item = library.handoffItem { library.describe(item, in: activity) }
+        }
+        .onContinueUserActivity(Library.handoffActivityType) { activity in
+            Library.continueActivity(activity)
+        }
         // An item chosen in Spotlight.
         .onContinueUserActivity(CSSearchableItemActionType) { activity in
             guard let id = (activity.userInfo?[CSSearchableItemActivityIdentifier] as? String).flatMap(UUID.init(uuidString:)),
@@ -137,7 +144,15 @@ struct ContentView: View {
         .sheet(isPresented: $library.isAskingLibrary) {
             AskLibraryView()
         }
+        .sheet(isPresented: $library.isShowingStatistics) {
+            StatisticsView()
+        }
         #else
+        .onChange(of: library.isShowingStatistics) {
+            guard library.isShowingStatistics else { return }
+            library.isShowingStatistics = false
+            openWindow(id: "stats")
+        }
         .onChange(of: library.isAskingLibrary) {
             guard library.isAskingLibrary else { return }
             library.isAskingLibrary = false

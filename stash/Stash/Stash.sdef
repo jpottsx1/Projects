@@ -1,0 +1,156 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE dictionary SYSTEM "file://localhost/System/Library/DTDs/sdef.dtd">
+<!-- Stash's AppleScript dictionary: what Script Editor shows, and what
+     ScriptingSupport.swift answers for. -->
+<dictionary title="Stash Terminology" xmlns:xi="http://www.w3.org/2003/XInclude">
+    <xi:include href="file:///System/Library/ScriptingDefinitions/CocoaStandard.sdef" xpointer="xpointer(/dictionary/suite)"/>
+
+    <suite name="Stash Suite" code="Stsh" description="Notes, documents and links in Stash.">
+        <class-extension extends="application" description="Stash, and the library that's open.">
+            <element type="item" access="r">
+                <cocoa key="scriptItems"/>
+            </element>
+            <element type="category" access="r">
+                <cocoa key="scriptCategories"/>
+            </element>
+            <element type="tag" access="r">
+                <cocoa key="scriptTags"/>
+            </element>
+            <property name="selected items" code="Ssel" access="r" description="The items selected in Stash's window.">
+                <type type="item" list="yes"/>
+                <cocoa key="scriptSelection"/>
+            </property>
+            <property name="current library" code="Slib" type="text" access="r" description="The name of the open library.">
+                <cocoa key="scriptLibraryName"/>
+            </property>
+        </class-extension>
+
+        <class name="item" code="Sitm" plural="items" description="A note, document or saved link.">
+            <cocoa class="StashScriptItem"/>
+            <property name="id" code="ID  " type="text" access="r" description="The item's unique identifier.">
+                <cocoa key="uniqueID"/>
+            </property>
+            <property name="name" code="pnam" type="text" description="The item's title.">
+                <cocoa key="name"/>
+            </property>
+            <property name="kind" code="Skin" type="text" access="r" description="note, document or link.">
+                <cocoa key="kind"/>
+            </property>
+            <property name="text" code="Stxt" type="text" description="A note's Markdown, or the notes on a document or link. Empty while a locked item is locked.">
+                <cocoa key="text"/>
+            </property>
+            <property name="URL" code="Surl" type="text" access="r" description="A link's web address.">
+                <cocoa key="url"/>
+            </property>
+            <property name="file" code="Sfil" type="file" access="r" description="A document's file, on this Mac.">
+                <cocoa key="file"/>
+            </property>
+            <property name="tags" code="Stag" access="r" description="Its tags' names.">
+                <type type="text" list="yes"/>
+                <cocoa key="tagNames"/>
+            </property>
+            <property name="category" code="Scat" type="text" description="Its category, as a path: &quot;Work › Clients&quot;. Set it to file the item; set it to &quot;&quot; for none.">
+                <cocoa key="categoryPath"/>
+            </property>
+            <property name="creation date" code="ascd" type="date" access="r">
+                <cocoa key="creationDate"/>
+            </property>
+            <property name="modification date" code="asmo" type="date" access="r">
+                <cocoa key="modificationDate"/>
+            </property>
+            <property name="favorite" code="Sfav" type="boolean">
+                <cocoa key="favorite"/>
+            </property>
+            <property name="unread" code="Sunr" type="boolean">
+                <cocoa key="unread"/>
+            </property>
+            <property name="label" code="Slbl" type="integer" description="0 for none, 1 red, 2 orange, 3 yellow, 4 green, 5 blue, 6 purple, 7 gray.">
+                <cocoa key="label"/>
+            </property>
+            <property name="rating" code="Srat" type="integer" description="0 to 5 stars.">
+                <cocoa key="rating"/>
+            </property>
+            <property name="locked" code="Slck" type="boolean" access="r">
+                <cocoa key="locked"/>
+            </property>
+        </class>
+
+        <class name="category" code="Scag" plural="categories" description="A category, at any depth.">
+            <cocoa class="StashScriptCategory"/>
+            <property name="id" code="ID  " type="text" access="r">
+                <cocoa key="uniqueID"/>
+            </property>
+            <property name="name" code="pnam" type="text" access="r">
+                <cocoa key="name"/>
+            </property>
+            <property name="path" code="Spth" type="text" access="r" description="&quot;Work › Clients&quot;.">
+                <cocoa key="path"/>
+            </property>
+        </class>
+
+        <class name="tag" code="Stgg" plural="tags" description="A tag.">
+            <cocoa class="StashScriptTag"/>
+            <property name="name" code="pnam" type="text" access="r">
+                <cocoa key="name"/>
+            </property>
+        </class>
+
+        <command name="search" code="StshSrch" description="Items matching a search, as typed in Stash's search field: words, &quot;phrases&quot;, #tags, kind:pdf, in:Category, is:favorite...">
+            <cocoa class="StashSearchCommand"/>
+            <direct-parameter type="text" description="The search."/>
+            <parameter name="limit" code="Slim" type="integer" optional="yes" description="At most this many (50 unless said).">
+                <cocoa key="limit"/>
+            </parameter>
+            <result description="The items, best match first.">
+                <type type="item" list="yes"/>
+            </result>
+        </command>
+
+        <command name="create note" code="StshNote" description="Adds a note.">
+            <cocoa class="StashCreateNoteCommand"/>
+            <direct-parameter type="text" optional="yes" description="Its text, in Markdown."/>
+            <parameter name="titled" code="Sttl" type="text" optional="yes" description="Its title.">
+                <cocoa key="title"/>
+            </parameter>
+            <result type="item"/>
+        </command>
+
+        <command name="save link" code="StshLink" description="Saves a web page, with a copy to read offline.">
+            <cocoa class="StashSaveLinkCommand"/>
+            <direct-parameter type="text" description="The web address."/>
+            <result type="item"/>
+        </command>
+
+        <command name="import" code="StshImpt" description="Imports files as documents.">
+            <cocoa class="StashImportCommand"/>
+            <direct-parameter description="The files.">
+                <type type="file" list="yes"/>
+            </direct-parameter>
+            <result>
+                <type type="item" list="yes"/>
+            </result>
+        </command>
+
+        <command name="add tags" code="StshAtag" description="Tags items.">
+            <cocoa class="StashAddTagsCommand"/>
+            <direct-parameter description="The tags' names.">
+                <type type="text" list="yes"/>
+            </direct-parameter>
+            <parameter name="to" code="Sto " description="The items.">
+                <type type="item" list="yes"/>
+                <cocoa key="items"/>
+            </parameter>
+        </command>
+
+        <command name="show" code="StshShow" description="Shows an item in Stash's window.">
+            <cocoa class="StashShowCommand"/>
+            <direct-parameter type="item"/>
+        </command>
+
+        <command name="add to today's note" code="StshToda" description="Adds text to the end of today's note, making it if need be.">
+            <cocoa class="StashTodayCommand"/>
+            <direct-parameter type="text"/>
+            <result type="item"/>
+        </command>
+    </suite>
+</dictionary>

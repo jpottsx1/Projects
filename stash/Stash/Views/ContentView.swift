@@ -148,7 +148,15 @@ struct ContentView: View {
         .sheet(isPresented: $library.isShowingStatistics) {
             StatisticsView()
         }
+        .sheet(isPresented: $library.isShowingConcordance) {
+            ConcordanceView()
+        }
         #else
+        .onChange(of: library.isShowingConcordance) {
+            guard library.isShowingConcordance else { return }
+            library.isShowingConcordance = false
+            openWindow(id: "concordance")
+        }
         .onChange(of: library.isShowingStatistics) {
             guard library.isShowingStatistics else { return }
             library.isShowingStatistics = false

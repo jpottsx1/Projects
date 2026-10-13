@@ -432,6 +432,10 @@ struct ItemListView: View {
                 Divider()
             }
             #endif
+            Menu("Copy Link") {
+                Button("Copy Item Link") { library.copyItemLink(item) }
+                Button("Copy Markdown Link") { library.copyMarkdownLink(item) }
+            }
             ImageSearchMenu(item: item)
             ListMenus(items: [item])
             BatchMenus(items: [item])

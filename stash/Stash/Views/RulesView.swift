@@ -93,6 +93,8 @@ struct RuleEditor: View {
     @State private var marksRead: Bool
     @State private var takesOutOfInbox: Bool
     @State private var isEnabled: Bool
+    @State private var schedule: RuleSchedule
+    @State private var runsAtLaunch: Bool
     @State private var appliedCount: Int?
 
     init(rule: SmartRule?) {
@@ -107,6 +109,8 @@ struct RuleEditor: View {
         _marksRead = State(initialValue: rule?.marksRead ?? false)
         _takesOutOfInbox = State(initialValue: rule?.takesOutOfInbox ?? false)
         _isEnabled = State(initialValue: rule?.isEnabled ?? true)
+        _schedule = State(initialValue: rule?.schedule ?? .never)
+        _runsAtLaunch = State(initialValue: rule?.runsAtLaunch ?? false)
     }
 
     var body: some View {
@@ -155,6 +159,23 @@ struct RuleEditor: View {
                     Toggle("Add to Favorites", isOn: $makesFavorite)
                     Toggle("Mark as Read", isOn: $marksRead)
                     Toggle("Take Out of Inbox", isOn: $takesOutOfInbox)
+                }
+                Section {
+                    Picker("Also Run", selection: $schedule) {
+                        ForEach(RuleSchedule.allCases) { schedule in
+                            Text(schedule.name).tag(schedule)
+                        }
+                    }
+                    Toggle("Run When Stash Opens", isOn: $runsAtLaunch)
+                    if let last = rule?.lastRunAt {
+                        Text("Last run \(last.formatted(.relative(presentation: .named))).")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                } header: {
+                    Text("On Everything Already Here")
+                } footer: {
+                    Text("Besides new arrivals, a rule can go over everything that matches: when Stash opens, or every hour, day or week while it's open, as DEVONthink's scheduled rules do.")
                 }
                 Section {
                     Button("Apply to Matching Items Now") {
@@ -214,6 +235,8 @@ struct RuleEditor: View {
         rule.marksRead = marksRead
         rule.takesOutOfInbox = takesOutOfInbox
         rule.isEnabled = isEnabled
+        rule.schedule = schedule
+        rule.runsAtLaunch = runsAtLaunch
         library.save()
         return rule
     }

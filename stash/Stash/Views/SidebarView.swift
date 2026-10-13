@@ -130,6 +130,7 @@ struct SidebarView: View {
                     Button("New Voice Note") { library.isRecording = true }
                     Button("Ask Your Library…") { library.isAskingLibrary = true }
                     Button("Statistics") { library.isShowingStatistics = true }
+                    Button("Concordance") { library.isShowingConcordance = true }
                     Button("Link Graph") { library.isShowingGraph = true }
                     Button("Smart Rules…") { library.isEditingRules = true }
                     Divider()

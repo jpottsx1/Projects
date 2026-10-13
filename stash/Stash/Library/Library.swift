@@ -203,6 +203,10 @@ final class Library {
     var checkingFeeds: Set<UUID> = []
     /// Checks feeds every so often while Stash is open.
     @ObservationIgnored var feedTimer: Task<Void, Never>?
+    /// Runs scheduled smart rules while the library is open.
+    @ObservationIgnored var ruleTimer: Task<Void, Never>?
+    /// Where things dropped on the Sorter go, overriding the sidebar while they're added.
+    @ObservationIgnored var arrivalTarget: ArrivalTarget?
     /// Indexed folders open this session, by the folder's uuid, and what's
     /// watching them for changes.
     @ObservationIgnored var indexedFolderURLs: [UUID: URL] = [:]
@@ -250,6 +254,7 @@ final class Library {
         startFinder()
         openIndexedFolders()
         startCheckingFeeds()
+        startRunningRules()
         if Self.requestedTestItems > 0 { generateTestItems(Self.requestedTestItems) }
 
         if inbox != nil {
@@ -278,6 +283,8 @@ final class Library {
     func close() {
         feedTimer?.cancel()
         feedTimer = nil
+        ruleTimer?.cancel()
+        ruleTimer = nil
         folderWatchers = [:]
         for url in indexedFolderURLs.values { url.stopAccessingSecurityScopedResource() }
         indexedFolderURLs = [:]
@@ -334,7 +341,7 @@ final class Library {
                 await extractText(from: item)
             }
         }
-        if let last { selection = last }
+        if let last, arrivalTarget == nil { selection = last }
     }
 
     /// Pages from the document camera, as one searchable PDF.
@@ -401,6 +408,14 @@ final class Library {
     /// tag, and visible in the list.
     func insert(_ item: Item, select: Bool = true) {
         context.insert(item)
+        if let arrivalTarget {
+            // Dropped on the Sorter: there, whatever the window's showing.
+            if case .category(let category) = arrivalTarget { item.category = category }
+            if item.category == nil { fileArrival(item) }
+            save()
+            reindex(item)
+            return
+        }
         switch sidebar {
         case .category(let category):
             item.category = category
@@ -509,6 +524,7 @@ final class Library {
     var isShowingGraph = false
     var isAskingLibrary = false
     var isShowingStatistics = false
+    var isShowingConcordance = false
     /// Favourites at the top of the list, whatever it's sorted by.
     var favoritesFirst = Library.favoritesFirst {
         didSet { Library.favoritesFirst = favoritesFirst }
@@ -1195,6 +1211,7 @@ final class Library {
         let search = compile(rule.query)
         let items = ((try? context.fetch(FetchDescriptor<Item>())) ?? []).filter { !$0.isTrashed && search.matches($0) }
         for item in items { apply(rule, to: item) }
+        rule.lastRunAt = .now
         save()
         runSearch()
         return items.count
@@ -2045,15 +2062,13 @@ final class Library {
 
     /// `stash://` links from the widgets: an item, or a new note.
     func open(stashURL url: URL) {
-        switch url.host {
-        case "item":
-            let id = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?
-                .first { $0.name == "id" }?.value.flatMap(UUID.init(uuidString:))
-            if let id, let item = items(withIDs: [id]).first { show(item) }
-        case "new-note":
+        // `stash://new-note` with nothing in it, from the widgets: a blank note to write.
+        if url.host == "new-note", URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.isEmpty ?? true {
             sidebar = .all
             newNote()
-        default:
+        } else if let request = StashURL.parse(url) {
+            perform(request)
+        } else {
             open(wikiURL: url)
         }
     }

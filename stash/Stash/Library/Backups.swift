@@ -110,10 +110,14 @@ extension Library {
                 .init(id: $0.uuid, title: $0.title, url: $0.urlString, siteURL: $0.siteURLString,
                       category: $0.categoryID, seenIDs: $0.seenIDs, addedAt: $0.addedAt)
             }
-            manifest.rules = try context.fetch(FetchDescriptor<SmartRule>()).map {
-                .init(id: $0.uuid, name: $0.name, query: $0.query, isEnabled: $0.isEnabled, createdAt: $0.createdAt,
-                      category: $0.category?.uuid, tags: $0.tagsToAdd, label: $0.labelRaw, rating: $0.rating,
-                      makesFavorite: $0.makesFavorite, marksRead: $0.marksRead, takesOutOfInbox: $0.takesOutOfInbox)
+            manifest.rules = try context.fetch(FetchDescriptor<SmartRule>()).map { rule in
+                var record = BackupManifest.RuleRecord(
+                    id: rule.uuid, name: rule.name, query: rule.query, isEnabled: rule.isEnabled, createdAt: rule.createdAt,
+                    category: rule.category?.uuid, tags: rule.tagsToAdd, label: rule.labelRaw, rating: rule.rating,
+                    makesFavorite: rule.makesFavorite, marksRead: rule.marksRead, takesOutOfInbox: rule.takesOutOfInbox)
+                record.schedule = rule.schedule == .never ? nil : rule.scheduleRaw
+                record.runsAtLaunch = rule.runsAtLaunch ? true : nil
+                return record
             }
         }
 
@@ -373,6 +377,8 @@ extension Library {
             rule.makesFavorite = record.makesFavorite
             rule.marksRead = record.marksRead
             rule.takesOutOfInbox = record.takesOutOfInbox
+            rule.scheduleRaw = record.schedule ?? RuleSchedule.never.rawValue
+            rule.runsAtLaunch = record.runsAtLaunch ?? false
         }
 
         var added: [Item] = []

@@ -227,6 +227,26 @@ struct StashApp: App {
         }
         .defaultSize(width: 560, height: 640)
 
+        Window("Concordance", id: "concordance") {
+            ConcordanceView(showsDone: false)
+                .environment(library)
+                .id(store.current.id)
+                .modelContainer(container)
+        }
+        .defaultSize(width: 520, height: 600)
+
+        // Floats above other apps, to drop things onto.
+        Window("Sorter", id: "sorter") {
+            SorterView()
+                .environment(library)
+                .id(store.current.id)
+                .modelContainer(container)
+        }
+        .windowLevel(.floating)
+        .windowResizability(.contentSize)
+        .defaultPosition(.topTrailing)
+        .keyboardShortcut("s", modifiers: [.command, .control])
+
         Window("Link Graph", id: "graph") {
             LinkGraphView()
                 .environment(library)
@@ -330,6 +350,9 @@ struct StashCommands: Commands {
             Divider()
             let live = chosen.filter { !$0.isTrashed }
             if live.count == 1 {
+                Button("Copy Item Link") { library.copyItemLink(live[0]) }
+                    .keyboardShortcut("c", modifiers: [.command, .control])
+                Button("Copy Markdown Link") { library.copyMarkdownLink(live[0]) }
                 ImageSearchMenu(item: live[0])
                     .environment(library)
             }
@@ -400,6 +423,7 @@ struct StashCommands: Commands {
             Button("Ask Your Library…") { library.isAskingLibrary = true }
                 .keyboardShortcut("a", modifiers: [.command, .option])
             Button("Statistics") { library.isShowingStatistics = true }
+            Button("Concordance") { library.isShowingConcordance = true }
             Button("Link Graph") { library.isShowingGraph = true }
                 .keyboardShortcut("g", modifiers: [.command, .option])
             Button("Smart Rules…") { library.isEditingRules = true }

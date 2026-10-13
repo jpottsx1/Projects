@@ -152,6 +152,9 @@ public struct BackupManifest: Codable, Equatable {
         public var makesFavorite: Bool
         public var marksRead: Bool
         public var takesOutOfInbox: Bool
+        /// When else it runs; nil in exports made before rules could be scheduled.
+        public var schedule: String?
+        public var runsAtLaunch: Bool?
 
         public init(id: UUID, name: String, query: String, isEnabled: Bool, createdAt: Date, category: UUID?,
                     tags: String, label: Int, rating: Int, makesFavorite: Bool, marksRead: Bool, takesOutOfInbox: Bool) {

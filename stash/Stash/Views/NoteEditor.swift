@@ -145,7 +145,7 @@ struct NoteEditor: View {
         }
         .environment(\.openURL, OpenURLAction { url in
             guard url.scheme == Library.linkScheme else { return .systemAction }
-            library.open(wikiURL: url)
+            library.open(stashURL: url)
             return .handled
         })
     }

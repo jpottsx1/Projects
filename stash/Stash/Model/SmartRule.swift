@@ -30,6 +30,17 @@ final class SmartRule {
     var marksRead: Bool = false
     var takesOutOfInbox: Bool = false
 
+    // When else it runs, over everything already here that matches.
+    /// A `RuleSchedule`'s raw value.
+    var scheduleRaw: String = RuleSchedule.never.rawValue
+    var runsAtLaunch: Bool = false
+    var lastRunAt: Date?
+
+    var schedule: RuleSchedule {
+        get { RuleSchedule(rawValue: scheduleRaw) ?? .never }
+        set { scheduleRaw = newValue.rawValue }
+    }
+
     init(name: String) {
         self.name = name
     }

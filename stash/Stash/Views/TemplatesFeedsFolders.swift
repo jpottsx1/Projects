@@ -348,6 +348,11 @@ struct ImportPanels: View {
                     run { await library.importMailbox(url) }
                 }
             Color.clear
+                .fileImporter(isPresented: $library.isImportingBookmarks, allowedContentTypes: [.html]) { result in
+                    guard case .success(let url) = result else { return }
+                    run { await library.importBookmarks(url) }
+                }
+            Color.clear
                 .fileImporter(isPresented: $library.isChoosingFolderToIndex, allowedContentTypes: [.folder]) { result in
                     guard case .success(let url) = result else { return }
                     library.isManagingIndexedFolders = false

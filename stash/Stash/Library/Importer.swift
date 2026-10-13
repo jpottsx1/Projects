@@ -8,6 +8,7 @@ struct ImportSummary {
     var notes = 0
     var documents = 0
     var emails = 0
+    var links = 0
     /// Files that couldn't be read, by name.
     var failed: [String] = []
     var categoryName: String?
@@ -17,6 +18,7 @@ struct ImportSummary {
         if notes > 0 { parts.append(notes == 1 ? "1 note" : "\(notes) notes") }
         if documents > 0 { parts.append(documents == 1 ? "1 document" : "\(documents) documents") }
         if emails > 0 { parts.append(emails == 1 ? "1 email" : "\(emails) emails") }
+        if links > 0 { parts.append(links == 1 ? "1 link" : "\(links) links") }
         var text = parts.isEmpty ? "Nothing was imported." : "Imported " + parts.joined(separator: " and ")
         if !parts.isEmpty, let categoryName { text += " into “\(categoryName)”" }
         if !parts.isEmpty { text += "." }

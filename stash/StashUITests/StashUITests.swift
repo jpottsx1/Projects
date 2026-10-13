@@ -784,5 +784,57 @@ final class StashUITests: XCTestCase {
         XCTAssertTrue(app.windows["Statistics"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.windows["Statistics"].descendants(matching: .any)["monthlyChart"].waitForExistence(timeout: 10))
     }
+    // MARK: - Search, organizing and editing (round 15)
+
+    func testQuickOpenFindsAnItem() {
+        newNote(title: "Zanzibar trip", text: "spices")
+        newNote(title: "Other", text: "x")
+        app.typeKey("o", modifierFlags: .command)
+        let field = app.textFields["quickOpenField"]
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        field.typeText("zanz\r")
+        XCTAssertEqual(app.textFields["itemTitle"].value as? String, "Zanzibar trip")
+    }
+
+    func testQuickFileMovesToACategory() {
+        app.outlines.buttons["New Category"].click()
+        app.typeText("Travel\r")
+        app.outlines.staticTexts["All Items"].click()
+        newNote(title: "Packing list", text: "socks")
+        app.typeKey("m", modifierFlags: [.command, .control])
+        let field = app.textFields["quickOpenField"]
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        field.typeText("trav\r")
+        app.outlines.staticTexts["Travel"].click()
+        XCTAssertTrue(listRow("Packing list").waitForExistence(timeout: 5))
+    }
+
+    func testDuplicatingAndFavoritesFirst() {
+        newNote(title: "Original", text: "body")
+        menuItem("Item", "Duplicate").click()
+        XCTAssertTrue(listRow("Original copy").waitForExistence(timeout: 5))
+        newNote(title: "Newest", text: "z")
+        listRow("Original").click()
+        app.typeKey("d", modifierFlags: .command)
+        app.buttons["Sort"].firstMatch.click()
+        app.menuItems["Favorites First"].click()
+        let first = app.outlines.element(boundBy: 1).descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'row-'")).firstMatch
+        XCTAssertEqual(first.identifier, "row-Original")
+    }
+
+    func testTableRowsAndWordCount() {
+        let editor = newNote(title: "Grid", text: "")
+        app.menuButtons["Table"].click()
+        app.menuItems["Insert Table"].click()
+        // The cursor's after the table; put it in the header row.
+        editor.typeKey(.upArrow, modifierFlags: .command)
+        app.menuButtons["Table"].click()
+        app.menuItems["Add Row Below"].click()
+        let lines = (editor.value as? String ?? "").components(separatedBy: "\n").filter { $0.hasPrefix("|") }
+        XCTAssertEqual(lines.count, 5)
+        app.menuButtons["Outline"].click()
+        app.menuItems["Word Count"].click()
+        XCTAssertTrue(app.staticTexts["wordCount"].waitForExistence(timeout: 5))
+    }
     #endif
 }

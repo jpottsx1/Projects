@@ -258,17 +258,4 @@ final class StashTodayCommand: NSScriptCommand {
     }
 }
 
-extension Library {
-    /// Every category, parents before the ones inside them.
-    func allCategories() -> [ItemCategory] {
-        let all = (try? context.fetch(FetchDescriptor<ItemCategory>())) ?? []
-        return all.filter { $0.parent == nil }
-            .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
-            .flatMap(\.flattened)
-    }
-
-    func allTagNames() -> [String] {
-        ((try? context.fetch(FetchDescriptor<Tag>())) ?? []).map(\.name).sorted()
-    }
-}
 #endif

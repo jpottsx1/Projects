@@ -117,6 +117,10 @@ struct BatchMenus: View {
         let live = items.filter { !$0.isTrashed }
         Button(live.count > 1 ? "Rename Items…" : "Rename…") { library.renamingItems = live }
             .disabled(live.isEmpty)
+        Button("Move to Category…") { library.quickOpen = .file(live) }
+            .disabled(live.isEmpty)
+        Button("Duplicate") { library.duplicate(live) }
+            .disabled(!live.contains { !$0.isLocked })
         let convertible = live.filter(Library.canConvert)
         if !convertible.isEmpty {
             Menu("Convert To") {
@@ -126,6 +130,11 @@ struct BatchMenus: View {
                     }
                 }
             }
+        }
+        let notable = live.filter(Library.canMakeNote(from:))
+        if !notable.isEmpty {
+            Button(notable.count > 1 ? "Make Notes" : "Make a Note") { library.makeNotes(from: notable) }
+                .help("A note with the text of the page, email or document, linked to it")
         }
     }
 }

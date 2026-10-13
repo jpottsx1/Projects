@@ -10,6 +10,8 @@ final class SmartFilter {
     var name: String = ""
     var query: String = ""
     var createdAt: Date = Date()
+    /// Its place in the sidebar when moved by hand; equal ones go by name.
+    var order: Int = 0
 
     init(name: String, query: String) {
         self.name = name

@@ -14,9 +14,42 @@ struct PDFReader: View {
     let item: Item
     let url: URL
     @State private var controller = PDFController()
+    @AppStorage("showsPDFPages") private var showsPages = false
+    /// The colour "Custom Color" highlights in, as #RRGGBB.
+    @AppStorage("customHighlightColor") private var customColor = "#FF6B9A"
 
     var body: some View {
         let highlights = item.sortedHighlights
+        HStack(spacing: 0) {
+            if showsPages {
+                PDFPagesPanel(item: item, url: url, controller: controller)
+                    .frame(width: 190)
+                Divider()
+            }
+            pdf(highlights)
+        }
+        .toolbar {
+            ToolbarItem {
+                Toggle(isOn: $showsPages) {
+                    Label("Pages", systemImage: "sidebar.left")
+                }
+                .help("Page thumbnails and the outline")
+            }
+            ToolbarItem {
+                ColorPicker("Custom Highlight Color", selection: Binding(
+                    get: { Color(hex: customColor) ?? .pink },
+                    set: { customColor = $0.hex ?? customColor }), supportsOpacity: false)
+                    .labelsHidden()
+                    .help("The colour for Custom Color highlights")
+            }
+        }
+        .onAppear {
+            // Opened from a search: the first place it matches.
+            if let term = library.search.query.terms.first?.text, !term.isEmpty { controller.reveal(firstMatchOf: term) }
+        }
+    }
+
+    private func pdf(_ highlights: [Highlight]) -> some View {
         PDFKitView(url: url, controller: controller)
             .onAppear {
                 controller.onTap = { id in open(id) }
@@ -37,15 +70,20 @@ struct PDFReader: View {
             }
             .toolbar {
                 ToolbarItem {
-                    HighlightMenu { color, withNote in highlightSelection(color, withNote: withNote) }
+                    HighlightMenu(action: { color, withNote in highlightSelection(color, withNote: withNote) },
+                                  custom: { highlightSelection(.pink, withNote: false, custom: customColor) })
                 }
             }
     }
 
-    private func highlightSelection(_ color: HighlightColor, withNote: Bool) {
+    private func highlightSelection(_ color: HighlightColor, withNote: Bool, custom: String? = nil) {
         guard let selected = controller.selectedPassage() else { return }
         let highlight = library.addHighlight(to: item, text: selected.text, anchor: selected.anchor,
                                              position: selected.position, color: color)
+        if let custom {
+            highlight.customColor = custom
+            library.save()
+        }
         controller.clearSelection()
         if withNote { library.editingHighlight = highlight }
     }
@@ -56,13 +94,15 @@ struct PDFReader: View {
 
     /// Changes whenever a highlight is added, removed or recoloured.
     static func signature(_ highlights: [Highlight]) -> String {
-        highlights.map { $0.uuid.uuidString + $0.colorRaw }.joined(separator: ",")
+        highlights.map { $0.uuid.uuidString + $0.colorRaw + $0.customColor }.joined(separator: ",")
     }
 }
 
 /// Highlight in yellow, or choose a colour, or highlight and write a note.
 struct HighlightMenu: View {
     let action: (HighlightColor, Bool) -> Void
+    /// Highlighting in the colour of your own, where there's one (PDFs).
+    var custom: (() -> Void)?
 
     var body: some View {
         Menu {
@@ -73,6 +113,11 @@ struct HighlightMenu: View {
                     Label(color.name, systemImage: "circle.fill")
                 }
                 .tint(color.swatch)
+            }
+            if let custom {
+                Button(action: custom) {
+                    Label("Custom Color", systemImage: "paintpalette")
+                }
             }
             Divider()
             Button {
@@ -124,6 +169,30 @@ final class PDFController: NSObject {
         var position: Double
     }
 
+    /// Shows a page (from 0).
+    func go(toPage index: Int) {
+        guard let view, let page = view.document?.page(at: index) else { return }
+        view.go(to: page)
+    }
+
+    /// Shows and selects the first place the text is found.
+    func reveal(firstMatchOf text: String) {
+        pendingMatch = text
+        revealPendingMatch()
+    }
+
+    private var pendingMatch: String?
+
+    private func revealPendingMatch() {
+        guard let text = pendingMatch, let view, let document = view.document else { return }
+        pendingMatch = nil
+        guard let found = document.findString(text, withOptions: [.caseInsensitive, .diacriticInsensitive]).first else { return }
+        DispatchQueue.main.async {
+            view.go(to: found)
+            view.setCurrentSelection(found, animate: true)
+        }
+    }
+
     func attach(_ view: PDFView) {
         self.view = view
         attachedAt = .now
@@ -133,6 +202,7 @@ final class PDFController: NSObject {
                                                name: .PDFViewPageChanged, object: view)
         if let waiting { show(waiting) }
         goToStartPage()
+        revealPendingMatch()
     }
 
     /// Opens at a page (from 0): where reading stopped last time.
@@ -209,7 +279,7 @@ final class PDFController: NSObject {
                 for rect in part.rects {
                     let annotation = PDFAnnotation(bounds: CGRect(x: rect.x, y: rect.y, width: rect.width, height: rect.height),
                                                    forType: .highlight, withProperties: nil)
-                    annotation.color = highlight.color.platformColor
+                    annotation.color = highlight.platformColor
                     annotation.userName = Self.prefix + highlight.uuid.uuidString
                     if !highlight.note.isEmpty { annotation.contents = highlight.note }
                     page.addAnnotation(annotation)
@@ -280,3 +350,142 @@ struct PDFKitView: UIViewRepresentable {
     }
 }
 #endif
+
+extension Highlight {
+    /// Its colour: the one of your own, if it has one.
+    var displayColor: Color { Color(hex: customColor) ?? color.swatch }
+
+    #if os(macOS)
+    var platformColor: NSColor { NSColor(displayColor).withAlphaComponent(0.45) }
+    #else
+    var platformColor: UIColor { UIColor(displayColor).withAlphaComponent(0.45) }
+    #endif
+}
+
+extension Color {
+    /// From "#RRGGBB"; nil for anything else.
+    init?(hex: String) {
+        let digits = hex.trimmingCharacters(in: .whitespaces).drop { $0 == "#" }
+        guard digits.count == 6, let value = Int(digits, radix: 16) else { return nil }
+        self.init(red: Double((value >> 16) & 0xFF) / 255, green: Double((value >> 8) & 0xFF) / 255,
+                  blue: Double(value & 0xFF) / 255)
+    }
+
+    /// As "#RRGGBB".
+    var hex: String? {
+        let resolved = resolve(in: EnvironmentValues())
+        func byte(_ component: Float) -> Int { Int((max(0, min(1, component)) * 255).rounded()) }
+        return String(format: "#%02X%02X%02X", byte(resolved.red), byte(resolved.green), byte(resolved.blue))
+    }
+}
+
+/// A PDF's pages as thumbnails, to go to and (when the file is Stash's
+/// own) drag into another order or delete; or its outline.
+struct PDFPagesPanel: View {
+    @Environment(Library.self) private var library
+    let item: Item
+    let url: URL
+    let controller: PDFController
+    @State private var showsOutline = false
+    @State private var pages: [Int] = []
+    @State private var thumbnails: [Int: PlatformImage] = [:]
+    @State private var outline: [OutlineNode] = []
+    @State private var deleting: Int?
+
+    struct OutlineNode: Identifiable {
+        let id = UUID()
+        let title: String
+        let page: Int?
+        let children: [OutlineNode]?
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Picker("Show", selection: $showsOutline) {
+                Text("Pages").tag(false)
+                Text("Outline").tag(true)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .padding(8)
+            if showsOutline {
+                if outline.isEmpty {
+                    ContentUnavailableView("No Outline", systemImage: "list.bullet.indent")
+                } else {
+                    List(outline, children: \.children) { node in
+                        Button(node.title) { if let page = node.page { controller.go(toPage: page) } }
+                            .buttonStyle(.plain)
+                    }
+                }
+            } else {
+                List {
+                    ForEach(Array(pages.enumerated()), id: \.element) { position, page in
+                        Button {
+                            controller.go(toPage: position)
+                        } label: {
+                            VStack(spacing: 4) {
+                                if let image = thumbnails[page] {
+                                    thumbnailImage(image)
+                                } else {
+                                    Rectangle().fill(.quaternary).frame(height: 160)
+                                }
+                                Text("\(position + 1)").font(.caption).foregroundStyle(.secondary)
+                            }
+                            .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.plain)
+                        .contextMenu {
+                            if Library.canEditPages(of: item) {
+                                Button("Delete Page", role: .destructive) { deleting = position }
+                            }
+                        }
+                    }
+                    .onMove(perform: Library.canEditPages(of: item) ? { from, to in
+                        var order = Array(pages.indices)
+                        order.move(fromOffsets: from, toOffset: to)
+                        library.arrangePages(of: item, order: order)
+                    } : nil)
+                }
+            }
+        }
+        .task(id: library.fileRevision(of: item)) { load() }
+        .confirmationDialog("Delete page \((deleting ?? 0) + 1)?", isPresented: Binding(get: { deleting != nil },
+                                                                                       set: { if !$0 { deleting = nil } })) {
+            Button("Delete Page", role: .destructive) {
+                guard let deleting else { return }
+                library.arrangePages(of: item, order: pages.indices.filter { $0 != deleting })
+            }
+        } message: {
+            Text("Highlights on it go too. Revert to Original brings it back.")
+        }
+    }
+
+    @ViewBuilder
+    private func thumbnailImage(_ image: PlatformImage) -> some View {
+        #if os(macOS)
+        Image(nsImage: image).resizable().scaledToFit().frame(maxHeight: 160).shadow(radius: 1)
+        #else
+        Image(uiImage: image).resizable().scaledToFit().frame(maxHeight: 160).shadow(radius: 1)
+        #endif
+    }
+
+    private func load() {
+        guard let document = PDFDocument(url: url) else { return }
+        pages = Array(0..<document.pageCount)
+        thumbnails = [:]
+        for index in pages.prefix(500) {
+            if let page = document.page(at: index) {
+                thumbnails[index] = page.thumbnail(of: CGSize(width: 140, height: 180), for: .cropBox)
+            }
+        }
+        func nodes(_ parent: PDFOutline) -> [OutlineNode] {
+            (0..<parent.numberOfChildren).compactMap { index in
+                guard let child = parent.child(at: index) else { return nil }
+                let page = child.destination?.page.map { document.index(for: $0) }
+                let children = nodes(child)
+                return OutlineNode(title: child.label ?? "Untitled", page: page, children: children.isEmpty ? nil : children)
+            }
+        }
+        outline = document.outlineRoot.map(nodes) ?? []
+    }
+}

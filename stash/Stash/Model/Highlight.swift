@@ -13,6 +13,8 @@ final class Highlight {
     var text: String = ""
     var note: String = ""
     var colorRaw: String = HighlightColor.yellow.rawValue
+    /// A colour of your own (#RRGGBB) in place of `color`, for PDFs; empty for none.
+    var customColor: String = ""
     /// Where it is: a `HighlightAnchor` as JSON.
     var anchorJSON: String = ""
     /// Orders highlights as they come in the document: the page or chapter

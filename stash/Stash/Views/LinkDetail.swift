@@ -18,6 +18,8 @@ struct LinkDetail: View {
     @AppStorage("showArticle") private var showArticle = true
     @AppStorage("articleTextSize") private var articleTextSize = 1.0
     @State private var article = ArticleController()
+    /// The address of the link under the pointer, shown as Safari does.
+    @State private var hover = LinkHover()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -29,9 +31,12 @@ struct LinkDetail: View {
             Group {
                 if showArticle, let saved = item.article {
                     ArticleView(controller: article, html: saved.page(textSize: articleTextSize), pageURL: item.url)
-                        .onAppear { article.attach(item: item, library: library) }
+                        .onAppear {
+                            article.attach(item: item, library: library)
+                            article.hover = hover
+                        }
                 } else if let copyURL {
-                    PageCopyView(fileURL: copyURL, pageURL: item.url)
+                    PageCopyView(fileURL: copyURL, pageURL: item.url, hover: hover)
                 } else if library.copyingPages.contains(item.uuid) {
                     ProgressView("Saving a copy of the page…")
                 } else if item.archivePath != nil {
@@ -51,6 +56,19 @@ struct LinkDetail: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .overlay(alignment: .bottomLeading) {
+                if !hover.address.isEmpty {
+                    Text(hover.address)
+                        .font(.caption)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 5))
+                        .padding(6)
+                        .allowsHitTesting(false)
+                }
+            }
 
             Divider()
 
@@ -157,11 +175,13 @@ struct LinkDetail: View {
 struct PageCopyView: NSViewRepresentable {
     let fileURL: URL
     let pageURL: URL?
+    var hover: LinkHover?
 
     func makeCoordinator() -> PageCopyCoordinator { PageCopyCoordinator() }
 
     func makeNSView(context: Context) -> WKWebView {
-        let view = PageCopyCoordinator.makeWebView()
+        context.coordinator.hover = hover
+        let view = context.coordinator.makeWebView()
         view.navigationDelegate = context.coordinator
         context.coordinator.show(fileURL, baseURL: pageURL, in: view)
         return view
@@ -175,11 +195,13 @@ struct PageCopyView: NSViewRepresentable {
 struct PageCopyView: UIViewRepresentable {
     let fileURL: URL
     let pageURL: URL?
+    var hover: LinkHover?
 
     func makeCoordinator() -> PageCopyCoordinator { PageCopyCoordinator() }
 
     func makeUIView(context: Context) -> WKWebView {
-        let view = PageCopyCoordinator.makeWebView()
+        context.coordinator.hover = hover
+        let view = context.coordinator.makeWebView()
         view.navigationDelegate = context.coordinator
         context.coordinator.show(fileURL, baseURL: pageURL, in: view)
         return view
@@ -192,14 +214,22 @@ struct PageCopyView: UIViewRepresentable {
 #endif
 
 @MainActor
-final class PageCopyCoordinator: NSObject, WKNavigationDelegate {
+final class PageCopyCoordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
     private var shown: URL?
     private var shownDate: Date?
+    var hover: LinkHover?
 
-    static func makeWebView() -> WKWebView {
+    func makeWebView() -> WKWebView {
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .nonPersistent()
+        configuration.userContentController.add(WeakMessageHandler(self), name: "stashHover")
+        configuration.userContentController.addUserScript(
+            WKUserScript(source: LinkHover.script, injectionTime: .atDocumentEnd, forMainFrameOnly: true))
         return WKWebView(frame: .zero, configuration: configuration)
+    }
+
+    func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+        MainActor.assumeIsolated { hover?.address = message.body as? String ?? "" }
     }
 
     /// Loads the copy, unless it's the one already showing -- a redraw
@@ -231,6 +261,7 @@ final class PageCopyCoordinator: NSObject, WKNavigationDelegate {
 @MainActor
 final class ArticleController: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
     private(set) weak var webView: WKWebView?
+    var hover: LinkHover?
     private weak var item: Item?
     private weak var library: Library?
     private var shownHTML: String?
@@ -250,6 +281,9 @@ final class ArticleController: NSObject, WKNavigationDelegate, WKScriptMessageHa
             WKUserScript(source: WebHighlights.script, injectionTime: .atDocumentEnd, forMainFrameOnly: true))
         configuration.userContentController.addUserScript(
             WKUserScript(source: Self.progressScript, injectionTime: .atDocumentEnd, forMainFrameOnly: true))
+        configuration.userContentController.add(WeakMessageHandler(self), name: "stashHover")
+        configuration.userContentController.addUserScript(
+            WKUserScript(source: LinkHover.script, injectionTime: .atDocumentEnd, forMainFrameOnly: true))
         let view = WKWebView(frame: .zero, configuration: configuration)
         view.navigationDelegate = self
         webView = view
@@ -338,6 +372,10 @@ final class ArticleController: NSObject, WKNavigationDelegate, WKScriptMessageHa
     }
 
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+        if message.name == "stashHover" {
+            hover?.address = message.body as? String ?? ""
+            return
+        }
         guard let body = message.body as? [String: Any] else { return }
         if body["type"] as? String == "position", let item, let fraction = (body["value"] as? NSNumber)?.doubleValue {
             let rounded = (fraction * 1000).rounded() / 1000
@@ -384,3 +422,21 @@ struct ArticleView: UIViewRepresentable {
     }
 }
 #endif
+
+/// The address of the link the pointer's over, in a web view.
+@MainActor
+@Observable
+final class LinkHover {
+    var address = ""
+
+    /// Posts each link's address as the pointer goes over it, and "" as it leaves.
+    static let script = """
+    (function () {
+      document.addEventListener('mouseover', (event) => {
+        const link = event.target.closest && event.target.closest('a[href]');
+        window.webkit.messageHandlers.stashHover.postMessage(link ? link.href : '');
+      });
+      document.addEventListener('mouseleave', () => window.webkit.messageHandlers.stashHover.postMessage(''));
+    })();
+    """
+}

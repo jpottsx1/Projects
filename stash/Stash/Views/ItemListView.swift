@@ -44,6 +44,12 @@ struct ItemListView: View {
         }
         .navigationTitle(library.sidebarTitle)
         .searchable(text: $library.searchText, prompt: "Search, #tag, kind:pdf…")
+        .searchSuggestions {
+            ForEach(searchSuggestions, id: \.completion) { suggestion in
+                Label(suggestion.title, systemImage: Self.icon(for: suggestion.kind))
+                    .searchCompletion(suggestion.completion)
+            }
+        }
         .toolbar {
             ToolbarItem(placement: .primaryAction) { AddMenu() }
             #if os(iOS)
@@ -184,6 +190,26 @@ struct ItemListView: View {
             #if os(macOS)
             for item in chosen { openWindow.item(item, asTab: false) }
             #endif
+        }
+    }
+
+    /// What the last word typed in the search field could become.
+    private var searchSuggestions: [SearchSuggestions.Suggestion] {
+        let text = library.searchText
+        guard !text.isEmpty, !text.hasSuffix(" ") else { return [] }
+        return SearchSuggestions.suggestions(
+            for: text, tags: library.allTagNames(), categories: library.allCategories().map(\.name),
+            lists: library.itemLists().map(\.name), fields: library.fieldDefinitions().map(\.name))
+    }
+
+    static func icon(for kind: SearchSuggestions.Kind) -> String {
+        switch kind {
+        case .tag: "number"
+        case .category: "folder"
+        case .list: "list.bullet.rectangle"
+        case .kind: "doc"
+        case .flag: "flag"
+        case .field: "tag"
         }
     }
 
@@ -466,6 +492,7 @@ struct SortMenu: View {
                 Text(library.sort.ascendingName(!natural)).tag(!natural)
             }
             .pickerStyle(.inline)
+            Toggle("Favorites First", isOn: $library.favoritesFirst)
         } label: {
             Label("Sort", systemImage: "arrow.up.arrow.down")
         }

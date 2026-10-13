@@ -486,6 +486,13 @@ final class Library {
     var isShowingGraph = false
     var isAskingLibrary = false
     var isShowingStatistics = false
+    /// Favourites at the top of the list, whatever it's sorted by.
+    var favoritesFirst = Library.favoritesFirst {
+        didSet { Library.favoritesFirst = favoritesFirst }
+    }
+    /// Quick Open, or Quick File for these items.
+    var quickOpen: QuickOpenMode?
+    var isImportingBookmarks = false
     /// Items waiting for a new list to be named, from a menu.
     var newListItems: [Item]?
     /// Items being renamed together.
@@ -1542,7 +1549,8 @@ final class Library {
         if sidebar == .readLater {
             return result.sorted { ($0.readLaterAt ?? .distantPast) < ($1.readLaterAt ?? .distantPast) }
         }
-        return sort.sorted(result, ascending: sortAscending)
+        let sorted = sort.sorted(result, ascending: sortAscending)
+        return favoritesFirst ? favoritesToTop(sorted) : sorted
     }
 
     private func isInSidebar(_ item: Item) -> Bool {

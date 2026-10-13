@@ -40,7 +40,9 @@ public enum MarkdownHTML {
                 case .rule: html.append("<hr>")
                 case .image(let alt, let source):
                     if let resolved = picture(source) {
-                        html.append("<p><img src=\"\(escape(resolved))\" alt=\"\(escape(alt))\"></p>")
+                        let sized = MarkdownBlocks.pictureSize(alt)
+                        let width = sized.width.map { " width=\"\($0)\"" } ?? ""
+                        html.append("<p><img src=\"\(escape(resolved))\" alt=\"\(escape(sized.alt))\"\(width)></p>")
                     }
                 case .table(let header, let rows):
                     let head = header.map { "<th>\(inline($0))</th>" }.joined()

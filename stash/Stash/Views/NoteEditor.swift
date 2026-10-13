@@ -39,6 +39,9 @@ struct NoteEditor: View {
     @State private var isRecording = false
     /// The sketch being drawn: a new one, or the one on the cursor's line.
     @State private var sketching: SketchEditing?
+    /// Room either side of the text, in points.
+    @AppStorage("noteMargin") private var margin = 12.0
+    @AppStorage("showWordCount") private var showWordCount = false
     #if os(iOS)
     @State private var photo: PhotosPickerItem?
     #endif
@@ -94,7 +97,10 @@ struct NoteEditor: View {
             completion = nil
             preferredMode = mode.rawValue
         }
-        .onAppear { library.beginEditing(item) }
+        .onAppear {
+            library.beginEditing(item)
+            revealFirstMatch()
+        }
         .onDisappear { library.endEditing(item) }
         .toolbar {
             if mode != .preview {
@@ -169,7 +175,8 @@ struct NoteEditor: View {
                 selection = range
             }, pictureURL: { library.pictureURL($0, in: item) },
                addPicture: { data, ext in library.addPicture(data, fileExtension: ext, to: item) },
-               focusMode: focusMode)
+               focusMode: focusMode, margin: margin, onIndent: { outward in indent(outward: outward) })
+            .overlay(alignment: .bottomTrailing) { wordCount }
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 let choices = self.choices
                 if !choices.isEmpty {
@@ -201,7 +208,8 @@ struct NoteEditor: View {
             })
             .font(.system(.body, design: .monospaced))
             .scrollContentBackground(.hidden)
-            .padding(.horizontal, 10)
+            .padding(.horizontal, max(10, margin - 2))
+            .overlay(alignment: .bottomTrailing) { wordCount }
             .padding(.top, 6)
             .onKeyPress(.downArrow) { moveHighlight(by: 1) }
             .onKeyPress(.upArrow) { moveHighlight(by: -1) }
@@ -237,10 +245,87 @@ struct NoteEditor: View {
             }
             Divider()
             Toggle("Focus Mode", isOn: $focusMode)
+            Toggle("Word Count", isOn: $showWordCount)
+            Picker("Margins", selection: $margin) {
+                Text("Narrow").tag(12.0)
+                Text("Medium").tag(60.0)
+                Text("Wide").tag(140.0)
+            }
         } label: {
             Label("Outline", systemImage: "list.bullet.indent")
         }
-        .help("Jump to a heading, or dim all but the paragraph you're writing")
+        .help("Jump to a heading, focus mode, word count and margins")
+    }
+
+    /// How many words, floating over the text's corner.
+    @ViewBuilder
+    private var wordCount: some View {
+        if showWordCount {
+            let words = LibraryStats.wordCount(item.body)
+            Text(words == 1 ? "1 word" : "\(words.formatted()) words")
+                .font(.caption.monospacedDigit())
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(.regularMaterial, in: Capsule())
+                .padding(10)
+                .allowsHitTesting(false)
+                .accessibilityIdentifier("wordCount")
+        }
+    }
+
+    /// Opened from a search: the first place it matches, selected and in view.
+    private func revealFirstMatch() {
+        let terms = library.search.query.terms.map(\.text).filter { !$0.isEmpty }
+        for term in terms {
+            if let range = item.body.range(of: term, options: [.caseInsensitive, .diacriticInsensitive]) {
+                let lower = item.body.distance(from: item.body.startIndex, to: range.lowerBound)
+                selection = lower..<(lower + item.body[range].count)
+                select = range
+                return
+            }
+        }
+    }
+
+    /// Nests the list lines the selection touches one level in or out;
+    /// false when there's no list line there (Tab then types a tab).
+    @discardableResult
+    private func indent(outward: Bool) -> Bool {
+        let range = selection ?? (item.body.count..<item.body.count)
+        let result = MarkdownFormatting.indent(item.body, selection: range, outward: outward)
+        guard result.text != item.body else { return false }
+        item.body = result.text
+        selection = result.selection
+        let lower = result.text.index(result.text.startIndex, offsetBy: min(result.selection.lowerBound, result.text.count))
+        let upper = result.text.index(result.text.startIndex, offsetBy: min(result.selection.upperBound, result.text.count))
+        select = lower..<upper
+        return true
+    }
+
+    /// The cursor's line, its index, and where in it the cursor is.
+    private var cursorLine: (index: Int, line: String, column: Int) {
+        let offset = min(selection?.lowerBound ?? 0, item.body.count)
+        let before = item.body.prefix(offset)
+        let index = before.filter { $0 == "\n" }.count
+        let lineStart = before.lastIndex(of: "\n").map { item.body.index(after: $0) } ?? item.body.startIndex
+        let lineEnd = item.body[lineStart...].firstIndex(of: "\n") ?? item.body.endIndex
+        let column = item.body.distance(from: lineStart, to: item.body.index(item.body.startIndex, offsetBy: offset))
+        return (index, String(item.body[lineStart..<lineEnd]), column)
+    }
+
+    private func changeTable(_ change: MarkdownTable.Change) {
+        let cursor = cursorLine
+        guard let changed = MarkdownTable.change(item.body, line: cursor.index,
+                                                 column: MarkdownTable.column(at: cursor.column, in: cursor.line), change) else { return }
+        item.body = changed
+    }
+
+    /// Limits the picture on the cursor's line to a width (nil for the text's width).
+    private func setPictureWidth(_ width: Int?) {
+        let cursor = cursorLine
+        guard let changed = MarkdownBlocks.settingPictureWidth(cursor.line, to: width) else { return }
+        var lines = item.body.components(separatedBy: "\n")
+        lines[cursor.index] = changed
+        item.body = lines.joined(separator: "\n")
     }
 
     private func jump(to offset: Int) {
@@ -283,6 +368,29 @@ struct NoteEditor: View {
         }
         #endif
         Button {
+            indent(outward: true)
+        } label: {
+            Label("Outdent", systemImage: "decrease.indent").labelStyle(.iconOnly)
+        }
+        .help("Move the list item out a level (Shift-Tab)")
+        Button {
+            indent(outward: false)
+        } label: {
+            Label("Indent", systemImage: "increase.indent").labelStyle(.iconOnly)
+        }
+        .help("Nest the list item a level in (Tab)")
+        Menu {
+            Button("Small") { setPictureWidth(200) }
+            Button("Medium") { setPictureWidth(400) }
+            Button("Large") { setPictureWidth(640) }
+            Button("Fit the Text") { setPictureWidth(nil) }
+        } label: {
+            Label("Picture Size", systemImage: "arrow.up.left.and.arrow.down.right").labelStyle(.iconOnly)
+        }
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("Size of the picture on the cursor’s line")
+        Button {
             sketching = sketchAtCursor() ?? SketchEditing(drawing: PKDrawing(), replacing: nil)
         } label: {
             Label("Sketch", systemImage: "pencil.and.scribble").labelStyle(.iconOnly)
@@ -298,6 +406,11 @@ struct NoteEditor: View {
         Menu {
             Button("Insert Table") { insertOwnLine(MarkdownTable.template()) }
             Button("Tidy Table") { tidyTable() }
+            Divider()
+            Button("Add Row Below") { changeTable(.addRowBelow) }
+            Button("Delete Row") { changeTable(.deleteRow) }
+            Button("Add Column After") { changeTable(.addColumnAfter) }
+            Button("Delete Column") { changeTable(.deleteColumn) }
         } label: {
             Label("Table", systemImage: "tablecells").labelStyle(.iconOnly)
         }
@@ -465,9 +578,10 @@ struct MarkdownView: View {
                 .overlay(alignment: .leading) {
                     Rectangle().fill(Color.accentColor).frame(width: 3)
                 }
-        case .image(let alt, let source):
+        case .image(let fullAlt, let source):
+            let (alt, width) = MarkdownBlocks.pictureSize(fullAlt)
             if let url = pictureURL(source) {
-                PictureView(url: url)
+                PictureView(url: url, maxWidth: width.map(CGFloat.init) ?? 600)
                     .accessibilityLabel(alt.isEmpty ? "Picture" : alt)
             } else {
                 Label(alt.isEmpty ? "Picture" : alt, systemImage: "photo")
@@ -556,6 +670,7 @@ private struct OptionalShortcut: ViewModifier {
 /// A picture in a note: a stored one from its file, or one from the web.
 struct PictureView: View {
     let url: URL
+    var maxWidth: CGFloat = 600
 
     var body: some View {
         Group {
@@ -577,7 +692,7 @@ struct PictureView: View {
                 }
             }
         }
-        .frame(maxWidth: 600, maxHeight: 420, alignment: .leading)
+        .frame(maxWidth: maxWidth, maxHeight: maxWidth == 600 ? 420 : nil, alignment: .leading)
         .clipShape(RoundedRectangle(cornerRadius: 6))
     }
 }

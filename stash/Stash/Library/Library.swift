@@ -25,6 +25,10 @@ enum SidebarSelection: Hashable {
     case inbox
     case all
     case favorites
+    /// What was added, looked at or changed lately.
+    case recents
+    /// Items in no category.
+    case unfiled
     /// Items with a reminder, soonest first.
     case reminders
     case kind(ItemKind)
@@ -71,6 +75,13 @@ final class Library {
     /// Reminders' notifications, for the main library only.
     private var reminders: Reminders? { isMain ? Reminders.shared : nil }
 
+    /// Tag names the list is narrowed to, as Keep It's tag filter (see TagFilterBar).
+    var tagFilter: [String] = []
+    var isShowingTagFilter = false
+    /// What *Recents* goes by, and how far back.
+    var recentsKind: Recents.Kind = .all
+    var recentsDays = 14
+
     var sidebar: SidebarSelection? = .all {
         didSet { if sidebar != oldValue { compileSmartFilter() } }
     }
@@ -81,9 +92,13 @@ final class Library {
             if selection != nil, !multiSelection.isEmpty { multiSelection = [] }
             remember(from: oldValue)
             // Looking at something reads it.
-            if let selection, selection.isUnread, selection != oldValue {
-                selection.isUnread = false
-                save()
+            if let selection, selection != oldValue {
+                let viewedLately = selection.lastViewedAt.map { Date.now.timeIntervalSince($0) < 60 } ?? false
+                if selection.isUnread || !viewedLately {
+                    selection.isUnread = false
+                    selection.lastViewedAt = .now
+                    save()
+                }
             }
         }
     }
@@ -404,10 +419,10 @@ final class Library {
         default:
             break
         }
-        // Pages and files arriving with nowhere to go wait in the Inbox;
-        // notes written here don't need filing.
+        // Pages and files arriving with nowhere to go wait in the Inbox (or
+        // the import destination); notes written here don't need filing.
         if item.category == nil, item.kind != .note || sidebar == .inbox {
-            item.inInbox = true
+            fileArrival(item)
         }
         if !query.isEmpty { searchText = "" }
         save()
@@ -581,6 +596,7 @@ final class Library {
         guard isAlive(item) else { return }
         item.fileData = syncableContents(of: item)
         item.contentHash = ""
+        item.fileSize = 0
         item.thumbnailData = nil
         thumbnailsTried.remove(item.uuid)
         item.modifiedAt = .now
@@ -1106,7 +1122,7 @@ final class Library {
     /// and waiting to be filed.
     func markReceived(_ item: Item) {
         item.isUnread = true
-        if item.category == nil { item.inInbox = true }
+        if item.category == nil { fileArrival(item) }
         save()
         arrived(item)
         runSearch()
@@ -1431,7 +1447,7 @@ final class Library {
                     .map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
                 item.category = names.reduce(nil as ItemCategory?) { parent, name in importCategory(named: name, in: parent) ?? parent }
             }
-            item.inInbox = item.category == nil
+            if item.category == nil { fileArrival(item) }
             if !entry.tags.isEmpty { addTags(from: entry.tags.joined(separator: ","), to: item) }
             save()
             reindex(item)
@@ -1524,6 +1540,8 @@ final class Library {
         case .inbox: "Inbox"
         case .all: "All Items"
         case .favorites: "Favorites"
+        case .recents: "Recents"
+        case .unfiled: "Unfiled"
         case .reminders: "Reminders"
         case .kind(let kind): kind.pluralName
         case .category(let category): category.name
@@ -1545,7 +1563,13 @@ final class Library {
         if sidebar == .duplicates { return duplicates(among: items).flatMap { $0 } }
         var result = items.filter(isInSidebar)
         if !search.isEmpty { result = result.filter(search.matches) }
+        if !tagFilter.isEmpty { result = result.filter { TagFilter.matches(($0.tags ?? []).map(\.name), chosen: tagFilter) } }
         if search.isRanked { return search.rank(result) }
+        if sidebar == .recents {
+            let kind = recentsKind
+            let date = { (item: Item) in Recents.date(kind, created: item.createdAt, modified: item.modifiedAt, viewed: item.lastViewedAt) ?? .distantPast }
+            return result.sorted { date($0) > date($1) }
+        }
         if sidebar == .reminders {
             return result.sorted { ($0.remindAt ?? .distantFuture) < ($1.remindAt ?? .distantFuture) }
         }
@@ -1570,6 +1594,10 @@ final class Library {
         if item.isTemplate || selection == .templates { return item.isTemplate && selection == .templates }
         switch selection {
         case .all, .trash, .duplicates, .templates, .timeline: return true
+        case .recents:
+            let date = Recents.date(recentsKind, created: item.createdAt, modified: item.modifiedAt, viewed: item.lastViewedAt)
+            return Recents.isRecent(date, days: recentsDays)
+        case .unfiled: return item.category == nil
         case .feed(let feed): return item.feed == feed
         case .list(let list): return (item.lists ?? []).contains(list)
         case .readLater: return item.readLaterAt != nil
@@ -1579,7 +1607,10 @@ final class Library {
         case .kind(let kind): return item.kind == kind
         case .category(let category): return category.contains(item.category)
         case .tag(let tag): return (item.tags ?? []).contains(tag)
-        case .smartFilter: return smartFilterSearch?.matches(item) ?? true
+        case .smartFilter(let filter):
+            if let scope = filter.category, !scope.contains(item.category) { return false }
+            if let list = filter.list, !(item.lists ?? []).contains(list) { return false }
+            return smartFilterSearch?.matches(item) ?? true
         }
     }
 
@@ -1617,19 +1648,21 @@ final class Library {
     // MARK: - Smart filters
 
     @discardableResult
-    func newSmartFilter(named name: String, query: String) -> SmartFilter? {
+    func newSmartFilter(named name: String, query: String, in scope: SmartFilterScope = .library) -> SmartFilter? {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
         let filter = SmartFilter(name: trimmed, query: query.trimmingCharacters(in: .whitespacesAndNewlines))
         context.insert(filter)
+        filter.scope = scope
         save()
         return filter
     }
 
-    func update(_ filter: SmartFilter, name: String, query: String) {
+    func update(_ filter: SmartFilter, name: String, query: String, scope: SmartFilterScope? = nil) {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmed.isEmpty { filter.name = trimmed }
         filter.query = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let scope { filter.scope = scope }
         save()
         compileSmartFilter()
     }
@@ -1723,6 +1756,7 @@ final class Library {
             spotlight.remove(changes.removed)
         }
         reminders?.replaceAll(with: items)
+        fillFileSizes(items)
         files.removeFolders(notBelongingTo: Set(items.map(\.uuid)))
         // Documents added before duplicates were looked for, or whose
         // hash hasn't arrived from iCloud yet.
@@ -1909,6 +1943,7 @@ final class Library {
         let hash = await Task.detached(priority: .utility) { FileStore.sha256(of: url) }.value
         guard let hash, isAlive(item) else { return }
         item.contentHash = hash
+        if item.fileSize == 0 { item.fileSize = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0 }
         save()
         revision += 1
     }

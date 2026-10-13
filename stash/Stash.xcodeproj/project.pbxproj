@@ -183,6 +183,14 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		1FE5B58F307DC18500B1918B /* Recovered References */ = {
+			isa = PBXGroup;
+			children = (
+				5A7A00000000000000000306 /* FinderExtension */,
+			);
+			name = "Recovered References";
+			sourceTree = "<group>";
+		};
 		5A7A00000000000000000001 = {
 			isa = PBXGroup;
 			children = (
@@ -193,6 +201,7 @@
 				5A7A00000000000000000305 /* SafariExtension */,
 				5A7A00000000000000000003 /* Config */,
 				5A7A00000000000000000002 /* Products */,
+				1FE5B58F307DC18500B1918B /* Recovered References */,
 			);
 			sourceTree = "<group>";
 		};

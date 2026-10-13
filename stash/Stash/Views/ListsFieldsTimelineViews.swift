@@ -11,24 +11,31 @@ struct ListsSection: View {
     @State private var renaming: ItemList?
     @State private var isNaming = false
     @State private var nameDraft = ""
+    /// Smart filters searching in a list sit under it; the sidebar edits them.
+    private let editFilter: (SmartFilter) -> Void
+    private let newFilter: (SmartFilterScope) -> Void
+
+    init(editFilter: @escaping (SmartFilter) -> Void = { _ in }, newFilter: @escaping (SmartFilterScope) -> Void = { _ in }) {
+        self.editFilter = editFilter
+        self.newFilter = newFilter
+    }
 
     var body: some View {
         Section("Lists") {
             ForEach(lists) { list in
-                Label(list.name, systemImage: "list.bullet.rectangle")
-                    .badge((list.items ?? []).filter { !$0.isTrashed }.count)
-                    .tag(SidebarSelection.list(list))
-                    .contextMenu {
-                        Button("Rename…") {
-                            nameDraft = list.name
-                            renaming = list
+                listRow(list)
+                ForEach((list.smartFilters ?? []).sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }) { filter in
+                    Label(filter.name, systemImage: "line.3.horizontal.decrease.circle")
+                        .padding(.leading, 18)
+                        .tag(SidebarSelection.smartFilter(filter))
+                        .help(filter.query)
+                        .contextMenu {
+                            Button("Edit…") { editFilter(filter) }
+                            Button("Duplicate") { library.duplicate(filter) }
+                            Divider()
+                            Button("Delete Smart Filter", role: .destructive) { library.delete(filter) }
                         }
-                        Button("Export…") {
-                            library.exportRequest = .items(list.orderedItems.filter { !$0.isTrashed }, name: list.name)
-                        }
-                        Divider()
-                        Button("Delete List", role: .destructive) { library.delete(list) }
-                    }
+                }
             }
             // The alerts hang off this button: a sidebar section can't show one.
             Button {
@@ -437,5 +444,25 @@ struct ListsAndReadingSection: View {
         } header: {
             Text("Lists & Reading")
         }
+    }
+}
+
+extension ListsSection {
+    fileprivate func listRow(_ list: ItemList) -> some View {
+        Label(list.name, systemImage: "list.bullet.rectangle")
+            .badge((list.items ?? []).filter { !$0.isTrashed }.count)
+            .tag(SidebarSelection.list(list))
+            .contextMenu {
+                Button("Rename…") {
+                    nameDraft = list.name
+                    renaming = list
+                }
+                Button("New Smart Filter Here…") { newFilter(.list(list)) }
+                Button("Export…") {
+                    library.exportRequest = .items(list.orderedItems.filter { !$0.isTrashed }, name: list.name)
+                }
+                Divider()
+                Button("Delete List", role: .destructive) { library.delete(list) }
+            }
     }
 }

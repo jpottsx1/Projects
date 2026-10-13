@@ -83,14 +83,21 @@ extension Library {
 
         var manifest = BackupManifest(
             exportedAt: .now,
-            categories: categories.map { .init(id: $0.uuid, name: $0.name, parent: $0.parent?.uuid,
-                                               color: $0.colorRaw == 0 ? nil : $0.colorRaw, order: $0.order == 0 ? nil : $0.order) })
+            categories: categories.map { category in
+                var record = BackupManifest.Category(id: category.uuid, name: category.name, parent: category.parent?.uuid,
+                                                     color: category.colorRaw == 0 ? nil : category.colorRaw,
+                                                     order: category.order == 0 ? nil : category.order)
+                record.isImportDestination = category.isImportDestination ? true : nil
+                return record
+            })
         if everything {
             manifest.smartFilters = try context.fetch(FetchDescriptor<SmartFilter>())
                 .map { filter in
                     var record = BackupManifest.SmartFilterRecord(id: filter.uuid, name: filter.name, query: filter.query,
                                                                   createdAt: filter.createdAt)
                     record.order = filter.order == 0 ? nil : filter.order
+                    record.categoryID = filter.category?.uuid
+                    record.listID = filter.list?.uuid
                     return record
                 }
             manifest.lists = try context.fetch(FetchDescriptor<ItemList>()).map {
@@ -135,6 +142,7 @@ extension Library {
             record.isTemplate = item.isTemplate ? true : nil
             record.feed = item.feed?.uuid
             record.isMindMap = item.isMindMap ? true : nil
+            record.lastViewedAt = item.lastViewedAt
             if !item.calendarEventID.isEmpty {
                 record.calendarEventID = item.calendarEventID
                 record.calendarEventTitle = item.calendarEventTitle
@@ -277,6 +285,7 @@ extension Library {
             category.uuid = record.id
             category.colorRaw = record.color ?? 0
             category.order = record.order ?? 0
+            category.isImportDestination = record.isImportDestination ?? false
             context.insert(category)
             categories[record.id] = category
         }
@@ -288,12 +297,15 @@ extension Library {
         }
 
         let existingFilters = Set(try context.fetch(FetchDescriptor<SmartFilter>()).map(\.uuid))
+        var restoredFilters: [(SmartFilter, UUID)] = []
         for record in manifest.smartFilters where !existingFilters.contains(record.id) {
             let filter = SmartFilter(name: record.name, query: record.query)
             filter.uuid = record.id
             filter.order = record.order ?? 0
             filter.createdAt = record.createdAt
             context.insert(filter)
+            filter.category = record.categoryID.flatMap { categories[$0] }
+            if let list = record.listID { restoredFilters.append((filter, list)) }
         }
 
         // Fields and lists, before the items that use them.
@@ -314,6 +326,7 @@ extension Library {
             context.insert(list)
             listsByID[record.id] = list
         }
+        for (filter, listID) in restoredFilters { filter.list = listsByID[listID] }
 
         // The keys locked items need, still under their passwords.
         let existingVaults = Set(try context.fetch(FetchDescriptor<Vault>()).map(\.uuid))
@@ -387,6 +400,7 @@ extension Library {
             item.category = record.category.flatMap { categories[$0] }
             item.feed = record.feed.flatMap { feedsByID[$0] }
             item.isMindMap = record.isMindMap ?? false
+            item.lastViewedAt = record.lastViewedAt
             item.calendarEventID = record.calendarEventID ?? ""
             item.calendarEventTitle = record.calendarEventTitle ?? ""
             item.calendarEventStart = record.calendarEventStart

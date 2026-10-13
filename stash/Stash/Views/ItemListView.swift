@@ -42,6 +42,14 @@ struct ItemListView: View {
         .overlay {
             if items.isEmpty, library.sidebar != .timeline { emptyState }
         }
+        .safeAreaInset(edge: .top, spacing: 0) {
+            VStack(spacing: 0) {
+                if library.sidebar == .recents { RecentsBar() }
+                if library.isShowingTagFilter || !library.tagFilter.isEmpty, library.sidebar != .timeline {
+                    TagFilterBar(items: items)
+                }
+            }
+        }
         .navigationTitle(library.sidebarTitle)
         .searchable(text: $library.searchText, prompt: "Search, #tag, kind:pdf…")
         .searchSuggestions {
@@ -87,10 +95,17 @@ struct ItemListView: View {
                     .help("Show as a list, a grid, or columns")
                 }
             }
-            if !library.searchText.isEmpty {
+            ToolbarItem {
+                Toggle(isOn: $library.isShowingTagFilter) {
+                    Label("Tag Filter", systemImage: "tag")
+                }
+                .help("Narrow the list by tags, one after another")
+            }
+            if !library.searchText.isEmpty || !library.tagFilter.isEmpty {
                 ToolbarItem {
                     Button {
-                        savingSearch = library.searchText
+                        let tags = library.tagFilter.map { "#" + TagName.key($0) }
+                        savingSearch = ([library.searchText] + tags).filter { !$0.isEmpty }.joined(separator: " ")
                     } label: {
                         Label("Save as Smart Filter", systemImage: "line.3.horizontal.decrease.circle.badge.plus")
                     }
@@ -118,8 +133,9 @@ struct ItemListView: View {
         }
         #endif
         .sheet(item: Binding(get: { savingSearch.map(SearchDraft.init) }, set: { savingSearch = $0?.query })) { draft in
-            SmartFilterEditor(filter: nil, query: draft.query) {
+            SmartFilterEditor(filter: nil, query: draft.query, scope: currentScope) {
                 library.searchText = ""
+                library.tagFilter = []
             }
         }
         .confirmationDialog("Delete everything in the Trash?", isPresented: $confirmingEmptyTrash) {
@@ -134,6 +150,15 @@ struct ItemListView: View {
             Button("Delete", role: .destructive) { library.deleteImmediately(confirmingDelete) }
         } message: {
             Text("This can’t be undone.")
+        }
+    }
+
+    /// A search saved from a category or list searches only there.
+    private var currentScope: SmartFilterScope {
+        switch library.sidebar {
+        case .category(let category): .category(category)
+        case .list(let list): .list(list)
+        default: .library
         }
     }
 
@@ -210,6 +235,7 @@ struct ItemListView: View {
         case .kind: "doc"
         case .flag: "flag"
         case .field: "tag"
+        case .filter: "slider.horizontal.3"
         }
     }
 
@@ -445,6 +471,12 @@ struct ItemListView: View {
             case .reminders:
                 ContentUnavailableView("No Reminders", systemImage: "bell",
                                        description: Text("Use Remind Me on an item to come back to it later."))
+            case .recents:
+                ContentUnavailableView("Nothing Recent", systemImage: "clock",
+                                       description: Text("Items added, looked at or changed in the last \(library.recentsDays) days appear here."))
+            case .unfiled:
+                ContentUnavailableView("Everything Is Filed", systemImage: "questionmark.folder",
+                                       description: Text("Items with no category appear here."))
             case .favorites:
                 ContentUnavailableView("No Favorites", systemImage: "star",
                                        description: Text("Swipe an item, or use its menu, to add it to Favorites."))

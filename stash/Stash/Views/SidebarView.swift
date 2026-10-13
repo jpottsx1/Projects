@@ -9,6 +9,7 @@ struct SidebarView: View {
     @Query(sort: \Tag.name) private var tags: [Tag]
     @Query(sort: \SmartFilter.name) private var smartFilters: [SmartFilter]
     @State private var editingFilter: FilterEditing?
+    @Query private var allCategories: [ItemCategory]
 
     private enum Naming {
         case new(parent: ItemCategory?)
@@ -32,6 +33,10 @@ struct SidebarView: View {
                     .tag(SidebarSelection.all)
                 Label("Favorites", systemImage: "star")
                     .tag(SidebarSelection.favorites)
+                Label("Recents", systemImage: "clock")
+                    .tag(SidebarSelection.recents)
+                Label("Unfiled", systemImage: "questionmark.folder")
+                    .tag(SidebarSelection.unfiled)
                 Label("Reminders", systemImage: "bell")
                     .badge(counts.due)
                     .tag(SidebarSelection.reminders)
@@ -58,23 +63,17 @@ struct SidebarView: View {
 
             FeedsSection()
 
-            ListsSection()
+            ListsSection { filter in editingFilter = FilterEditing(filter: filter) } newFilter: { scope in
+                editingFilter = FilterEditing(filter: nil, scope: scope)
+            }
 
             Section("Smart Filters") {
-                ForEach(orderedSmartFilters) { filter in
-                    Label(filter.name, systemImage: "line.3.horizontal.decrease.circle")
-                        .tag(SidebarSelection.smartFilter(filter))
-                        .help(filter.query)
-                        .contextMenu {
-                            Button("Edit…") { editingFilter = FilterEditing(filter: filter) }
-                            Button("Duplicate") { library.duplicate(filter) }
-                            Divider()
-                            Button("Delete Smart Filter", role: .destructive) { library.delete(filter) }
-                        }
+                ForEach(orderedSmartFilters.filter { $0.scope == .library }) { filter in
+                    filterRow(filter)
                 }
                 .onMove { library.moveSmartFilters(from: $0, to: $1) }
                 Button {
-                    editingFilter = FilterEditing(filter: nil)
+                    editingFilter = FilterEditing(filter: nil, scope: .library)
                 } label: {
                     Label("New Smart Filter", systemImage: "plus")
                         .foregroundStyle(.secondary)
@@ -83,32 +82,14 @@ struct SidebarView: View {
             }
 
             Section("Categories") {
-                OutlineGroup(rootCategories.sorted(by: ItemCategory.inOrder), children: \.subcategories) { category in
-                    Label {
-                        Text(category.name)
-                    } icon: {
-                        Image(systemName: category.colorRaw == 0 ? "folder" : "folder.fill")
-                            .foregroundStyle(folderColor(category))
+                let destination = allCategories.filter(\.isImportDestination).min { $0.uuid.uuidString < $1.uuid.uuidString }
+                OutlineGroup(CategoryNode.nodes(rootCategories.sorted(by: ItemCategory.inOrder)), children: \.children) { node in
+                    switch node.content {
+                    case .filter(let filter):
+                        filterRow(filter)
+                    case .category(let category):
+                        categoryRow(category, isDestination: category == destination)
                     }
-                        .tag(SidebarSelection.category(category))
-                        .contextMenu {
-                            Button("New Category Inside…") { startNaming(.new(parent: category)) }
-                            Button("Rename…") { startNaming(.rename(category)) }
-                            Menu("Color") {
-                                ForEach(ItemLabel.allCases) { label in
-                                    Button(label == .none ? "None" : label.name) { library.setColor(label, of: category) }
-                                }
-                            }
-                            Button("Move Up") { library.move(category, by: -1) }
-                            Button("Move Down") { library.move(category, by: 1) }
-                            Button("Duplicate") { library.duplicate(category) }
-                            Button("Export…") {
-                                let inside = library.items(in: category)
-                                library.exportRequest = .items(inside, name: category.name)
-                            }
-                            Divider()
-                            Button("Delete Category", role: .destructive) { library.delete(category) }
-                        }
                 }
                 Button {
                     startNaming(.new(parent: nil))
@@ -180,12 +161,65 @@ struct SidebarView: View {
             if SyncMonitor.isEnabled { SyncStatusView() }
         }
         .sheet(item: $editingFilter) { editing in
-            SmartFilterEditor(filter: editing.filter)
+            SmartFilterEditor(filter: editing.filter, scope: editing.scope)
         }
         .alert(namingTitle, isPresented: Binding(get: { naming != nil }, set: { if !$0 { naming = nil } })) {
             TextField("Name", text: $nameDraft)
             Button("Cancel", role: .cancel) {}
             Button("Save") { finishNaming() }
+        }
+    }
+
+    private func filterRow(_ filter: SmartFilter) -> some View {
+        Label(filter.name, systemImage: "line.3.horizontal.decrease.circle")
+            .tag(SidebarSelection.smartFilter(filter))
+            .help(filter.query)
+            .contextMenu {
+                Button("Edit…") { editingFilter = FilterEditing(filter: filter) }
+                Button("Duplicate") { library.duplicate(filter) }
+                Divider()
+                Button("Delete Smart Filter", role: .destructive) { library.delete(filter) }
+            }
+    }
+
+    private func categoryRow(_ category: ItemCategory, isDestination: Bool) -> some View {
+        Label {
+            HStack {
+                Text(category.name)
+                if isDestination {
+                    Spacer()
+                    Image(systemName: "tray.and.arrow.down")
+                        .foregroundStyle(.secondary)
+                        .help("New things arrive here instead of the Inbox")
+                }
+            }
+        } icon: {
+            Image(systemName: category.colorRaw == 0 ? "folder" : "folder.fill")
+                .foregroundStyle(folderColor(category))
+        }
+        .tag(SidebarSelection.category(category))
+        .contextMenu {
+            Button("New Category Inside…") { startNaming(.new(parent: category)) }
+            Button("New Smart Filter Here…") { editingFilter = FilterEditing(filter: nil, scope: .category(category)) }
+            Button(isDestination ? "Stop Using as Import Destination" : "Use as Import Destination") {
+                library.setImportDestination(isDestination ? nil : category)
+            }
+            .help("New things with no category arrive here instead of the Inbox")
+            Button("Rename…") { startNaming(.rename(category)) }
+            Menu("Color") {
+                ForEach(ItemLabel.allCases) { label in
+                    Button(label == .none ? "None" : label.name) { library.setColor(label, of: category) }
+                }
+            }
+            Button("Move Up") { library.move(category, by: -1) }
+            Button("Move Down") { library.move(category, by: 1) }
+            Button("Duplicate") { library.duplicate(category) }
+            Button("Export…") {
+                let inside = library.items(in: category)
+                library.exportRequest = .items(inside, name: category.name)
+            }
+            Divider()
+            Button("Delete Category", role: .destructive) { library.delete(category) }
         }
     }
 
@@ -240,5 +274,29 @@ struct SidebarView: View {
 
 private struct FilterEditing: Identifiable {
     let filter: SmartFilter?
+    var scope: SmartFilterScope?
     let id = UUID()
+}
+
+/// A row in the categories' outline: a category, or a smart filter
+/// searching in it, shown inside it.
+private struct CategoryNode: Identifiable {
+    enum Content: Hashable {
+        case category(ItemCategory)
+        case filter(SmartFilter)
+    }
+
+    let content: Content
+    let children: [CategoryNode]?
+    var id: Content { content }
+
+    static func nodes(_ categories: [ItemCategory]) -> [CategoryNode] {
+        categories.map { category in
+            let filters = (category.smartFilters ?? [])
+                .sorted { $0.order != $1.order ? $0.order < $1.order : $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+                .map { CategoryNode(content: .filter($0), children: nil) }
+            let inside = filters + nodes(category.subcategories ?? [])
+            return CategoryNode(content: .category(category), children: inside.isEmpty ? nil : inside)
+        }
+    }
 }

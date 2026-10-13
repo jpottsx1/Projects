@@ -1,3 +1,4 @@
+import SwiftData
 import SwiftUI
 import StashCore
 
@@ -9,12 +10,15 @@ struct SmartFilterEditor: View {
     var onSave: () -> Void = {}
     @State private var name: String
     @State private var query: String
+    @State private var scope: SmartFilterScope
+    @Query(sort: \ItemList.name) private var lists: [ItemList]
 
-    init(filter: SmartFilter?, query: String = "", onSave: @escaping () -> Void = {}) {
+    init(filter: SmartFilter?, query: String = "", scope: SmartFilterScope? = nil, onSave: @escaping () -> Void = {}) {
         self.filter = filter
         self.onSave = onSave
         _name = State(initialValue: filter?.name ?? "")
         _query = State(initialValue: filter?.query ?? query)
+        _scope = State(initialValue: scope ?? filter?.scope ?? .library)
     }
 
     var body: some View {
@@ -32,8 +36,28 @@ struct SmartFilterEditor: View {
                         Words to find, and any of these: \
                         "exact phrase", word OR other, -leave-out, #tag, -#tag, \
                         kind:note, kind:link, kind:pdf, kind:image, in:Category, \
-                        is:favorite, is:untagged, after:7d, before:2026-01-01.
+                        is:favorite, is:untagged, after:7d, before:2026-01-01, \
+                        created:>7d, modified:2026-03-01, size:>1mb, source:example.com.
                         """)
+                }
+                Section {
+                    Picker("Search In", selection: $scope) {
+                        Text("Whole Library").tag(SmartFilterScope.library)
+                        if !library.allCategories().isEmpty {
+                            Divider()
+                            ForEach(library.allCategories()) { category in
+                                Text(category.path).tag(SmartFilterScope.category(category))
+                            }
+                        }
+                        if !lists.isEmpty {
+                            Divider()
+                            ForEach(lists) { list in
+                                Text("List: " + list.name).tag(SmartFilterScope.list(list))
+                            }
+                        }
+                    }
+                } footer: {
+                    Text("A smart filter searching one category or list is shown inside it in the sidebar.")
                 }
             }
             .formStyle(.grouped)
@@ -53,8 +77,8 @@ struct SmartFilterEditor: View {
 
     private func save() {
         if let filter {
-            library.update(filter, name: name, query: query)
-        } else if let made = library.newSmartFilter(named: name, query: query) {
+            library.update(filter, name: name, query: query, scope: scope)
+        } else if let made = library.newSmartFilter(named: name, query: query, in: scope) {
             library.sidebar = .smartFilter(made)
         }
         onSave()

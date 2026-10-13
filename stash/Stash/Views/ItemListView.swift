@@ -432,6 +432,7 @@ struct ItemListView: View {
                 Divider()
             }
             #endif
+            ImageSearchMenu(item: item)
             ListMenus(items: [item])
             BatchMenus(items: [item])
             if !(item.highlights ?? []).isEmpty {

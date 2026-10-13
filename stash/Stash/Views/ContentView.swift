@@ -177,14 +177,7 @@ struct ContentView: View {
         .background { BackupPanels() }
         .background { PrintPanels() }
         .background { ImportPanels() }
-        .alert("Couldn’t Import", isPresented: Binding(
-            get: { library.importError != nil },
-            set: { if !$0 { library.importError = nil } })
-        ) {
-            Button("OK") {}
-        } message: {
-            Text(library.importError ?? "")
-        }
+        .modifier(LibraryAlerts(library: library))
     }
 }
 
@@ -386,5 +379,30 @@ private struct LibrarySheets: ViewModifier {
                              set: { library.renamingItems = $0?.items })) { group in
             BatchRenameView(items: group.items)
         }
+    }
+}
+
+/// The library's messages: an import that failed, an image copied to search for.
+private struct LibraryAlerts: ViewModifier {
+    let library: Library
+
+    func body(content: Content) -> some View {
+        content
+            .alert("Image Copied", isPresented: Binding(
+                get: { library.imageSearchNotice != nil },
+                set: { if !$0 { library.imageSearchNotice = nil } })
+            ) {
+                Button("OK") {}
+            } message: {
+                Text(library.imageSearchNotice ?? "")
+            }
+            .alert("Couldn’t Import", isPresented: Binding(
+                get: { library.importError != nil },
+                set: { if !$0 { library.importError = nil } })
+            ) {
+                Button("OK") {}
+            } message: {
+                Text(library.importError ?? "")
+            }
     }
 }

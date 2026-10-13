@@ -103,7 +103,7 @@ struct CompiledSearch {
         if !query.created.allSatisfy({ $0.matches(item.createdAt, now: now, calendar: calendar) }) { return false }
         if !query.modified.allSatisfy({ $0.matches(item.modifiedAt, now: now, calendar: calendar) }) { return false }
         if !query.sources.isEmpty {
-            let source = [item.urlString ?? "", item.feed?.title ?? ""].joined(separator: " ").lowercased()
+            let source = [item.urlString ?? "", item.sourceAddress ?? "", item.feed?.title ?? ""].joined(separator: " ").lowercased()
             if !query.sources.contains(where: source.contains) { return false }
         }
 

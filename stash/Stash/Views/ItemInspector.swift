@@ -234,6 +234,18 @@ struct ItemInspector: View {
                         .disabled(library.localFile(for: item) == nil)
                     #endif
                 }
+                if item.kind == .document, !item.isLocked {
+                    // Where it came from: image searches use it, and `source:` finds it.
+                    TextField("Came From", text: Binding(
+                        get: { item.sourceAddress ?? "" },
+                        set: { library.setSourceAddress($0, of: item) }),
+                        prompt: Text("Web address"))
+                        .autocorrectionDisabled()
+                        #if os(iOS)
+                        .textInputAutocapitalization(.never)
+                        .keyboardType(.URL)
+                        #endif
+                }
                 LabeledContent("Created", value: item.createdAt.formatted(date: .abbreviated, time: .shortened))
                 LabeledContent("Modified", value: item.modifiedAt.formatted(date: .abbreviated, time: .shortened))
             }

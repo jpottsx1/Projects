@@ -143,6 +143,7 @@ extension Library {
             record.feed = item.feed?.uuid
             record.isMindMap = item.isMindMap ? true : nil
             record.lastViewedAt = item.lastViewedAt
+            record.sourceAddress = item.sourceAddress
             if !item.calendarEventID.isEmpty {
                 record.calendarEventID = item.calendarEventID
                 record.calendarEventTitle = item.calendarEventTitle
@@ -401,6 +402,7 @@ extension Library {
             item.feed = record.feed.flatMap { feedsByID[$0] }
             item.isMindMap = record.isMindMap ?? false
             item.lastViewedAt = record.lastViewedAt
+            item.sourceAddress = record.sourceAddress
             item.calendarEventID = record.calendarEventID ?? ""
             item.calendarEventTitle = record.calendarEventTitle ?? ""
             item.calendarEventStart = record.calendarEventStart

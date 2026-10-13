@@ -145,6 +145,10 @@ final class Item {
     var calendarEventStart: Date?
     /// A note shown as a mind map (`MindMap`): its text is the map's outline.
     var isMindMap: Bool = false
+    /// When it was last looked at, for *Recents*.
+    var lastViewedAt: Date?
+    /// A document's file size in bytes, for `size:` searches; 0 until known.
+    var fileSize: Int = 0
     @Relationship(inverse: \Tag.items) var tags: [Tag]? = []
     /// The lists it's been put in, besides its category.
     @Relationship(inverse: \ItemList.items) var lists: [ItemList]? = []

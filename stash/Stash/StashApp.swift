@@ -412,6 +412,10 @@ struct StashCommands: Commands {
             Button("Forward") { library.goForward() }
                 .keyboardShortcut("]")
                 .disabled(!library.canGoForward)
+            Divider()
+            Button("Recents") { library.sidebar = .recents }
+            Button("Unfiled") { library.sidebar = .unfiled }
+            Button(library.isShowingTagFilter ? "Hide Tag Filter" : "Show Tag Filter") { library.isShowingTagFilter.toggle() }
         }
     }
 }
@@ -470,8 +474,6 @@ struct PadCommands: Commands {
                 .disabled(!library.canGoForward)
             Button("Quick Open…") { library.quickOpen = .open }
                 .keyboardShortcut("o")
-            Button("Quick Open…") { library.quickOpen = .open }
-                .keyboardShortcut("o")
             Divider()
             Button("Inbox") { library.sidebar = .inbox }
                 .keyboardShortcut("1")
@@ -479,6 +481,8 @@ struct PadCommands: Commands {
                 .keyboardShortcut("2")
             Button("Read Later") { library.sidebar = .readLater }
                 .keyboardShortcut("3")
+            Button("Recents") { library.sidebar = .recents }
+                .keyboardShortcut("4")
         }
     }
 }

@@ -41,6 +41,8 @@ public struct BackupManifest: Codable, Equatable {
         /// exports made before they could be set.
         public var color: Int?
         public var order: Int?
+        /// Where things arrive instead of the Inbox; nil when it isn't.
+        public var isImportDestination: Bool?
 
         public init(id: UUID, name: String, parent: UUID?, color: Int? = nil, order: Int? = nil) {
             self.id = id
@@ -58,6 +60,9 @@ public struct BackupManifest: Codable, Equatable {
         public var createdAt: Date
         /// Its place in the sidebar; nil in exports made before it could be set.
         public var order: Int?
+        /// The category or list it searches in; nil for the whole library.
+        public var categoryID: UUID?
+        public var listID: UUID?
 
         public init(id: UUID, name: String, query: String, createdAt: Date) {
             self.id = id
@@ -235,6 +240,7 @@ public struct BackupManifest: Codable, Equatable {
         public var calendarEventStart: Date?
         /// Whether a note is shown as a mind map.
         public var isMindMap: Bool?
+        public var lastViewedAt: Date?
         /// Words read from its pictures, by picture name, so they needn't be read again.
         public var pictureText: [String: String]?
         /// The lists it's in, its own fields' values (`CustomField.encode`),

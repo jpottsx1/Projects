@@ -18,6 +18,10 @@ final class ItemCategory {
     @Relationship(deleteRule: .nullify, inverse: \Item.category) var items: [Item]? = []
     /// Rules that file items here.
     @Relationship(deleteRule: .nullify, inverse: \SmartRule.category) var rules: [SmartRule]? = []
+    /// Smart filters that search only in here, shown inside it.
+    @Relationship(deleteRule: .nullify, inverse: \SmartFilter.category) var smartFilters: [SmartFilter]? = []
+    /// Where things arrive instead of the Inbox (see `Library.importDestination`).
+    var isImportDestination: Bool = false
 
     init(name: String, parent: ItemCategory? = nil) {
         self.name = name

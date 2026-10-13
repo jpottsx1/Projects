@@ -44,7 +44,7 @@ public enum QuickOpen {
 /// could become (#tags, in:Category, list:, kind:, is:, your fields).
 public enum SearchSuggestions {
     public enum Kind: Equatable {
-        case tag, category, list, kind, flag, field
+        case tag, category, list, kind, flag, field, filter
     }
 
     public struct Suggestion: Equatable {
@@ -90,6 +90,12 @@ public enum SearchSuggestions {
             for name in kinds where name.hasPrefix(rest) { add(name, "kind:" + name, .kind) }
         case "is":
             for name in flags where name.hasPrefix(rest) { add(name, "is:" + name, .flag) }
+        case "size":
+            for example in [">1mb", ">10mb", "<100kb"] where example.hasPrefix(rest) { add("size:" + example, "size:" + example, .filter) }
+        case "created", "modified":
+            for example in ["today", ">7d", ">1m", "<1y"] where example.hasPrefix(rest) {
+                add(prefix + ":" + example, prefix + ":" + example, .filter)
+            }
         case "":
             // A plain word: tags, categories and lists it starts the name of.
             for tag in tags where tag.lowercased().hasPrefix(lowered) { add("#" + tag, "#" + tag, .tag) }
@@ -97,6 +103,9 @@ public enum SearchSuggestions {
             for name in lists where name.lowercased().hasPrefix(lowered) { add("list:" + name, "list:" + quoted(name), .list) }
             for name in fields where name.lowercased().hasPrefix(lowered) {
                 add(name + ":", name.replacingOccurrences(of: " ", with: "_") + ":", .field)
+            }
+            for key in ["size", "created", "modified", "source"] where lowered.count >= 2 && key.hasPrefix(lowered) {
+                add(key + ":", key + ":", .filter)
             }
         default:
             break

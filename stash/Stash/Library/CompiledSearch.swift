@@ -16,6 +16,8 @@ struct CompiledSearch {
     let usesIndex: Bool
     private let after: Date?
     private let before: Date?
+    private let now: Date
+    private let calendar: Calendar
     /// The custom fields searched, by name.
     private let fields: [String: (id: UUID, kind: CustomField.Kind)]
 
@@ -38,6 +40,8 @@ struct CompiledSearch {
         } else {
             excluded = []
         }
+        self.now = now
+        self.calendar = calendar
         after = query.after?.start(now: now, calendar: calendar)
         before = query.before?.start(now: now, calendar: calendar)
     }
@@ -92,6 +96,16 @@ struct CompiledSearch {
         if let minimum = query.minimumRating, item.rating < minimum { return false }
         if let after, item.modifiedAt < after { return false }
         if let before, item.modifiedAt >= before { return false }
+        if !query.sizes.isEmpty {
+            let size = item.searchableSize
+            if !query.sizes.allSatisfy({ $0.matches(size) }) { return false }
+        }
+        if !query.created.allSatisfy({ $0.matches(item.createdAt, now: now, calendar: calendar) }) { return false }
+        if !query.modified.allSatisfy({ $0.matches(item.modifiedAt, now: now, calendar: calendar) }) { return false }
+        if !query.sources.isEmpty {
+            let source = [item.urlString ?? "", item.feed?.title ?? ""].joined(separator: " ").lowercased()
+            if !query.sources.contains(where: source.contains) { return false }
+        }
 
         if usesIndex {
             if let ranks, ranks[item.uuid] == nil { return false }

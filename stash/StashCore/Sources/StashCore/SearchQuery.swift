@@ -15,6 +15,10 @@ import Foundation
 /// - `label:red` (or any label colour, or `label:none`); `rating:3` -- three stars or more
 /// - `after:2026-03-01`, `before:2026-03-01` -- last changed from that day on,
 ///   or before it; also `today`, `yesterday`, and `7d`, `2w`, `3m`, `1y` ago
+/// - `created:2026-03-01` (that day), `created:>7d` (on or after), `created:<2026-01-01`
+///   (before); `modified:` the same for the last change
+/// - `size:>1mb`, `size:<500kb` -- a document's file, or a note's text
+/// - `source:example.com` -- where a link or feed post came from
 public struct SearchQuery: Equatable {
     public enum Term: Equatable {
         case word(String)
@@ -107,6 +111,76 @@ public struct SearchQuery: Equatable {
         }
     }
 
+    /// How a size or a date is compared with what's typed.
+    public enum Comparison: Equatable {
+        case less, lessOrEqual, equal, greaterOrEqual, greater
+
+        /// Takes `>`, `>=`, `<`, `<=` or `=` off the front of `text`.
+        static func split(_ text: String) -> (Comparison?, String) {
+            for (prefix, comparison) in [(">=", Comparison.greaterOrEqual), ("<=", .lessOrEqual), (">", .greater),
+                                         ("<", .less), ("=", .equal)] where text.hasPrefix(prefix) {
+                return (comparison, String(text.dropFirst(prefix.count)))
+            }
+            return (nil, text)
+        }
+    }
+
+    public struct SizeFilter: Equatable {
+        public var comparison: Comparison
+        public var bytes: Int64
+
+        /// `1mb`, `1.5 GB`, `500k`, `200` (bytes); a thousand to the kilobyte, as the Finder counts.
+        init?(typed: String) {
+            let (comparison, rest) = Comparison.split(typed.lowercased().replacingOccurrences(of: " ", with: ""))
+            let number = rest.prefix { $0.isNumber || $0 == "." }
+            guard let value = Double(number), value >= 0 else { return nil }
+            let multiplier: Double
+            switch rest.dropFirst(number.count) {
+            case "", "b", "byte", "bytes": multiplier = 1
+            case "k", "kb": multiplier = 1e3
+            case "m", "mb": multiplier = 1e6
+            case "g", "gb": multiplier = 1e9
+            default: return nil
+            }
+            self.comparison = comparison ?? .greaterOrEqual
+            bytes = Int64(value * multiplier)
+        }
+
+        public func matches(_ size: Int64) -> Bool {
+            switch comparison {
+            case .less: size < bytes
+            case .lessOrEqual: size <= bytes
+            case .equal: size == bytes
+            case .greaterOrEqual: size >= bytes
+            case .greater: size > bytes
+            }
+        }
+    }
+
+    public struct DateFilter: Equatable {
+        public var comparison: Comparison
+        public var day: Day
+
+        init?(typed: String) {
+            let (comparison, rest) = Comparison.split(typed)
+            guard let day = Day(typed: rest) else { return nil }
+            self.comparison = comparison ?? .equal
+            self.day = day
+        }
+
+        /// On that day; on or after it (`>` and `>=`); before it (`<`); on or before it (`<=`).
+        public func matches(_ date: Date, now: Date = .now, calendar: Calendar = .current) -> Bool {
+            guard let start = day.start(now: now, calendar: calendar),
+                  let end = calendar.date(byAdding: .day, value: 1, to: start) else { return false }
+            switch comparison {
+            case .equal: return date >= start && date < end
+            case .greater, .greaterOrEqual: return date >= start
+            case .less: return date < start
+            case .lessOrEqual: return date < end
+            }
+        }
+    }
+
     /// Words and phrases every result has: one from each group.
     public private(set) var groups: [[Term]] = []
     /// Words and phrases no result has.
@@ -127,6 +201,12 @@ public struct SearchQuery: Equatable {
     public private(set) var before: Day?
     /// List names, lowercased; items in any one of these.
     public private(set) var lists: [String] = []
+    /// All of these.
+    public private(set) var sizes: [SizeFilter] = []
+    public private(set) var created: [DateFilter] = []
+    public private(set) var modified: [DateFilter] = []
+    /// Lowercased; where it came from contains any one of these.
+    public private(set) var sources: [String] = []
     public struct FieldFilter: Equatable {
         /// The field's name, as defined.
         public var name: String
@@ -150,7 +230,8 @@ public struct SearchQuery: Equatable {
         var quoted: Bool
     }
 
-    private static let filterKeys: Set<String> = ["kind", "type", "in", "is", "after", "before", "label", "rating", "list"]
+    private static let filterKeys: Set<String> = ["kind", "type", "in", "is", "after", "before", "label", "rating", "list",
+                                                         "size", "created", "added", "modified", "changed", "source", "site"]
 
     /// `fields`: the names of the custom fields there are.
     public init(_ text: String, fields: [String] = []) {
@@ -290,6 +371,19 @@ public struct SearchQuery: Equatable {
             let name = value.trimmingCharacters(in: .whitespaces).lowercased()
             guard !name.isEmpty else { return false }
             if !lists.contains(name) { lists.append(name) }
+        case "size":
+            guard let size = SizeFilter(typed: value) else { return false }
+            sizes.append(size)
+        case "created", "added":
+            guard let date = DateFilter(typed: value) else { return false }
+            created.append(date)
+        case "modified", "changed":
+            guard let date = DateFilter(typed: value) else { return false }
+            modified.append(date)
+        case "source", "site":
+            let text = value.trimmingCharacters(in: .whitespaces).lowercased()
+            guard !text.isEmpty else { return false }
+            if !sources.contains(text) { sources.append(text) }
         default:
             guard let name = fieldNames[Self.fieldKey(key)] else { return false }
             fieldFilters.append(FieldFilter(name: name, value: value.trimmingCharacters(in: .whitespaces)))
@@ -301,6 +395,7 @@ public struct SearchQuery: Equatable {
         groups.isEmpty && excludedTerms.isEmpty && tags.isEmpty && excludedTags.isEmpty
             && kinds.isEmpty && categories.isEmpty && flags.isEmpty && after == nil && before == nil
             && labels.isEmpty && minimumRating == nil && lists.isEmpty && fieldFilters.isEmpty
+            && sizes.isEmpty && created.isEmpty && modified.isEmpty && sources.isEmpty
     }
 
     /// An SQLite FTS5 `MATCH` expression for the words and phrases, or nil

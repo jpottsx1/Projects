@@ -13,6 +13,8 @@ final class ItemList {
     /// (added on another device, say) come after, oldest first.
     var orderIDs: String = ""
     var items: [Item]? = []
+    /// Smart filters that search only in this list, shown under it.
+    @Relationship(deleteRule: .nullify, inverse: \SmartFilter.list) var smartFilters: [SmartFilter]? = []
 
     init(name: String) {
         self.name = name

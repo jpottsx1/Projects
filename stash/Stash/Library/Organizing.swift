@@ -125,8 +125,10 @@ extension Library {
         }
     }
 
+    /// Moves among the whole-library filters, the ones the Smart Filters
+    /// section shows (those searching one category or list sit inside it).
     func moveSmartFilters(from offsets: IndexSet, to destination: Int) {
-        var filters = smartFiltersInOrder()
+        var filters = smartFiltersInOrder().filter { $0.scope == .library }
         filters.move(fromOffsets: offsets, toOffset: destination)
         for (order, filter) in filters.enumerated() { filter.order = order }
         save()

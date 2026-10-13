@@ -27,6 +27,9 @@ extension Library {
         if (template.title + template.body).range(of: "{{clipboard", options: .caseInsensitive) != nil {
             values.clipboard = Self.clipboardText() ?? ""
         }
+        if template.body.range(of: "{{events", options: .caseInsensitive) != nil {
+            values.events = Self.eventsText(on: values.date)
+        }
         let filledTitle = title ?? NoteTemplate.fill(template.title, with: values)
         values.title = filledTitle
         // A note made here isn't a template, whichever list is showing.
@@ -96,6 +99,21 @@ extension Library {
         set { UserDefaults.standard.set(newValue?.uuid.uuidString, forKey: "dailyNoteTemplate") }
     }
 
+    /// Adds text to the end of today's note (made if need be): a line of
+    /// its own, or a list item.
+    @discardableResult
+    func appendToToday(_ text: String, asListItem: Bool = false) -> Item {
+        let note = openToday()
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return note }
+        let addition = asListItem ? trimmed.split(separator: "\n").map { "- " + $0 }.joined(separator: "\n") : trimmed
+        note.body = note.body.isEmpty ? addition
+            : note.body.trimmingCharacters(in: .newlines) + (asListItem ? "\n" : "\n\n") + addition
+        didEdit(note)
+        save()
+        return note
+    }
+
     /// Today's note, made if there isn't one yet, and shown.
     @discardableResult
     func openToday() -> Item {
@@ -110,7 +128,14 @@ extension Library {
             return existing
         }
         if sidebar == .templates { sidebar = .all }
-        let note = dailyTemplate.map { newNote(from: $0, title: title) } ?? newNote(titled: title)
+        let note: Item
+        if let template = dailyTemplate {
+            note = newNote(from: template, title: title)
+        } else {
+            var values = NoteTemplate.Values(title: title)
+            values.events = Self.eventsText(on: .now)
+            note = newNote(titled: title, text: NoteTemplate.fill(Self.defaultDailyBody, with: values))
+        }
         if note.category == nil {
             note.category = dailyCategory()
             note.inInbox = false
@@ -128,6 +153,13 @@ extension Library {
             return existing
         }
         return newCategory(named: name)
+    }
+
+    /// The day's events as a list, for `{{events}}`; a line saying why when there are none to show.
+    static func eventsText(on day: Date) -> String {
+        guard CalendarEvents.shared.isAuthorized else { return "_Calendar access is off._" }
+        let list = CalendarEvents.shared.markdownList(on: day)
+        return list.isEmpty ? "_No events._" : list
     }
 
     static func clipboardText() -> String? {

@@ -107,6 +107,7 @@ struct SettingsView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Section("Daily Notes") {
+                DailyEventsToggle()
                 TextField("Title format", text: $dailyFormat, prompt: Text(NoteTemplate.dailyTitleFormat))
                 Text("Today: \(NoteTemplate.format(.now, dailyFormat.isEmpty ? NoteTemplate.dailyTitleFormat : dailyFormat, NoteTemplate.Values()))")
                     .font(.caption)
@@ -188,7 +189,8 @@ final class StashAppDelegate: NSObject, UIApplicationDelegate {
         if let type = options.shortcutItem?.type {
             MainActor.assumeIsolated { QuickActions.pending = type }
         }
-        let configuration = UISceneConfiguration(name: nil, sessionRole: session.role)
+        // SwiftUI's own name for the scene, so an item window opens as one.
+        let configuration = UISceneConfiguration(name: session.configuration.name, sessionRole: session.role)
         configuration.delegateClass = StashSceneDelegate.self
         return configuration
     }

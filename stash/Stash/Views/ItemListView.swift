@@ -3,6 +3,8 @@ import SwiftData
 import StashCore
 #if os(macOS)
 import AppKit
+#else
+import UIKit
 #endif
 
 struct ItemListView: View {
@@ -12,9 +14,7 @@ struct ItemListView: View {
     @State private var confirmingEmptyTrash = false
     @State private var confirmingDelete: [Item] = []
     @Environment(\.horizontalSizeClass) private var sizeClass
-    #if os(macOS)
     @Environment(\.openWindow) private var openWindow
-    #endif
     #if os(iOS)
     /// Kept here rather than read from the environment: this view sits
     /// above the list the Edit button changes, so it wouldn't see the change.
@@ -99,17 +99,11 @@ struct ItemListView: View {
             }
         }
         // Files from Finder or Files become documents; web addresses become links.
-        .dropDestination(for: URL.self) { urls, _ in
-            library.add(urls)
-            return !urls.isEmpty
-        }
-        #if os(macOS)
-        // Messages dragged from Mail arrive as promised .eml files.
-        .onDrop(of: [.emailMessage], isTargeted: nil) { providers in
-            Task { await library.importEmailProviders(providers) }
+        // Files, pictures, web addresses, text, and messages from Mail.
+        .onDrop(of: Library.droppableTypes, isTargeted: nil) { providers in
+            Task { await library.importDropped(providers) }
             return true
         }
-        #endif
         #if os(macOS)
         .onDeleteCommand {
             let chosen = library.selectedItems
@@ -153,6 +147,8 @@ struct ItemListView: View {
                 ItemRow(item: item)
                     .tag(item)
                     .accessibilityIdentifier("row-\(item.displayTitle)")
+                    // Dragged out to another app.
+                    .itemProvider { library.itemProvider(for: item) }
                     .swipeActions(edge: .trailing) {
                         if item.isTrashed {
                             Button("Delete", role: .destructive) { confirmingDelete = [item] }
@@ -334,6 +330,10 @@ struct ItemListView: View {
                 ForEach(items) { item in
                     ItemCard(item: item, isSelected: library.listSelection.contains(item))
                         .onTapGesture { tap(item, in: items) }
+                        .onDrag { library.itemProvider(for: item) ?? NSItemProvider() }
+                        #if os(iOS)
+                        .hoverEffect(.lift)
+                        #endif
                         .contextMenu {
                             let chosen = library.listSelection
                             if chosen.count > 1, chosen.contains(item) {
@@ -374,6 +374,11 @@ struct ItemListView: View {
             Button("Open in New Window") { openWindow.item(item, asTab: false) }
             Button("Open in New Tab") { openWindow.item(item, asTab: true) }
             Divider()
+            #else
+            if UIApplication.shared.supportsMultipleScenes {
+                Button("Open in New Window") { openWindow.item(item) }
+                Divider()
+            }
             #endif
             ListMenus(items: [item])
             BatchMenus(items: [item])

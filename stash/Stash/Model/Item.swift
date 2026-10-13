@@ -138,6 +138,11 @@ final class Item {
     var readLaterAt: Date?
     /// How far through it you've read, 0 to 1.
     var readingProgress: Double = 0
+    /// A calendar event it's about: the event's identifier on the device
+    /// that linked it, and its title and start, kept for other devices.
+    var calendarEventID: String = ""
+    var calendarEventTitle: String = ""
+    var calendarEventStart: Date?
     @Relationship(inverse: \Tag.items) var tags: [Tag]? = []
     /// The lists it's been put in, besides its category.
     @Relationship(inverse: \ItemList.items) var lists: [ItemList]? = []

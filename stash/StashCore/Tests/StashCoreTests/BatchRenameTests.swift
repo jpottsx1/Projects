@@ -44,3 +44,11 @@ final class BatchRenameTests: XCTestCase {
         XCTAssertEqual(MarkdownStyling.plainLines(markdown), "Plan\n\n- Buy milk\n- Call Sam\n\nThe end.")
     }
 }
+
+final class EventsPlaceholderTests: XCTestCase {
+    func testEventsFillIn() {
+        var values = NoteTemplate.Values()
+        values.events = "- 09:00–09:30 Standup"
+        XCTAssertEqual(NoteTemplate.fill("## Today\n\n{{events}}", with: values), "## Today\n\n- 09:00–09:30 Standup")
+    }
+}

@@ -20,7 +20,7 @@ struct TemplateBanner: View {
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
-                .help("Also {{weekday}}, {{yesterday}}, {{tomorrow}}, and {{date:EEEE d MMMM}} in any date format.")
+                .help("Also {{weekday}}, {{yesterday}}, {{tomorrow}}, {{events}} (the day’s calendar), and {{date:EEEE d MMMM}} in any date format.")
             #endif
             Spacer()
             Toggle("Daily Note", isOn: Binding(get: { isDaily }, set: { library.dailyTemplate = $0 ? item : nil }))

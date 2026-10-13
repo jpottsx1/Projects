@@ -82,6 +82,7 @@ struct ItemInspector: View {
 
             FieldsSection(item: item)
             ListsAndReadingSection(item: item)
+            CalendarSection(item: item)
             if !item.isLocked { AssistantSection(item: item) }
 
             Section("Reminder") {

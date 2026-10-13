@@ -758,5 +758,25 @@ final class StashUITests: XCTestCase {
         XCTAssertLessThan(openedIn, 30, "Opening a 10,000-item library took \(openedIn) s")
         big.terminate()
     }
+    // MARK: - Libraries
+
+    func testLibrariesKeepTheirOwnItems() {
+        newNote(title: "Home note", text: "in the main library")
+        menuItem("Library", "Manage Libraries…").click()
+        let name = app.textFields["newLibraryName"]
+        XCTAssertTrue(name.waitForExistence(timeout: 5))
+        name.click()
+        name.typeText("Work\r")
+        // The new library is open, and empty.
+        XCTAssertTrue(app.outlines.staticTexts["All Items"].waitForExistence(timeout: 10))
+        XCTAssertFalse(listRow("Home note").waitForExistence(timeout: 2))
+        newNote(title: "Work note", text: "in the work library")
+        // Back to the main one: its note, not the other's.
+        app.typeKey("1", modifierFlags: [.command, .control])
+        XCTAssertTrue(listRow("Home note").waitForExistence(timeout: 10))
+        XCTAssertFalse(listRow("Work note").exists)
+        app.typeKey("2", modifierFlags: [.command, .control])
+        XCTAssertTrue(listRow("Work note").waitForExistence(timeout: 10))
+    }
     #endif
 }

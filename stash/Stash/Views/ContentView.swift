@@ -187,6 +187,9 @@ struct AddMenu: View {
             Button { library.isRecording = true } label: {
                 Label("New Voice Note", systemImage: "mic")
             }
+            Button { library.eventPicking = .newNote } label: {
+                Label("Note for Event…", systemImage: "calendar.badge.plus")
+            }
             Menu {
                 TemplateMenuItems(library: library, templates: library.templates())
             } label: {
@@ -351,6 +354,12 @@ private struct LibrarySheets: ViewModifier {
             PasswordSheet(request: request)
         }
         .modifier(NewListPrompt())
+        .sheet(isPresented: $library.isManagingLibraries) {
+            LibrariesView()
+        }
+        .sheet(item: $library.eventPicking) { purpose in
+            EventPickerView(purpose: purpose)
+        }
         .sheet(item: Binding(get: { library.renamingItems.map(ItemGroup.init) },
                              set: { library.renamingItems = $0?.items })) { group in
             BatchRenameView(items: group.items)

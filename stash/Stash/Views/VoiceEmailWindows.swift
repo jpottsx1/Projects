@@ -374,25 +374,6 @@ extension FocusedValues {
     }
 }
 
-/// An item in a window of its own.
-struct ItemWindow: View {
-    @Environment(Library.self) private var library
-    let id: UUID?
-
-    var body: some View {
-        if let id, let item = library.items(withIDs: [id]).first, library.isAlive(item) {
-            NavigationStack {
-                ItemDetailView(item: item)
-            }
-            .navigationTitle(item.displayTitle)
-            .focusedSceneValue(\.windowItem, item)
-            .background(WindowTabber())
-        } else {
-            ContentUnavailableView("Item Not Found", systemImage: "questionmark.square.dashed",
-                                   description: Text("It may have been deleted."))
-        }
-    }
-}
 
 /// Puts a window opened with *Open in New Tab* in as a tab of the window
 /// it was opened from.
@@ -421,6 +402,38 @@ extension OpenWindowAction {
     @MainActor
     func item(_ item: Item, asTab: Bool) {
         WindowTabber.tabTarget = asTab ? NSApp.keyWindow : nil
+        self(id: "item", value: item.uuid)
+    }
+}
+#endif
+
+/// An item in a window of its own: on a Mac, or beside another on an iPad.
+struct ItemWindow: View {
+    @Environment(Library.self) private var library
+    let id: UUID?
+
+    var body: some View {
+        if let id, let item = library.items(withIDs: [id]).first, library.isAlive(item) {
+            NavigationStack {
+                ItemDetailView(item: item)
+            }
+            .navigationTitle(item.displayTitle)
+            #if os(macOS)
+            .focusedSceneValue(\.windowItem, item)
+            .background(WindowTabber())
+            #endif
+        } else {
+            ContentUnavailableView("Item Not Found", systemImage: "questionmark.square.dashed",
+                                   description: Text("It may have been deleted."))
+        }
+    }
+}
+
+#if os(iOS)
+extension OpenWindowAction {
+    /// Opens an item in a window of its own, beside the others.
+    @MainActor
+    func item(_ item: Item) {
         self(id: "item", value: item.uuid)
     }
 }

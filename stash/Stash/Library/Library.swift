@@ -62,7 +62,14 @@ final class Library {
     let context: ModelContext
     let files: FileStore
     let index: SearchIndex?
-    @ObservationIgnored private let spotlight = SpotlightIndex()
+    @ObservationIgnored private let spotlight: SpotlightIndex
+    /// The library that syncs, and the only one in Spotlight, notifications,
+    /// widgets and the share inbox, which can't tell libraries apart.
+    let isMain: Bool
+    /// Where its files, search index and so on are kept.
+    let supportFolder: URL
+    /// Reminders' notifications, for the main library only.
+    private var reminders: Reminders? { isMain ? Reminders.shared : nil }
 
     var sidebar: SidebarSelection? = .all {
         didSet { if sidebar != oldValue { compileSmartFilter() } }
@@ -203,12 +210,20 @@ final class Library {
     static let sharingEnabled = false
     #endif
     /// Where the share extension leaves things; nil when sharing is off.
-    private let inbox: SharedInbox? = Library.sharingEnabled ? SharedInbox.forAppGroup() : nil
+    private let inbox: SharedInbox?
 
-    init(context: ModelContext) {
+    /// The folder the main library's files are kept in.
+    nonisolated static var mainSupportFolder: URL {
+        URL.applicationSupportDirectory.appendingPathComponent(StashStore.isTestLibrary ? "StashTest" : "Stash", isDirectory: true)
+    }
+
+    init(context: ModelContext, support: URL = Library.mainSupportFolder, isMain: Bool = true) {
         self.context = context
-        let support = URL.applicationSupportDirectory
-            .appendingPathComponent(StashStore.isTestLibrary ? "StashTest" : "Stash", isDirectory: true)
+        self.isMain = isMain
+        supportFolder = support
+        spotlight = SpotlightIndex(enabled: isMain)
+        inbox = isMain && Library.sharingEnabled ? SharedInbox.forAppGroup() : nil
+        widgetFolder = isMain && !StashStore.isTestLibrary ? WidgetSnapshot.folder() : nil
         files = FileStore(root: support.appendingPathComponent("Files", isDirectory: true))
         index = SearchIndex(url: support.appendingPathComponent("SearchIndex.sqlite"))
         refreshAfterStoreChange()
@@ -228,7 +243,7 @@ final class Library {
             }
         }
 
-        guard SyncMonitor.isEnabled else { return }
+        guard SyncMonitor.isEnabled, isMain else { return }
         // Posted when changes arrive in the store from outside this
         // context -- in practice, from iCloud. The views update on their
         // own; the search index, merged tags and files need a hand.
@@ -237,6 +252,20 @@ final class Library {
         ) { [weak self] _ in
             MainActor.assumeIsolated { self?.scheduleRefresh() }
         }
+    }
+
+    /// Stops what's running for this library, when another is opened in its place.
+    func close() {
+        feedTimer?.cancel()
+        feedTimer = nil
+        folderWatchers = [:]
+        for url in indexedFolderURLs.values { url.stopAccessingSecurityScopedResource() }
+        indexedFolderURLs = [:]
+        relockAll()
+        for observer in [storeObserver, shareObserver].compactMap({ $0 }) {
+            NotificationCenter.default.removeObserver(observer)
+        }
+        save()
     }
 
     // MARK: - Adding
@@ -460,6 +489,9 @@ final class Library {
     var newListItems: [Item]?
     /// Items being renamed together.
     var renamingItems: [Item]?
+    var isManagingLibraries = false
+    /// Choosing a calendar event, and what for.
+    var eventPicking: EventPicking?
 
     /// Items that link or are linked to, and the links between them (as
     /// pairs of indices): hand-made links and `[[links]]` in notes.
@@ -1015,11 +1047,11 @@ final class Library {
     func setReminder(_ items: [Item], at date: Date?) {
         for item in items {
             item.remindAt = date
-            Reminders.shared.schedule(item)
+            reminders?.schedule(item)
         }
         save()
         runSearch()
-        if date != nil { Task { await Reminders.shared.requestPermission() } }
+        if date != nil, let reminders { Task { await reminders.requestPermission() } }
     }
 
     func setLabel(_ items: [Item], _ label: ItemLabel) {
@@ -1212,7 +1244,7 @@ final class Library {
             item.trashedAt = .now
             spotlight.update(item)
         }
-        Reminders.shared.cancel(items)
+        reminders?.cancel(items)
         save()
         revision += 1
         runSearch()
@@ -1223,7 +1255,7 @@ final class Library {
         for item in items {
             item.trashedAt = nil
             spotlight.update(item)
-            Reminders.shared.schedule(item)
+            reminders?.schedule(item)
         }
         save()
         revision += 1
@@ -1241,7 +1273,7 @@ final class Library {
             context.delete(item)
         }
         spotlight.remove(items.map(\.uuid))
-        Reminders.shared.cancel(items)
+        reminders?.cancel(items)
         save()
         revision += 1
         runSearch()
@@ -1672,7 +1704,7 @@ final class Library {
             for id in changes.changed { if let item = byID[id] { spotlight.update(item) } }
             spotlight.remove(changes.removed)
         }
-        Reminders.shared.replaceAll(with: items)
+        reminders?.replaceAll(with: items)
         files.removeFolders(notBelongingTo: Set(items.map(\.uuid)))
         // Documents added before duplicates were looked for, or whose
         // hash hasn't arrived from iCloud yet.
@@ -1852,7 +1884,7 @@ final class Library {
 
     @ObservationIgnored private var pendingWidgetUpdate: Task<Void, Never>?
     /// Where the widgets read from; nil without an App Group.
-    @ObservationIgnored private let widgetFolder = StashStore.isTestLibrary ? nil : WidgetSnapshot.folder()
+    @ObservationIgnored private let widgetFolder: URL?
 
     /// Saves come in bursts while typing; the widgets are told once it settles.
     private func scheduleWidgetUpdate() {

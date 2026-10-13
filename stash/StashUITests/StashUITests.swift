@@ -778,5 +778,11 @@ final class StashUITests: XCTestCase {
         app.typeKey("2", modifierFlags: [.command, .control])
         XCTAssertTrue(listRow("Work note").waitForExistence(timeout: 10))
     }
+    func testStatisticsOpen() {
+        newNote(title: "Counted", text: "one two three")
+        menuItem("Item", "Statistics").click()
+        XCTAssertTrue(app.windows["Statistics"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.windows["Statistics"].descendants(matching: .any)["monthlyChart"].waitForExistence(timeout: 10))
+    }
     #endif
 }

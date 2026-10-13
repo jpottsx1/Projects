@@ -131,6 +131,7 @@ struct SidebarView: View {
                     DailyEventsToggle()
                     Button("New Voice Note") { library.isRecording = true }
                     Button("Ask Your Library…") { library.isAskingLibrary = true }
+                    Button("Statistics") { library.isShowingStatistics = true }
                     Button("Link Graph") { library.isShowingGraph = true }
                     Button("Smart Rules…") { library.isEditingRules = true }
                     Divider()

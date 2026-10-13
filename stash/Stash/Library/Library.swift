@@ -485,6 +485,7 @@ final class Library {
 
     var isShowingGraph = false
     var isAskingLibrary = false
+    var isShowingStatistics = false
     /// Items waiting for a new list to be named, from a menu.
     var newListItems: [Item]?
     /// Items being renamed together.

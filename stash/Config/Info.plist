@@ -79,6 +79,16 @@
 			</array>
 		</dict>
 	</array>
+	<!-- Mac: AppleScript, with the dictionary in Stash.sdef. -->
+	<key>NSAppleScriptEnabled</key>
+	<true/>
+	<key>OSAScriptingDefinition</key>
+	<string>Stash.sdef</string>
+	<!-- Handoff of the item being looked at (Handoff.swift). -->
+	<key>NSUserActivityTypes</key>
+	<array>
+		<string>com.jpottsx1.stash.item</string>
+	</array>
 	<key>BGTaskSchedulerPermittedIdentifiers</key>
 	<array>
 		<string>com.jpottsx1.stash.feeds</string>

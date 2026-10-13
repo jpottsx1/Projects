@@ -211,6 +211,14 @@ struct StashApp: App {
         .modelContainer(container)
         .defaultSize(width: 860, height: 680)
 
+        Window("Statistics", id: "stats") {
+            StatisticsView(showsDone: false)
+                .environment(library)
+                .modelContainer(container)
+                .id(store.current.id)
+        }
+        .defaultSize(width: 640, height: 720)
+
         Window("Ask Your Library", id: "ask") {
             AskLibraryView(showsDone: false)
                 .environment(library)
@@ -378,6 +386,7 @@ struct StashCommands: Commands {
             Button("Indexed Folders…") { library.isManagingIndexedFolders = true }
             Button("Ask Your Library…") { library.isAskingLibrary = true }
                 .keyboardShortcut("a", modifiers: [.command, .option])
+            Button("Statistics") { library.isShowingStatistics = true }
             Button("Link Graph") { library.isShowingGraph = true }
                 .keyboardShortcut("g", modifiers: [.command, .option])
             Button("Smart Rules…") { library.isEditingRules = true }

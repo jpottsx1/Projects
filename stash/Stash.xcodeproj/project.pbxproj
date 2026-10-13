@@ -12,6 +12,10 @@
 		5A7A00000000000000000103 /* StashCore in Frameworks */ = {isa = PBXBuildFile; productRef = 5A7A00000000000000000602 /* StashCore */; };
 		5A7A00000000000000000104 /* StashWidgets.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 5A7A00000000000000000203 /* StashWidgets.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		5A7A00000000000000000105 /* StashCore in Frameworks */ = {isa = PBXBuildFile; productRef = 5A7A00000000000000000603 /* StashCore */; };
+		5A7A00000000000000000106 /* StashSafari.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 5A7A00000000000000000205 /* StashSafari.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		5A7A00000000000000000107 /* StashCore in Frameworks */ = {isa = PBXBuildFile; productRef = 5A7A00000000000000000604 /* StashCore */; };
+		5A7A00000000000000000108 /* StashFinder.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 5A7A00000000000000000206 /* StashFinder.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		5A7A00000000000000000109 /* StashCore in Frameworks */ = {isa = PBXBuildFile; productRef = 5A7A00000000000000000605 /* StashCore */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -36,6 +40,20 @@
 			remoteGlobalIDString = 5A7A00000000000000000501;
 			remoteInfo = Stash;
 		};
+		5A7A00000000000000000A05 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 5A7A00000000000000000000 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 5A7A00000000000000000505;
+			remoteInfo = StashSafari;
+		};
+		5A7A00000000000000000A06 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 5A7A00000000000000000000 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 5A7A00000000000000000506;
+			remoteInfo = StashFinder;
+		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -47,6 +65,8 @@
 			files = (
 				5A7A00000000000000000102 /* StashShare.appex in Embed Foundation Extensions */,
 				5A7A00000000000000000104 /* StashWidgets.appex in Embed Foundation Extensions */,
+				5A7A00000000000000000108 /* StashFinder.appex in Embed Foundation Extensions */,
+				5A7A00000000000000000106 /* StashSafari.appex in Embed Foundation Extensions */,
 			);
 			name = "Embed Foundation Extensions";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -58,6 +78,8 @@
 		5A7A00000000000000000202 /* StashShare.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = StashShare.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		5A7A00000000000000000203 /* StashWidgets.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = StashWidgets.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		5A7A00000000000000000204 /* StashUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = StashUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		5A7A00000000000000000205 /* StashSafari.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = StashSafari.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		5A7A00000000000000000206 /* StashFinder.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = StashFinder.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		5A7A00000000000000000211 /* Stash.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Stash.xcconfig; sourceTree = "<group>"; };
 		5A7A00000000000000000212 /* App-iOS-Sync.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "App-iOS-Sync.entitlements"; sourceTree = "<group>"; };
 		5A7A00000000000000000213 /* App-macOS-Sync.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "App-macOS-Sync.entitlements"; sourceTree = "<group>"; };
@@ -71,6 +93,10 @@
 		5A7A0000000000000000021B /* ShareExtension-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "ShareExtension-Info.plist"; sourceTree = "<group>"; };
 		5A7A0000000000000000021C /* Widgets.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Widgets.xcconfig; sourceTree = "<group>"; };
 		5A7A0000000000000000021D /* Widgets-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "Widgets-Info.plist"; sourceTree = "<group>"; };
+		5A7A0000000000000000021E /* SafariExtension.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = SafariExtension.xcconfig; sourceTree = "<group>"; };
+		5A7A0000000000000000021F /* SafariExtension-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "SafariExtension-Info.plist"; sourceTree = "<group>"; };
+		5A7A00000000000000000220 /* FinderExtension.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = FinderExtension.xcconfig; sourceTree = "<group>"; };
+		5A7A00000000000000000221 /* FinderExtension-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "FinderExtension-Info.plist"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -92,6 +118,16 @@
 		5A7A00000000000000000304 /* StashUITests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = StashUITests;
+			sourceTree = "<group>";
+		};
+		5A7A00000000000000000305 /* SafariExtension */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = SafariExtension;
+			sourceTree = "<group>";
+		};
+		5A7A00000000000000000306 /* FinderExtension */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = FinderExtension;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -128,6 +164,22 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		5A7A00000000000000000442 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				5A7A00000000000000000107 /* StashCore in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		5A7A00000000000000000452 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				5A7A00000000000000000109 /* StashCore in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -138,6 +190,7 @@
 				5A7A00000000000000000302 /* ShareExtension */,
 				5A7A00000000000000000303 /* Widgets */,
 				5A7A00000000000000000304 /* StashUITests */,
+				5A7A00000000000000000305 /* SafariExtension */,
 				5A7A00000000000000000003 /* Config */,
 				5A7A00000000000000000002 /* Products */,
 			);
@@ -150,6 +203,8 @@
 				5A7A00000000000000000202 /* StashShare.appex */,
 				5A7A00000000000000000203 /* StashWidgets.appex */,
 				5A7A00000000000000000204 /* StashUITests.xctest */,
+				5A7A00000000000000000206 /* StashFinder.appex */,
+				5A7A00000000000000000205 /* StashSafari.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -170,6 +225,10 @@
 				5A7A00000000000000000219 /* ShareExtension.entitlements */,
 				5A7A0000000000000000021C /* Widgets.xcconfig */,
 				5A7A0000000000000000021D /* Widgets-Info.plist */,
+				5A7A00000000000000000220 /* FinderExtension.xcconfig */,
+				5A7A00000000000000000221 /* FinderExtension-Info.plist */,
+				5A7A0000000000000000021E /* SafariExtension.xcconfig */,
+				5A7A0000000000000000021F /* SafariExtension-Info.plist */,
 			);
 			path = Config;
 			sourceTree = "<group>";
@@ -191,6 +250,8 @@
 			dependencies = (
 				5A7A00000000000000000B01 /* PBXTargetDependency */,
 				5A7A00000000000000000B02 /* PBXTargetDependency */,
+				5A7A00000000000000000B06 /* PBXTargetDependency */,
+				5A7A00000000000000000B05 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				5A7A00000000000000000301 /* Stash */,
@@ -270,6 +331,52 @@
 			productReference = 5A7A00000000000000000204 /* StashUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
 		};
+		5A7A00000000000000000505 /* StashSafari */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 5A7A00000000000000000806 /* Build configuration list for PBXNativeTarget "StashSafari" */;
+			buildPhases = (
+				5A7A00000000000000000441 /* Sources */,
+				5A7A00000000000000000442 /* Frameworks */,
+				5A7A00000000000000000443 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				5A7A00000000000000000305 /* SafariExtension */,
+			);
+			name = StashSafari;
+			packageProductDependencies = (
+				5A7A00000000000000000604 /* StashCore */,
+			);
+			productName = StashSafari;
+			productReference = 5A7A00000000000000000205 /* StashSafari.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+		5A7A00000000000000000506 /* StashFinder */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 5A7A00000000000000000807 /* Build configuration list for PBXNativeTarget "StashFinder" */;
+			buildPhases = (
+				5A7A00000000000000000451 /* Sources */,
+				5A7A00000000000000000452 /* Frameworks */,
+				5A7A00000000000000000453 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				5A7A00000000000000000306 /* FinderExtension */,
+			);
+			name = StashFinder;
+			packageProductDependencies = (
+				5A7A00000000000000000605 /* StashCore */,
+			);
+			productName = StashFinder;
+			productReference = 5A7A00000000000000000206 /* StashFinder.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -292,6 +399,9 @@
 					5A7A00000000000000000504 = {
 						CreatedOnToolsVersion = 16.0;
 						TestTargetID = 5A7A00000000000000000501;
+					};
+					5A7A00000000000000000505 = {
+						CreatedOnToolsVersion = 16.0;
 					};
 				};
 			};
@@ -316,6 +426,8 @@
 				5A7A00000000000000000502 /* StashShare */,
 				5A7A00000000000000000503 /* StashWidgets */,
 				5A7A00000000000000000504 /* StashUITests */,
+				5A7A00000000000000000505 /* StashSafari */,
+				5A7A00000000000000000506 /* StashFinder */,
 			);
 		};
 /* End PBXProject section */
@@ -343,6 +455,20 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		5A7A00000000000000000433 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		5A7A00000000000000000443 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		5A7A00000000000000000453 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -380,6 +506,20 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		5A7A00000000000000000441 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		5A7A00000000000000000451 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -397,6 +537,16 @@
 			isa = PBXTargetDependency;
 			target = 5A7A00000000000000000501 /* Stash */;
 			targetProxy = 5A7A00000000000000000A03 /* PBXContainerItemProxy */;
+		};
+		5A7A00000000000000000B05 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 5A7A00000000000000000505 /* StashSafari */;
+			targetProxy = 5A7A00000000000000000A05 /* PBXContainerItemProxy */;
+		};
+		5A7A00000000000000000B06 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 5A7A00000000000000000506 /* StashFinder */;
+			targetProxy = 5A7A00000000000000000A06 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -773,6 +923,158 @@
 			};
 			name = Release;
 		};
+		5A7A0000000000000000090B /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 5A7A0000000000000000021E /* SafariExtension.xcconfig */;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_USER_SELECTED_FILES = readonly;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "Config/SafariExtension-Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = Stash;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.5;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = (
+					"@executable_path/../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 0.1;
+				PRODUCT_BUNDLE_IDENTIFIER = com.jpottsx1.stash.safari;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = auto;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		5A7A0000000000000000090C /* Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 5A7A0000000000000000021E /* SafariExtension.xcconfig */;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_USER_SELECTED_FILES = readonly;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "Config/SafariExtension-Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = Stash;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.5;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = (
+					"@executable_path/../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 0.1;
+				PRODUCT_BUNDLE_IDENTIFIER = com.jpottsx1.stash.safari;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = auto;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		5A7A0000000000000000090D /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 5A7A00000000000000000220 /* FinderExtension.xcconfig */;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_USER_SELECTED_FILES = readonly;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "Config/FinderExtension-Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = Stash;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.5;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = (
+					"@executable_path/../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 0.1;
+				PRODUCT_BUNDLE_IDENTIFIER = com.jpottsx1.stash.finder;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = auto;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		5A7A0000000000000000090E /* Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 5A7A00000000000000000220 /* FinderExtension.xcconfig */;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_USER_SELECTED_FILES = readonly;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "Config/FinderExtension-Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = Stash;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.5;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = (
+					"@executable_path/../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 0.1;
+				PRODUCT_BUNDLE_IDENTIFIER = com.jpottsx1.stash.finder;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = auto;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -821,6 +1123,24 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
+		5A7A00000000000000000806 /* Build configuration list for PBXNativeTarget "StashSafari" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				5A7A0000000000000000090B /* Debug */,
+				5A7A0000000000000000090C /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		5A7A00000000000000000807 /* Build configuration list for PBXNativeTarget "StashFinder" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				5A7A0000000000000000090D /* Debug */,
+				5A7A0000000000000000090E /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
@@ -840,6 +1160,14 @@
 			productName = StashCore;
 		};
 		5A7A00000000000000000603 /* StashCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = StashCore;
+		};
+		5A7A00000000000000000604 /* StashCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = StashCore;
+		};
+		5A7A00000000000000000605 /* StashCore */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = StashCore;
 		};

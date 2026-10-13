@@ -70,6 +70,23 @@ doesn't say, so try it and see.
    `SHARE_EXTENSION = YES`.
 3. Run Stash once on each device.
 
+The share sheet's category field finds a category as you type, or makes a
+new one (`Work › Clients` makes both). The same switch turns on two more
+things that need the App Group:
+
+- **Save to Stash in Safari** (the StashSafari target): a toolbar button
+  that saves the page you're on as a link, in the Inbox. Turn it on in
+  Safari's *Settings › Extensions*.
+- **Stash in the Finder** (the StashFinder target): Stash appears under
+  *Locations* in the Finder's sidebar, in Open and Save dialogs, and in
+  the Files app, with a folder for each category and a file for each item
+  (documents as themselves, notes as Markdown, links as `.webloc`).
+  Renaming, moving, deleting, making folders, saving new files there and
+  editing files there all change the library. Locked, trashed and
+  indexed-folder items aren't shown.
+
+Choose your team for the **StashSafari** and **StashFinder** targets too.
+
 On a Mac, if Stash doesn't appear in a share menu, turn it on in
 *System Settings › General › Login Items & Extensions › Sharing*. On an
 iPhone, it may be under *More* at the end of the row of apps in the share
@@ -139,6 +156,7 @@ Capabilities* for each target, find App Groups, and tick
 | **Sorting** | By date modified, date created, title or kind, either way round, with *Favorites First* if you like. Search results always come best match first. Categories can be given a colour and moved up and down by hand (right-click), smart filters dragged into order, and items, categories and smart filters duplicated. |
 | **See Also** | The side panel lists items most like the one you're looking at, from the words they share, and suggests a category for an uncategorized item from where those are. |
 | **Duplicates** | Pages saved twice (however their addresses are written) and files imported twice are listed under *Duplicates* in the sidebar, and in each copy's side panel. |
+| **Mind maps** | *New Mind Map* (the + menu, or *File*) makes a note drawn as a map: the centre on the left, branches to the right. Tab adds a branch, Return a node beside, Delete removes one, double-click renames, and dragging a node onto another moves its branch there. A node can link to an item (`[[Title]]`). It's kept as a nested list, so *Outline* edits it as text, and search, sync and other apps read it as one. *Export* copies the outline or saves a picture of the map into Stash. |
 | **Export and backup** | Export an item, a category or everything (*File › Export*, or the sidebar's backup menu) as a ZIP file: a folder per category, notes and links as Markdown, documents as they were, saved pages as web archives, readable without Stash. *Restore from Backup* adds back anything in an export that isn't already in the library, with its categories, tags, links, highlights and smart filters. |
 | **Shortcuts and Spotlight** | In Shortcuts and Siri: Add Note, Save Link, Find Items, Open Item, Open Today's Note, Add to Today's Note, Record Voice Note, Read Later, Get Read Later Queue, Add to List, Get Items in List, Set Field, Get Field, Subscribe to Feed, Check Feeds and Ask Your Library (which answers aloud in Siri). Items appear in the system's Spotlight search, and open in Stash. |
 | **Board** | The fourth view beside list, grid and columns: items as cards in columns, by label, by top-level category or by one of your choice fields. Drag a card to another column to give it that label, category or value. |
@@ -164,6 +182,8 @@ Stash/                  the app (SwiftUI + SwiftData), shared by Mac and iPhone
   Intents/              Shortcuts actions (App Intents)
   Views/
 ShareExtension/         "Save to Stash" in share menus (StashShare target)
+SafariExtension/        Safari's Save to Stash button (StashSafari target)
+FinderExtension/        Stash in the Finder and Files (StashFinder target)
 Widgets/                Home Screen and desktop widgets (StashWidgets target)
 StashCore/              no-interface logic, with tests
                         [[link]] parsing, search syntax, Markdown blocks,
@@ -211,7 +231,17 @@ StashCore/              no-interface logic, with tests
   Group (`SharedInbox` in StashCore), and the app takes it in at launch,
   when it comes to the front, or as soon as the extension signals. The
   app writes its category list into the same folder for the share sheet
-  to offer.
+  to offer. The Safari extension leaves links in the same inbox.
+- **The Finder** works the same way round (`FinderShare` in StashCore):
+  the app publishes a snapshot of folders and files into the App Group,
+  with each file's contents beside it (documents hard-linked where they
+  can be), and the File Provider extension serves those. What's done in
+  the Finder comes back as requests the app carries out, after which it
+  publishes again. The extension never opens the library.
+- **Backups** keep everything that syncs: category colours and order,
+  smart filter order, custom highlight colours, linked calendar events,
+  text read from pictures, and mind maps. Lists, fields and feeds made
+  twice on two devices are merged as tags and categories are.
 - **Feeds** are read by `FeedParser` (StashCore). Each feed remembers the
   posts it has seen (`Feed.seenIDs`), so deleting a post doesn't bring it
   back, and a post already in the library isn't added twice.

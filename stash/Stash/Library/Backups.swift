@@ -83,10 +83,16 @@ extension Library {
 
         var manifest = BackupManifest(
             exportedAt: .now,
-            categories: categories.map { .init(id: $0.uuid, name: $0.name, parent: $0.parent?.uuid) })
+            categories: categories.map { .init(id: $0.uuid, name: $0.name, parent: $0.parent?.uuid,
+                                               color: $0.colorRaw == 0 ? nil : $0.colorRaw, order: $0.order == 0 ? nil : $0.order) })
         if everything {
             manifest.smartFilters = try context.fetch(FetchDescriptor<SmartFilter>())
-                .map { .init(id: $0.uuid, name: $0.name, query: $0.query, createdAt: $0.createdAt) }
+                .map { filter in
+                    var record = BackupManifest.SmartFilterRecord(id: filter.uuid, name: filter.name, query: filter.query,
+                                                                  createdAt: filter.createdAt)
+                    record.order = filter.order == 0 ? nil : filter.order
+                    return record
+                }
             manifest.lists = try context.fetch(FetchDescriptor<ItemList>()).map {
                 .init(id: $0.uuid, name: $0.name, order: $0.orderedItems.map(\.uuid), createdAt: $0.createdAt)
             }
@@ -128,6 +134,15 @@ extension Library {
             record.readingPosition = item.readingPosition
             record.isTemplate = item.isTemplate ? true : nil
             record.feed = item.feed?.uuid
+            record.isMindMap = item.isMindMap ? true : nil
+            if !item.calendarEventID.isEmpty {
+                record.calendarEventID = item.calendarEventID
+                record.calendarEventTitle = item.calendarEventTitle
+                record.calendarEventStart = item.calendarEventStart
+            }
+            let pictureText = Dictionary((item.attachments ?? []).filter { !$0.recognizedText.isEmpty }
+                .map { ($0.fileName, $0.recognizedText) }, uniquingKeysWith: { first, _ in first })
+            record.pictureText = pictureText.isEmpty ? nil : pictureText
             let listIDs = (item.lists ?? []).map(\.uuid)
             record.lists = listIDs.isEmpty ? nil : listIDs
             record.customFields = item.customFields.isEmpty ? nil : item.customFields
@@ -137,7 +152,7 @@ extension Library {
             record.archivedAt = item.archivedAt
             record.highlights = item.sortedHighlights.map {
                 .init(id: $0.uuid, text: $0.text, note: $0.note, color: $0.colorRaw, anchor: $0.anchorJSON,
-                      position: $0.position, createdAt: $0.createdAt)
+                      position: $0.position, createdAt: $0.createdAt, customColor: $0.customColor.isEmpty ? nil : $0.customColor)
             }
 
             var folder = manifest.folder(for: item.category?.uuid)
@@ -260,6 +275,8 @@ extension Library {
         for record in manifest.categories where categories[record.id] == nil {
             let category = ItemCategory(name: record.name)
             category.uuid = record.id
+            category.colorRaw = record.color ?? 0
+            category.order = record.order ?? 0
             context.insert(category)
             categories[record.id] = category
         }
@@ -274,6 +291,7 @@ extension Library {
         for record in manifest.smartFilters where !existingFilters.contains(record.id) {
             let filter = SmartFilter(name: record.name, query: record.query)
             filter.uuid = record.id
+            filter.order = record.order ?? 0
             filter.createdAt = record.createdAt
             context.insert(filter)
         }
@@ -368,6 +386,10 @@ extension Library {
             context.insert(item)
             item.category = record.category.flatMap { categories[$0] }
             item.feed = record.feed.flatMap { feedsByID[$0] }
+            item.isMindMap = record.isMindMap ?? false
+            item.calendarEventID = record.calendarEventID ?? ""
+            item.calendarEventTitle = record.calendarEventTitle ?? ""
+            item.calendarEventStart = record.calendarEventStart
             item.lists = (record.lists ?? []).compactMap { listsByID[$0] }
             item.customFields = record.customFields ?? ""
             item.readLaterAt = record.readLaterAt
@@ -390,6 +412,7 @@ extension Library {
                 let stored = files.url(for: "\(record.id.uuidString)/Attachments/\(name)")
                 guard let data = try? Data(contentsOf: stored) else { continue }
                 let attachment = NoteAttachment(fileName: name, data: data)
+                attachment.recognizedText = record.pictureText?[name] ?? ""
                 context.insert(attachment)
                 attachment.item = item
             }
@@ -402,6 +425,7 @@ extension Library {
                 highlight.note = highlightRecord.note
                 highlight.createdAt = highlightRecord.createdAt
                 highlight.anchorJSON = highlightRecord.anchor
+                highlight.customColor = highlightRecord.customColor ?? ""
                 context.insert(highlight)
                 highlight.item = item
             }

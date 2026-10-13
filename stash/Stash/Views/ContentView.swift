@@ -73,6 +73,7 @@ struct ContentView: View {
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
                 library.importSharedItems()
+                library.processFinderRequests()
                 library.checkFilesEditedElsewhere()
                 Task {
                     await library.rescanIndexedFolders()
@@ -201,6 +202,9 @@ struct AddMenu: View {
             }
             Button { library.isRecording = true } label: {
                 Label("New Voice Note", systemImage: "mic")
+            }
+            Button { library.newMindMap() } label: {
+                Label("New Mind Map", systemImage: "point.3.connected.trianglepath.dotted")
             }
             Button { library.eventPicking = .newNote } label: {
                 Label("Note for Event…", systemImage: "calendar.badge.plus")

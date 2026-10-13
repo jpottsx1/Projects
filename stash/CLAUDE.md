@@ -15,11 +15,14 @@ SwiftData, one multiplatform target. Read README.md first.
   stays out of Spotlight, notifications and widgets. The Mac UI tests
   (`StashUITests`, in the Stash scheme) use it; run them before trusting a
   change to the Mac interface.
-- Three targets: **Stash** (the app), **StashShare** (the share
-  extension, folder `ShareExtension/`) and **StashWidgets** (the widgets,
-  folder `Widgets/`), both embedded in the app. The widgets read a snapshot
-  the app writes into the App Group (`WidgetSnapshot`); like the share
-  extension they never open the SwiftData store.
+- Five targets: **Stash** (the app), **StashShare** (the share
+  extension, folder `ShareExtension/`), **StashWidgets** (the widgets,
+  folder `Widgets/`), **StashSafari** (Safari's Save to Stash button,
+  `SafariExtension/`) and **StashFinder** (the File Provider extension,
+  `FinderExtension/`), all embedded in the app. The widgets read a snapshot
+  the app writes into the App Group (`WidgetSnapshot`), the Finder another
+  (`FinderShare`); like the share and Safari extensions they never open
+  the SwiftData store.
 - `StashCore/` is a local Swift package with no UI and no Apple-only
   frameworks. Logic that can live there should, because it's the only part
   that can be tested without building the app. `swift test --package-path StashCore`.

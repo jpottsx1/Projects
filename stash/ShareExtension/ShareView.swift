@@ -62,12 +62,35 @@ struct ShareView: View {
                     #if os(iOS)
                     .textInputAutocapitalization(.never)
                     #endif
-                if !model.categories.isEmpty {
-                    Picker("Category", selection: $model.categoryID) {
-                        Text("None").tag(UUID?.none)
-                        ForEach(model.categories) { category in
-                            Text(category.path).tag(Optional(category.id))
+                if let chosen = model.chosenCategory {
+                    HStack {
+                        Label(chosen, systemImage: "folder")
+                        Spacer()
+                        Button {
+                            model.categoryID = nil
+                            model.newCategory = nil
+                        } label: {
+                            Label("No Category", systemImage: "xmark.circle.fill")
                         }
+                        .labelStyle(.iconOnly)
+                        .buttonStyle(.borderless)
+                    }
+                }
+                TextField("Find or make a category", text: $model.categorySearch)
+                    .autocorrectionDisabled()
+                ForEach(model.matchingCategories) { category in
+                    Button(category.path) {
+                        model.categoryID = category.id
+                        model.newCategory = nil
+                        model.categorySearch = ""
+                    }
+                }
+                let typed = model.categorySearch.trimmingCharacters(in: .whitespaces)
+                if !typed.isEmpty, !model.categories.contains(where: { $0.path.caseInsensitiveCompare(typed) == .orderedSame }) {
+                    Button("Make “\(typed)”") {
+                        model.newCategory = typed
+                        model.categoryID = nil
+                        model.categorySearch = ""
                     }
                 }
             }

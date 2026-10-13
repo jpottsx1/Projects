@@ -37,11 +37,17 @@ public struct BackupManifest: Codable, Equatable {
         public var id: UUID
         public var name: String
         public var parent: UUID?
+        /// Its folder's colour and its place among its siblings; nil in
+        /// exports made before they could be set.
+        public var color: Int?
+        public var order: Int?
 
-        public init(id: UUID, name: String, parent: UUID?) {
+        public init(id: UUID, name: String, parent: UUID?, color: Int? = nil, order: Int? = nil) {
             self.id = id
             self.name = name
             self.parent = parent
+            self.color = color
+            self.order = order
         }
     }
 
@@ -50,6 +56,8 @@ public struct BackupManifest: Codable, Equatable {
         public var name: String
         public var query: String
         public var createdAt: Date
+        /// Its place in the sidebar; nil in exports made before it could be set.
+        public var order: Int?
 
         public init(id: UUID, name: String, query: String, createdAt: Date) {
             self.id = id
@@ -165,9 +173,12 @@ public struct BackupManifest: Codable, Equatable {
         public var anchor: String
         public var position: Double
         public var createdAt: Date
+        /// A colour of its own, #RRGGBB; nil for one of the usual ones.
+        public var customColor: String?
 
         public init(id: UUID, text: String, note: String, color: String, anchor: String,
-                    position: Double, createdAt: Date) {
+                    position: Double, createdAt: Date, customColor: String? = nil) {
+            self.customColor = customColor
             self.id = id
             self.text = text
             self.note = note
@@ -217,6 +228,15 @@ public struct BackupManifest: Codable, Equatable {
         /// it's encrypted with. Its files in the export are encrypted too.
         public var sealed: Data?
         public var sealedVault: UUID?
+        /// The calendar event it's linked to (its title and start; the
+        /// identifier only works on the device that linked it).
+        public var calendarEventID: String?
+        public var calendarEventTitle: String?
+        public var calendarEventStart: Date?
+        /// Whether a note is shown as a mind map.
+        public var isMindMap: Bool?
+        /// Words read from its pictures, by picture name, so they needn't be read again.
+        public var pictureText: [String: String]?
         /// The lists it's in, its own fields' values (`CustomField.encode`),
         /// and the reading queue.
         public var lists: [UUID]?

@@ -102,6 +102,22 @@ struct ContentView: View {
         defaultDirectory.appendingPathComponent("library.db")
     }
 
+    /// Folders smaller than this stay out of the reference list. The list
+    /// is every folder ever measured, and most of those are a handful of
+    /// tracks swept in by a run -- a genre folder holding one House track
+    /// is not a target anything should be sized against.
+    private static let minimumReferenceTracks = 20
+
+    /// The measured folders offered as a reference: the ones big enough to
+    /// be one, plus whichever is chosen now, so a small folder already in
+    /// use is never silently swapped for "Other…".
+    private var referenceChoices: [String] {
+        let chosen = profile.reference ?? ""
+        return (engine.survey?.folders ?? [])
+            .filter { $0.tracks >= Self.minimumReferenceTracks || $0.folder == chosen }
+            .map(\.folder)
+    }
+
     private var format: AudioWriter.Format {
         AudioWriter.Format(rawValue: formatName) ?? .flac
     }
@@ -117,7 +133,7 @@ struct ContentView: View {
                               compare: $compare, dryRun: $dryRun,
                               replaceOriginals: $replaceOriginals,
                               personal: personal,
-                              folders: engine.survey?.folders.map(\.folder) ?? [])
+                              folders: referenceChoices)
                 Divider()
                 runControls
             }

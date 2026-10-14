@@ -116,6 +116,12 @@ struct SettingsView: View {
             Section("Feeds") {
                 FeedIntervalPicker()
             }
+            Section("Links") {
+                AutoLinkToggle()
+                Text("In a note's preview, the first mention of any item's title or alias becomes a link to it, as DEVONthink's automatic wiki links do. The note's text isn't changed.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
         .formStyle(.grouped)
         .frame(width: 420)

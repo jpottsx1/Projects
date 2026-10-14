@@ -153,6 +153,9 @@ final class Item {
     /// the Mac's "Where from" on a download, or the page it was dragged out
     /// of. Image searches use it.
     var sourceAddress: String?
+    /// Other names for it, as typed (see `Aliases`): `[[links]]` to them
+    /// reach it, and search finds it by them.
+    var aliases: String = ""
     @Relationship(inverse: \Tag.items) var tags: [Tag]? = []
     /// The lists it's been put in, besides its category.
     @Relationship(inverse: \ItemList.items) var lists: [ItemList]? = []

@@ -25,6 +25,9 @@ struct DocumentDetail: View {
                     MediaPlayerView(item: item, url: fileURL)
                 } else if let fileURL, item.contentType?.conforms(to: .emailMessage) == true {
                     EmailView(item: item, url: fileURL)
+                } else if let fileURL, Library.isSheet(item) {
+                    SheetView(item: item, url: fileURL)
+                        .id(item.uuid)
                 } else if let fileURL {
                     FileThumbnail(url: fileURL)
                         .padding()

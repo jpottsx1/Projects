@@ -127,6 +127,7 @@ struct SidebarView: View {
                     Button("Today’s Note") { library.openToday() }
                     Button("Note for Event…") { library.eventPicking = .newNote }
                     DailyEventsToggle()
+                    AutoLinkToggle()
                     Button("New Voice Note") { library.isRecording = true }
                     Button("Ask Your Library…") { library.isAskingLibrary = true }
                     Button("Statistics") { library.isShowingStatistics = true }

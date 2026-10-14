@@ -12,6 +12,7 @@ import PhotosUI
 /// boxes ticked; while editing, typing `[[` suggests items to link to, and
 /// the formatting buttons mark up the selected text.
 struct NoteEditor: View {
+    @AppStorage(Library.autoLinkKey) private var autoLinksNames = false
     enum Mode: String {
         /// Formatted as it's typed (`LiveMarkdownEditor`).
         case write
@@ -139,7 +140,8 @@ struct NoteEditor: View {
         ScrollView {
             MarkdownView(text: item.body, onToggleTask: { line in
                 item.body = MarkdownBlocks.toggleTask(onLine: line, in: item.body)
-            }, pictureURL: { library.pictureURL($0, in: item) })
+            }, pictureURL: { library.pictureURL($0, in: item) },
+               autoLinks: autoLinksNames ? library.autoLinkNames(excluding: item) : [])
             .padding()
             .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -522,9 +524,12 @@ struct MarkdownView: View {
     var onToggleTask: (Int) -> Void = { _ in }
     /// Where a picture's source is, for showing it; nil leaves it out.
     var pictureURL: (String) -> URL? = { _ in nil }
+    /// Items' names to link wherever they're mentioned; none to leave the text as it is.
+    var autoLinks: [AutoLink.Name] = []
 
     var body: some View {
-        let blocks = MarkdownBlocks.parse(WikiLinks.markdownLinks(in: text, scheme: Library.linkScheme))
+        let linked = autoLinks.isEmpty ? text : AutoLink.link(text, names: autoLinks, scheme: Library.linkScheme)
+        let blocks = MarkdownBlocks.parse(WikiLinks.markdownLinks(in: linked, scheme: Library.linkScheme))
         VStack(alignment: .leading, spacing: 10) {
             ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
                 view(for: block)

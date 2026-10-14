@@ -251,9 +251,11 @@ struct SettingsPanel: View {
                             .help(Help.reference.summary)
                     }
                     referenceFolders
-                    slider(Help.maxAmount, $profile.maxAmount, 1...12, "dB",
+                    slider(Help.maxAmount, $profile.maxAmount, 1...16, "dB",
                            // disco-70s caps at 8, eighties at 11, both
-                           // just above their measured worst.
+                           // just above their measured worst. Up to 16 for
+                           // a single track run on its own: Strut hit 11
+                           // and still came out light (2026-10-14).
                            sweet: 8...11)
                     slider(Help.subOffset, $profile.subOffset, -6...6, "dB",
                            // Zero is "match the reference". Jeff's first

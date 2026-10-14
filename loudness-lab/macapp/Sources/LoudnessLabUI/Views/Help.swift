@@ -463,6 +463,11 @@ enum Help {
         need 12 dB. The cap bounds what any single track can be given. \
         disco-70s raises it to 8 because the deficit on that material was \
         measured at 6 to 9 dB.
+
+        Past 11 is past what any measured folder needed, which is why the \
+        number turns orange there. It goes to 16 for a single track that \
+        reached the cap and still sounds light -- process that one on its \
+        own, so the rest of the folder keeps the usual cap.
         """)
 
     static let subOffset = HelpEntry(

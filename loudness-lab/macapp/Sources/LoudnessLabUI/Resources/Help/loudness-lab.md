@@ -487,6 +487,8 @@ Each folder is measured the first time a run uses it -- a slower start once, the
 
 A track measured as 12 dB short is more likely to be unusual than to need 12 dB. The cap bounds what any single track can be given. disco-70s raises it to 8 because the deficit on that material was measured at 6 to 9 dB.
 
+Past 11 is past what any measured folder needed, which is why the number turns orange there. It goes to 16 for a single track that reached the cap and still sounds light -- process that one on its own, so the rest of the folder keeps the usual cap.
+
 ### More or less than the reference
 
 *Added to each track's measured shortfall. Zero matches the reference.*

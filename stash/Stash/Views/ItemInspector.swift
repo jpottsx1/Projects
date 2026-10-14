@@ -234,6 +234,12 @@ struct ItemInspector: View {
                         .disabled(library.localFile(for: item) == nil)
                     #endif
                 }
+                // Other names: [[links]] to them reach it, and search finds it by them.
+                TextField("Also Known As", text: Binding(
+                    get: { item.aliases },
+                    set: { library.setAliases($0, of: item) }),
+                    prompt: Text("Aliases, separated by commas"))
+                    .autocorrectionDisabled()
                 if item.kind == .document, !item.isLocked {
                     // Where it came from: image searches use it, and `source:` finds it.
                     TextField("Came From", text: Binding(

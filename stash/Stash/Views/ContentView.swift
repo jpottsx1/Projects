@@ -186,6 +186,7 @@ struct ContentView: View {
         .background { PrintPanels() }
         .background { ImportPanels() }
         .modifier(LibraryAlerts(library: library))
+        .modifier(PDFToolSheets(library: library))
     }
 }
 
@@ -206,6 +207,9 @@ struct AddMenu: View {
             }
             Button { library.newMindMap() } label: {
                 Label("New Mind Map", systemImage: "point.3.connected.trianglepath.dotted")
+            }
+            Button { library.newSheet() } label: {
+                Label("New Sheet", systemImage: "tablecells")
             }
             Button { library.eventPicking = .newNote } label: {
                 Label("Note for Event…", systemImage: "calendar.badge.plus")

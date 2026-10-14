@@ -300,6 +300,7 @@ struct StashCommands: Commands {
             Button("Quick Open…") { library.quickOpen = .open }
                 .keyboardShortcut("o")
             Button("New Mind Map") { library.newMindMap() }
+            Button("New Sheet") { library.newSheet() }
             Button("New Note for Event…") { library.eventPicking = .newNote }
             Menu("New from Template") {
                 // Read on every change of selection, which making a template is.

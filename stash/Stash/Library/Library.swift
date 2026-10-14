@@ -207,6 +207,8 @@ final class Library {
     @ObservationIgnored var ruleTimer: Task<Void, Never>?
     /// Where things dropped on the Sorter go, overriding the sidebar while they're added.
     @ObservationIgnored var arrivalTarget: ArrivalTarget?
+    /// Every item's names, for automatic links, kept until the next save.
+    @ObservationIgnored var autoLinkCache: (version: Int, names: [AutoLink.Name])?
     /// Indexed folders open this session, by the folder's uuid, and what's
     /// watching them for changes.
     @ObservationIgnored var indexedFolderURLs: [UUID: URL] = [:]
@@ -525,6 +527,9 @@ final class Library {
     var isAskingLibrary = false
     var isShowingStatistics = false
     var isShowingConcordance = false
+    /// A PDF being split, and PDFs being imprinted (see PDFToolViews).
+    var splittingPDF: Item?
+    var imprintingItems: [Item]?
     /// Favourites at the top of the list, whatever it's sorted by.
     var favoritesFirst = Library.favoritesFirst {
         didSet { Library.favoritesFirst = favoritesFirst }
@@ -1514,7 +1519,13 @@ final class Library {
         let descriptor = FetchDescriptor<Item>(predicate: #Predicate { $0.title.localizedStandardContains(trimmed) })
         let named = ((try? context.fetch(descriptor)) ?? []).filter { WikiLinks.key($0.title) == key && !$0.isTemplate }
         // One in the Trash is only the answer when there's nothing else.
-        return named.first { !$0.isTrashed } ?? named.first
+        if let found = named.first(where: { !$0.isTrashed }) { return found }
+        // Then one known by that name as an alias.
+        let aliasDescriptor = FetchDescriptor<Item>(predicate: #Predicate { $0.aliases.localizedStandardContains(trimmed) })
+        let aliased = ((try? context.fetch(aliasDescriptor)) ?? []).filter { item in
+            !item.isTemplate && !item.isTrashed && Aliases.split(item.aliases).contains { WikiLinks.key($0) == key }
+        }
+        return aliased.min { $0.uuid.uuidString < $1.uuid.uuidString } ?? named.first
     }
 
     /// Follows a link tapped in a note's preview, making the note if it doesn't exist yet.
@@ -1530,7 +1541,9 @@ final class Library {
     /// Notes whose text has a `[[link]]` to `item`.
     func notesLinking(to item: Item) -> [Item] {
         _ = revision
-        return notesLinking(toTitle: item.title).filter { $0 != item && !$0.isTrashed }
+        let names = [item.title] + Aliases.split(item.aliases)
+        var seen: Set<Item> = []
+        return names.flatMap(notesLinking(toTitle:)).filter { $0 != item && !$0.isTrashed && seen.insert($0).inserted }
     }
 
     private func notesLinking(toTitle title: String) -> [Item] {
@@ -1929,7 +1942,7 @@ final class Library {
     private func entry(for item: Item) -> SearchIndex.Entry {
         // A locked item is found by its title and tags only.
         if item.isLocked {
-            return SearchIndex.Entry(id: item.uuid, title: item.title, body: "",
+            return SearchIndex.Entry(id: item.uuid, title: Self.indexedTitle(item), body: "",
                                      tags: item.sortedTags.map(\.name).joined(separator: " "), extra: "")
         }
         let fileName = item.storedFilePath.map { URL(fileURLWithPath: $0).lastPathComponent } ?? ""
@@ -1941,7 +1954,7 @@ final class Library {
             .joined(separator: "\n")
         return SearchIndex.Entry(
             id: item.uuid,
-            title: item.title,
+            title: Self.indexedTitle(item),
             body: body,
             tags: item.sortedTags.map(\.name).joined(separator: " "),
             extra: ([item.urlString ?? "", fileName, item.extractedText]
@@ -2009,8 +2022,13 @@ final class Library {
 
     /// What the index's entry for an item is made from, cheaply: when it
     /// changes, the entry is made again. Lengths stand in for long text.
+    /// Its title and aliases: found by either, as a title match.
+    static func indexedTitle(_ item: Item) -> String {
+        item.aliases.isEmpty ? item.title : item.title + "\n" + Aliases.split(item.aliases).joined(separator: "\n")
+    }
+
     static func indexSignature(_ item: Item) -> String {
-        [String(item.modifiedAt.timeIntervalSince1970), item.isLocked ? "locked" : "", item.title,
+        [String(item.modifiedAt.timeIntervalSince1970), item.isLocked ? "locked" : "", item.title, item.aliases,
          String(item.body.utf16.count), String(item.summary.utf16.count), String(item.extractedText.utf16.count),
          item.urlString ?? "", item.sortedTags.map(\.name).joined(separator: ","),
          String((item.highlights ?? []).reduce(0) { $0 + $1.text.utf16.count + $1.note.utf16.count }),

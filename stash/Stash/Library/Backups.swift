@@ -148,6 +148,7 @@ extension Library {
             record.isMindMap = item.isMindMap ? true : nil
             record.lastViewedAt = item.lastViewedAt
             record.sourceAddress = item.sourceAddress
+            record.aliases = item.aliases.isEmpty ? nil : item.aliases
             if !item.calendarEventID.isEmpty {
                 record.calendarEventID = item.calendarEventID
                 record.calendarEventTitle = item.calendarEventTitle
@@ -409,6 +410,7 @@ extension Library {
             item.isMindMap = record.isMindMap ?? false
             item.lastViewedAt = record.lastViewedAt
             item.sourceAddress = record.sourceAddress
+            item.aliases = record.aliases ?? ""
             item.calendarEventID = record.calendarEventID ?? ""
             item.calendarEventTitle = record.calendarEventTitle ?? ""
             item.calendarEventStart = record.calendarEventStart

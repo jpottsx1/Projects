@@ -18,6 +18,7 @@ struct SidebarCounts: Equatable {
     var due = 0
     var readLater = 0
     var duplicates = 0
+    var overdueTasks = 0
 }
 
 /// What the sidebar is showing.
@@ -29,6 +30,8 @@ enum SidebarSelection: Hashable {
     case recents
     /// Items in no category.
     case unfiled
+    /// Every checkbox in every note.
+    case tasks
     /// Items with a reminder, soonest first.
     case reminders
     case kind(ItemKind)
@@ -530,6 +533,10 @@ final class Library {
     /// A PDF being split, and PDFs being imprinted (see PDFToolViews).
     var splittingPDF: Item?
     var imprintingItems: [Item]?
+    var isManagingBackups = false
+    /// Pictures being cropped or resized (see PictureTools).
+    var croppingPicture: Item?
+    var resizingPictures: [Item]?
     /// Favourites at the top of the list, whatever it's sorted by.
     var favoritesFirst = Library.favoritesFirst {
         didSet { Library.favoritesFirst = favoritesFirst }
@@ -1482,7 +1489,12 @@ final class Library {
             inbox.remove(pending)
 
             switch item.kind {
-            case .link: Task { await refreshPage(of: item) }
+            case .link:
+                let format = entry.saveAs.flatMap(PageFormat.init(rawValue:)) ?? .link
+                Task {
+                    await refreshPage(of: item)
+                    if format != .link { await savePage(item, as: format) }
+                }
             case .document:
                 Task {
                     await fillContentHash(of: item)
@@ -1577,6 +1589,7 @@ final class Library {
         case .favorites: "Favorites"
         case .recents: "Recents"
         case .unfiled: "Unfiled"
+        case .tasks: "Tasks"
         case .reminders: "Reminders"
         case .kind(let kind): kind.pluralName
         case .category(let category): category.name
@@ -1633,6 +1646,7 @@ final class Library {
             let date = Recents.date(recentsKind, created: item.createdAt, modified: item.modifiedAt, viewed: item.lastViewedAt)
             return Recents.isRecent(date, days: recentsDays)
         case .unfiled: return item.category == nil
+        case .tasks: return item.kind == .note && !item.isLocked && CompiledSearch.hasChecklist(item.body)
         case .feed(let feed): return item.feed == feed
         case .list(let list): return (item.lists ?? []).contains(list)
         case .readLater: return item.readLaterAt != nil
@@ -2015,18 +2029,19 @@ final class Library {
             due: ((try? context.fetch(FetchDescriptor<Item>(predicate: #Predicate { $0.trashedAt == nil && $0.remindAt != nil }))) ?? [])
                 .filter { ($0.remindAt ?? .distantFuture) <= now }.count,
             readLater: count(#Predicate { $0.trashedAt == nil && $0.readLaterAt != nil && $0.readingProgress < 0.98 }),
-            duplicates: duplicates(among: candidates).count)
+            duplicates: duplicates(among: candidates).count,
+            overdueTasks: overdueTaskCount(now: now))
         cachedCounts = (storeVersion, counts)
         return counts
     }
 
-    /// What the index's entry for an item is made from, cheaply: when it
-    /// changes, the entry is made again. Lengths stand in for long text.
     /// Its title and aliases: found by either, as a title match.
     static func indexedTitle(_ item: Item) -> String {
         item.aliases.isEmpty ? item.title : item.title + "\n" + Aliases.split(item.aliases).joined(separator: "\n")
     }
 
+    /// What the index's entry for an item is made from, cheaply: when it
+    /// changes, the entry is made again. Lengths stand in for long text.
     static func indexSignature(_ item: Item) -> String {
         [String(item.modifiedAt.timeIntervalSince1970), item.isLocked ? "locked" : "", item.title, item.aliases,
          String(item.body.utf16.count), String(item.summary.utf16.count), String(item.extractedText.utf16.count),

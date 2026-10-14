@@ -109,7 +109,7 @@ struct QuickOpenView: View {
             var places: [Choice] = [
                 place("Inbox", "tray.and.arrow.down", .inbox), place("All Items", "tray.full", .all),
                 place("Favorites", "star", .favorites), place("Recents", "clock", .recents),
-                place("Unfiled", "questionmark.folder", .unfiled), place("Read Later", "book", .readLater),
+                place("Unfiled", "questionmark.folder", .unfiled), place("Tasks", "checklist", .tasks), place("Read Later", "book", .readLater),
                 place("Timeline", "calendar", .timeline), place("Templates", "doc.on.doc", .templates),
                 place("Trash", "trash", .trash),
             ]

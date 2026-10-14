@@ -28,11 +28,12 @@ final class ItemPrinter: NSObject, WKNavigationDelegate {
         case archive(Data, baseURL: URL?)
     }
 
-    private static func content(for item: Item, in library: Library) -> Content? {
+    /// `asPage`: a link's saved page as it looked, even when it has a clean article.
+    private static func content(for item: Item, in library: Library, asPage: Bool = false) -> Content? {
         if item.kind == .document, Library.canMarkUp(item), let file = library.localFile(for: item) {
             return .file(file)
         }
-        if item.kind == .link, item.article == nil, let copy = library.localPageCopy(for: item),
+        if item.kind == .link, item.article == nil || asPage, let copy = library.localPageCopy(for: item),
            let data = try? Data(contentsOf: copy) {
             return .archive(data, baseURL: item.url)
         }
@@ -188,8 +189,8 @@ final class ItemPrinter: NSObject, WKNavigationDelegate {
     // MARK: - PDF
 
     /// A PDF of the item in a temporary folder, for saving.
-    func pdf(of item: Item, in library: Library) async -> URL? {
-        guard let content = Self.content(for: item, in: library) else { return nil }
+    func pdf(of item: Item, in library: Library, asPage: Bool = false) async -> URL? {
+        guard let content = Self.content(for: item, in: library, asPage: asPage) else { return nil }
         let folder = URL.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let url = folder.appendingPathComponent(ExportNaming.safe(item.displayTitle) + ".pdf")

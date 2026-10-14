@@ -105,6 +105,8 @@ extension Library {
                 try? await Task.sleep(for: .seconds(5 * 60))
                 guard !Task.isCancelled else { return }
                 self?.runRules(atLaunch: false)
+                // Automatic backups ride along: checked every five minutes, made when due.
+                await self?.runAutomaticBackupIfDue()
             }
         }
     }

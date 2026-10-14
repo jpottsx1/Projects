@@ -18,5 +18,5 @@
             "32": "toolbar-32.png"
         }
     },
-    "permissions": ["nativeMessaging", "activeTab"]
+    "permissions": ["nativeMessaging", "activeTab", "contextMenus"]
 }

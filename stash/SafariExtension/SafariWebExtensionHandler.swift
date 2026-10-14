@@ -30,8 +30,11 @@ final class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
             return ["saved": false, "reason": "This page can’t be saved."]
         }
         let title = (message?["title"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        var entry = SharedEntry(kind: .link, title: title, url: url.absoluteString)
+        // From the button's menu: Save to Stash as PDF, and so on.
+        entry.saveAs = (message?["format"] as? String).flatMap(PageFormat.init(rawValue:)).map(\.rawValue)
         do {
-            try inbox.add(SharedEntry(kind: .link, title: title, url: url.absoluteString))
+            try inbox.add(entry)
             ShareSignal.post()
             return ["saved": true]
         } catch {

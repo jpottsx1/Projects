@@ -37,6 +37,9 @@ struct SidebarView: View {
                     .tag(SidebarSelection.recents)
                 Label("Unfiled", systemImage: "questionmark.folder")
                     .tag(SidebarSelection.unfiled)
+                Label("Tasks", systemImage: "checklist")
+                    .badge(counts.overdueTasks)
+                    .tag(SidebarSelection.tasks)
                 Label("Reminders", systemImage: "bell")
                     .badge(counts.due)
                     .tag(SidebarSelection.reminders)
@@ -149,6 +152,7 @@ struct SidebarView: View {
                     Button("Export All Highlights…") { library.exportRequest = .highlights }
                     Button("Export Everything…") { library.exportRequest = .everything }
                     Button("Restore from Backup…") { library.isRestoring = true }
+                    Button("Automatic Backups…") { library.isManagingBackups = true }
                     if StashStore.isTestLibrary {
                         Divider()
                         Button("Add 10,000 Test Items") { library.generateTestItems(10_000) }

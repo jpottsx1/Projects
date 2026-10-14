@@ -527,7 +527,7 @@ On some records the low end is the bass line, not the kick -- She Blinded Me Wit
 
 An octave under the note, where it can only add: a tone on the bass's own pitch, started blind, would add to it on one note and cancel it on the next. A note above 150 Hz gets a tone two octaves down. A note under 56 Hz, where an octave below would be too low to hear, gets a tone on its own pitch -- in step with it, the timing read from the record itself, so it lands on top of the note and only makes it bigger.
 
-How much of the sub goes under the bass and how much under the kicks follows where the track's low end already is: mostly the bass on a record whose bass carries it, mostly the kicks on disco. The total added is the same as without this setting; only where it goes changes. As with the kicks, the separated bass only decides the notes: the tone is made fresh and added to the untouched original.
+How strong the bass tone is follows where the track's low end already is: strong on a record whose bass carries it, little on disco. The kicks get their full amount either way -- the tone is added on top, not taken out of them -- so a track with a strong bass line ends a little above the reference (the Sub column above Asked; under 2 dB when the bass carries half). As with the kicks, the separated bass only decides the notes: the tone is made fresh and added to the untouched original.
 
 Needs "Find kicks on the drum track". Tracks separated before this setting existed are separated once more, to keep their bass part.
 

@@ -254,6 +254,11 @@ class TestADeepNoteGetsATone(unittest.TestCase):
                                           bassline=(free, 0.7, locked))
             flipped.append(report["polarity_flipped"])
             added = (out / 10 ** (report["safety_trim_db"] / 20) - mix)[:, 0]
+            # The kicks carry the whole lift now, tone or not (2026-10-14),
+            # so they are taken out first: this is about the tone.
+            bursts = subbass._lay_bursts(mix.shape[0], RATE, *kicks,
+                                         subbass.DEFAULT_FREQ_HZ, subbass.DEFAULT_DECAY_S)
+            added = added - bursts * (float(np.dot(added, bursts)) / float(np.dot(bursts, bursts)))
             for f, where in _middles(added.size, skip=0.3):
                 a, b = added[where].astype(np.float64), fund[where]
                 self.assertGreater(float(np.dot(a, b) / np.linalg.norm(a)
@@ -265,8 +270,9 @@ class TestADeepNoteGetsATone(unittest.TestCase):
                                       self.bass.shape[0], mix=self.mix)
         self.assertRegex(line, r"in step with the notes under 56 Hz \(around \d+ Hz\) \d+%")
         said = bassline.what_it_did(self.heard, 0.4)
-        self.assertRegex(said, r"^40% of the sub under the bassline: one in step "
-                               r"with the deep notes around \d+ Hz, \d+% of the track$")
+        self.assertRegex(said, r"^kicks at the full lift, plus a tone under the bassline "
+                               r"for its 40% of the low end: one in step with the deep "
+                               r"notes around \d+ Hz, \d+% of the track$")
 
 
 class TestTheShare(unittest.TestCase):
@@ -289,7 +295,8 @@ class TestTheReportLine(unittest.TestCase):
         line = fixtures.bassline_line(silent, bass, bass.shape[0])
         self.assertRegex(line, r"^bassline: a note \d+% of the track, around \d+ Hz; "
                                r"a tone around \d+ Hz \d+% of the track; the bass "
-                               r"carries 100% of the low end, so 100% of the sub")
+                               r"carries 100% of the low end, so a tone for 100% of "
+                               r"the sub would follow it, on top of the kicks")
 
 
 class TestTheSubStage(unittest.TestCase):
@@ -314,13 +321,40 @@ class TestTheSubStage(unittest.TestCase):
         return subbass.enhance(self.mix, RATE, amount_db=4.0, kicks=kicks or self.kicks,
                                bassline=(self.tone, share))
 
-    def test_the_lift_is_what_was_asked_for_however_it_is_shared(self):
-        for share in (0.0, 0.5, 1.0):
+    def test_the_kicks_get_the_whole_lift_however_it_is_shared(self):
+        """Rock the Casbah (2026-10-14): 38% of its sub went under the bass
+        line and its kicks came out thinner than tracks with none. The
+        kicks are now sized as with no tone at all, whatever the share."""
+        _, alone = self.run_it(0.0)
+        track = subbass._band(self.mix, RATE, subbass.SUB_LOW_HZ, subbass.SUB_HIGH_HZ)
+        bursts = subbass._band(subbass._lay_bursts(self.mix.shape[0], RATE, *self.kicks,
+                                                   subbass.DEFAULT_FREQ_HZ,
+                                                   subbass.DEFAULT_DECAY_S),
+                               RATE, subbass.SUB_LOW_HZ, subbass.SUB_HIGH_HZ)
+        # The bursts as enhance lays them with no tone: flipped to reinforce.
+        if float(np.mean(track * bursts)) < 0:
+            bursts = -bursts
+        baseline = subbass._gain_for_increase(track, bursts, 4.0)
+        self.assertAlmostEqual(alone["applied_db"], 4.0, delta=0.3)
+        for share in (0.3, 0.5, 0.9):
             _, report = self.run_it(share)
-            self.assertAlmostEqual(report["applied_db"], 4.0, delta=0.3, msg=share)
+            self.assertAlmostEqual(report["kick_gain"], baseline, delta=baseline * 1e-3,
+                                   msg=share)
             self.assertAlmostEqual(report["bass_share"], share)
 
-    def test_the_share_decides_where_it_goes(self):
+    def test_the_tone_goes_on_top_and_costs_a_bounded_overshoot(self):
+        previous = 4.0 - 0.3
+        for share in (0.0, 0.3, 0.5, 0.9):
+            _, report = self.run_it(share)
+            lift = report["applied_db"]
+            self.assertGreaterEqual(lift, previous - 0.05, share)
+            self.assertLess(lift, 4.0 + 10 * np.log10(1 + share) + 0.3, share)
+            previous = lift
+        # On top, not out of the kicks: a strong bass share lifts the band
+        # past what was asked (the old split held it at 4.0).
+        self.assertGreater(previous, 4.8)
+
+    def test_the_share_decides_how_much_tone(self):
         def with_tone(share):
             out, report = self.run_it(share)
             added = self.added(out, report)
@@ -328,9 +362,9 @@ class TestTheSubStage(unittest.TestCase):
             # Either polarity: enhance flips the sub to reinforce the track.
             return abs(float(np.dot(added, t) / np.linalg.norm(added)
                              / np.linalg.norm(t)))
-        self.assertGreater(with_tone(1.0), 0.95)
         self.assertLess(with_tone(0.0), 0.1)
-        self.assertTrue(0.4 < with_tone(0.5) < 0.9)
+        self.assertTrue(0.3 < with_tone(0.5) < 0.8, with_tone(0.5))
+        self.assertGreater(with_tone(0.9), with_tone(0.5))
 
     def test_too_few_kicks_puts_it_all_on_the_bassline(self):
         few = (self.kicks[0][:3], self.kicks[1][:3])

@@ -571,8 +571,8 @@ def bassline_line(drums: np.ndarray, bass: np.ndarray, n: int,
     tone = "; ".join(tones) or "no tone (every note already under 56 Hz)"
     return (f"bassline: a note {heard['voiced']:.0%} of the track, around "
             f"{heard['median_note_hz']:.0f} Hz; {tone}; the bass carries "
-            f"{share:.0%} of the low end, so {share:.0%} of the sub would "
-            f"follow it")
+            f"{share:.0%} of the low end, so a tone for {share:.0%} of the sub "
+            f"would follow it, on top of the kicks")
 
 
 def _analyse(task: dict) -> dict:

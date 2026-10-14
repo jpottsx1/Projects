@@ -1465,6 +1465,23 @@ bass_sub passed it silently before it was added. Not yet compiled on the
 Mac, and not yet heard: the first run wants an A/B on She Blinded Me With
 Science and Blue Monday.
 
+### The kicks keep their whole lift; the bass tone goes on top (2026-10-14)
+
+Jeff: Rock the Casbah's kicks came out less deep than other tracks on the
+same run. It was given +6.3 dB, but 38% of that went to the bass tone:
+the one lift was split share to share, so the kicks got about 60% of what
+a track with no bass share gives its kicks. The deeper the bass, the
+thinner the kick -- the opposite of what a dancefloor wants.
+
+Now (`subbass._kicks_at_full_lift`) the tone is sized exactly as before,
+and the kick bursts are resized to carry the whole `amount_db` on their
+own, as with no tone. On the synthetic groove the kick gain is identical
+to the no-tone run (0.742) at every share. The cost is the band ending
+above what was asked, by the tone's part: +0.38 dB at a share of 0.3,
++1.46 at 0.9, bounded by 10*log10(1 + share). It shows as Sub above Asked
+in Results. Not yet heard: wants an A/B on Rock the Casbah, and on a
+bass-led record (She Blinded Me With Science) for the overshoot.
+
 ### Air: why none arrived, and air that follows the stems
 
 The 1988 folder got no air on any track, and not by accident: with `auto`

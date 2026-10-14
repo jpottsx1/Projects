@@ -263,4 +263,5 @@ def what_it_did(heard: dict, share: float) -> str:
                     f"of the track")
     if not said:
         return "no bass notes found to follow, so the sub is under the kicks only"
-    return f"{share:.0%} of the sub under the bassline: " + "; ".join(said)
+    return (f"kicks at the full lift, plus a tone under the bassline for its "
+            f"{share:.0%} of the low end: " + "; ".join(said))

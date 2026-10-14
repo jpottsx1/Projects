@@ -681,24 +681,59 @@ def _blank_report(amount_db: float) -> dict:
             "band_level_change_db": 0.0, "note": None, "bass_share": 0.0}
 
 
+def _share_scales(bursts: np.ndarray, tone: np.ndarray, locked: np.ndarray,
+                  share: float, rate: int) -> tuple[float, float]:
+    """(kick scale, tone scale) putting `share` of the band energy on the
+    tone. They are at different moments and pitches, so their energies
+    add; each is first brought to unit energy in the band."""
+    def energy(y):
+        return float(np.mean(_band(y, rate, SUB_LOW_HZ, SUB_HIGH_HZ) ** 2))
+    share = float(np.clip(share, 0.0, 1.0))
+    kick_energy, tone_energy = energy(bursts), energy(tone + locked)
+    kick_scale = np.sqrt(1 - share) / np.sqrt(kick_energy) if kick_energy > 0 else 0.0
+    tone_scale = np.sqrt(share) / np.sqrt(tone_energy) if tone_energy > 0 else 0.0
+    return float(kick_scale), float(tone_scale)
+
+
 def _share_out(bursts: np.ndarray, tone: np.ndarray, share: float,
                rate: int, locked: np.ndarray | None = None
                ) -> tuple[np.ndarray, np.ndarray]:
     """Bursts and tone mixed so the tone carries `share` of the energy in
-    the sub band. They are at different moments and pitches, so their
-    energies add; each is first brought to unit energy in the band. The
-    tone is `tone` and `locked` together, scaled as one, and the locked
-    part comes back apart: (bursts and free tone, locked tone)."""
-    def energy(y):
-        return float(np.mean(_band(y, rate, SUB_LOW_HZ, SUB_HIGH_HZ) ** 2))
-    share = float(np.clip(share, 0.0, 1.0))
+    the sub band (`_share_scales`). The tone is `tone` and `locked`
+    together, scaled as one, and the locked part comes back apart:
+    (bursts and free tone, locked tone)."""
     tone = tone[:bursts.size]
     locked = (np.zeros_like(tone) if locked is None else locked[:bursts.size])
-    kick_energy, tone_energy = energy(bursts), energy(tone + locked)
-    kick_scale = np.sqrt(1 - share) / np.sqrt(kick_energy) if kick_energy > 0 else 0.0
-    tone_scale = np.sqrt(share) / np.sqrt(tone_energy) if tone_energy > 0 else 0.0
+    kick_scale, tone_scale = _share_scales(bursts, tone, locked, share, rate)
     return ((kick_scale * bursts + tone_scale * tone).astype(np.float32),
             (tone_scale * locked).astype(np.float32))
+
+
+def _kicks_at_full_lift(added: np.ndarray, bursts: np.ndarray,
+                        tone: np.ndarray, locked: np.ndarray | None,
+                        share: float, mixed_gain: float,
+                        track_band: np.ndarray, amount_db: float, rate: int,
+                        report: dict) -> np.ndarray:
+    """`added` with its kick bursts resized to carry the whole of
+    `amount_db`, as on a track with no bass tone; the tone left as it was.
+
+    Splitting one lift share to share took the kicks' depth away exactly
+    where the bass is strong: Rock the Casbah (2026-10-14) put 38% under
+    its bass line, and its kicks came out audibly thinner than tracks given
+    the same amount with no bass share. Now the tone is added ON TOP of a
+    full kick lift instead of out of it. The cost is the band rising by
+    more than asked: by under 10*log10(1 + share) dB (1.8 at a share of
+    0.5), the tone's part -- reported as `applied_db` against
+    `amount_db`, the Sub and Asked columns."""
+    tone = tone[:bursts.size]
+    locked = (np.zeros_like(tone) if locked is None else locked[:bursts.size])
+    kick_scale, _ = _share_scales(bursts, tone, locked, share, rate)
+    bursts_band = _band(bursts, rate, SUB_LOW_HZ, SUB_HIGH_HZ)
+    kick_sign = -1.0 if float(np.mean(track_band * bursts_band)) < 0 else 1.0
+    kick_gain = _gain_for_increase(track_band, kick_sign * bursts_band, amount_db)
+    report["kick_gain"] = float(kick_gain)
+    shared_kicks = mixed_gain * kick_scale * bursts
+    return (added - shared_kicks + kick_sign * kick_gain * bursts).astype(np.float32)
 
 
 def enhance(x: np.ndarray, rate: int, amount_db: float = 5.0,
@@ -721,11 +756,12 @@ def enhance(x: np.ndarray, rate: int, amount_db: float = 5.0,
     `bassline`, if given, is (tone, share) or (tone, share, locked): a tone
     under the bass notes (`bassline.tones`), the part of the added energy
     it gets, and a tone locked in step with the deep notes. The locked tone
-    is never flipped with the rest: out of step it would cancel its note. The kick
-    bursts and the tone are each brought to the same energy in the band,
-    mixed share to share, and the one gain then sized for `amount_db` as
-    before -- so the lift is what was asked for, only split. A track with
-    too few kicks for bursts can still take the whole of it on the tone.
+    is never flipped with the rest: out of step it would cancel its note.
+    The tone is sized as if the lift were split share to share; the kicks
+    then get the WHOLE of `amount_db` anyway, as on a track with no bass
+    tone -- so the band ends above what was asked by the tone's part
+    (`_kicks_at_full_lift`). A track with too few kicks for bursts takes
+    the whole of it on the tone.
 
     Returns the new audio and a report of what was actually done, because the
     point of a prototype is to be checked rather than believed.
@@ -761,8 +797,9 @@ def enhance(x: np.ndarray, rate: int, amount_db: float = 5.0,
         report.update(punch_info)
         return out, report
 
-    sub = (_lay_bursts(x.shape[0], rate, kicks, strengths, freq, decay_s)
-           if kicks.size >= 8 else np.zeros(x.shape[0], dtype=np.float32))
+    bursts = (_lay_bursts(x.shape[0], rate, kicks, strengths, freq, decay_s)
+              if kicks.size >= 8 else np.zeros(x.shape[0], dtype=np.float32))
+    sub = bursts
     in_step = np.zeros(x.shape[0], dtype=np.float32)
     if has_tone:
         sub, in_step = _share_out(sub, tone, share if kicks.size >= 8 else 1.0,
@@ -781,14 +818,20 @@ def enhance(x: np.ndarray, rate: int, amount_db: float = 5.0,
 
     # Reinforce rather than fight what is already under the kick. The
     # locked tone is in step with its note already, and stays so.
+    sign = 1.0
     if float(np.mean(track_band * sub_band)) < 0:
-        sub, sub_band = -sub, -sub_band
+        sub, sub_band, sign = -sub, -sub_band, -1.0
         report["polarity_flipped"] = True
     sub, sub_band = sub + in_step, sub_band + step_band
 
     gain = _gain_for_increase(track_band, sub_band, amount_db)
     existing = float(np.mean(track_band ** 2))
-    out = x + np.column_stack([sub * gain, sub * gain])
+    added = sub * gain
+    if has_tone and kicks.size >= 8 and share > 0:
+        added = _kicks_at_full_lift(added, bursts, tone, locked, share,
+                                    sign * gain, track_band, amount_db,
+                                    rate, report)
+    out = x + np.column_stack([added, added])
 
     # The band change is measured BEFORE any trim. A trim scales everything
     # equally, so it moves level without touching spectral balance -- and

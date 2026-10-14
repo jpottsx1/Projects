@@ -428,8 +428,9 @@ def _backtrack(peaks: np.ndarray, fast: np.ndarray, rate: int) -> np.ndarray:
 # about 280 ms -- a second, lower note under every kick that outlasted it,
 # which by ear added no drum depth and read as "catching the bass line".
 VOICE_LOW_HZ, VOICE_HIGH_HZ = 30.0, 120.0
-# The octave below the kick, unless that falls under the band the stage
-# is sized in; then the kick's own pitch, which is already inside it.
+# The octave below the kick when that is at least SUB_FLOOR_HZ; else a
+# fifth below; else the kick's own pitch. Raised to the band the stage is
+# sized in when just under it.
 TUNED_MIN_HZ = 31.5
 TUNED_MAX_HZ = 63.0
 # The burst's decay is set so it falls 20 dB when the kick does, within
@@ -494,16 +495,37 @@ def kick_voice(source: np.ndarray, rate: int,
 
 def tuned_burst(pitch_hz: float, tail_s: float) -> tuple[float, float]:
     """(freq Hz, decay s) for a burst that sits under a kick of this voice:
-    an octave down, or at the kick's own pitch when an octave down would
-    fall under the band, and gone 20 dB when the kick is -- but never in
-    fewer than TUNED_MIN_CYCLES of its own pitch."""
+    an octave down, a fifth down when an octave would fall under the
+    floor, or at the kick's own pitch when even a fifth would; gone 20 dB
+    when the kick is -- but never in fewer than TUNED_MIN_CYCLES of its
+    own pitch."""
     # The octave down whenever it is at least SUB_FLOOR_HZ, raised to the
     # band's floor if it falls just under it. The rule was "an octave down
     # only if that reaches 31.5 Hz", and the 1983 records sit right on its
     # edge: Maniac's kick read 63 Hz one run (sub 31.5) and 62 the next
     # (sub 62, on the kick itself) -- a hertz of measurement doubling the
     # sub. Now anything from 56 Hz up goes to about an octave under.
-    freq = pitch_hz / 2 if pitch_hz / 2 >= SUB_FLOOR_HZ else pitch_hz
+    #
+    # Under 56 Hz it was the kick's own pitch, and by ear that is the kick
+    # made louder, not deeper: Rapture (50 Hz kick) and Sex Shooter (47)
+    # came out with little more weight than they went in with, beside
+    # Party All the Time (59 Hz, sub 32) and The Rain (87, sub 43) that
+    # plainly gained some -- on the same run and settings, and with MORE
+    # sub asked for on Rapture (+7.1 dB) than on Party All the Time
+    # (+4.6). The level-matched A/B also takes back much of what a burst
+    # on the kick's own note adds. The four-cycle minimum made it shorter
+    # too: 36 ms at 50 Hz against 55 at 32. So a fifth down (two thirds
+    # of the pitch, the next consonant step after the octave) now takes
+    # 42-56 Hz kicks to 31.5-37 Hz, a new note under the kick like the
+    # octave gives, rather than more of the kick's own. A judgement from
+    # one A/B by ear (Jeff, 2026-10-14), not a measurement: it wants the
+    # same A/B on those two tracks to confirm.
+    if pitch_hz / 2 >= SUB_FLOOR_HZ:
+        freq = pitch_hz / 2
+    elif pitch_hz * 2 / 3 >= SUB_FLOOR_HZ:
+        freq = pitch_hz * 2 / 3
+    else:
+        freq = pitch_hz
     freq = float(min(max(freq, TUNED_MIN_HZ), TUNED_MAX_HZ))
     floor = max(TUNED_DECAY_S[0], TUNED_MIN_CYCLES / (freq * np.log(10)))
     decay = float(np.clip(tail_s / np.log(10), floor, TUNED_DECAY_S[1]))

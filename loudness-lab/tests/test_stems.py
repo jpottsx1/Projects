@@ -278,14 +278,30 @@ class TestTuningTheSub(unittest.TestCase):
             self.assertAlmostEqual(measured[0], pitch, delta=1.0)
             self.assertAlmostEqual(measured[1], tail, delta=0.02)
 
-    def test_the_burst_goes_an_octave_under_or_onto_the_kick(self):
+    def test_the_burst_goes_an_octave_under_a_fifth_under_or_onto_the_kick(self):
         self.assertAlmostEqual(subbass.tuned_burst(70.0, 0.127)[0], 35.0)
         self.assertAlmostEqual(subbass.tuned_burst(84.0, 0.115)[0], 42.0)
         # An octave under 58 is 29 Hz: above the floor, raised to the band.
         self.assertAlmostEqual(subbass.tuned_burst(58.0, 0.1)[0], 31.5)
-        # Under 56 Hz an octave down is below the floor: the kick's own pitch.
-        self.assertAlmostEqual(subbass.tuned_burst(45.0, 0.1)[0], 45.0)
-        self.assertAlmostEqual(subbass.tuned_burst(55.0, 0.1)[0], 55.0)
+        # Under 56 Hz an octave down is below the floor: a fifth down.
+        # Rapture's 50 Hz kick and Sex Shooter's 47 (raised to the band).
+        self.assertAlmostEqual(subbass.tuned_burst(50.0, 0.083)[0], 100 / 3)
+        self.assertAlmostEqual(subbass.tuned_burst(47.0, 0.041)[0], 31.5)
+        self.assertAlmostEqual(subbass.tuned_burst(55.0, 0.1)[0], 110 / 3)
+        # Under 42 Hz even a fifth is below the floor: the kick's own pitch.
+        self.assertAlmostEqual(subbass.tuned_burst(40.0, 0.1)[0], 40.0)
+
+    def test_a_low_kick_gets_a_note_under_it_not_more_of_its_own(self):
+        """By ear (2026-10-14): a sub on a 47-50 Hz kick's own pitch made
+        it louder, not deeper. Everywhere a fifth fits, the sub is lower
+        than the kick, and lasts about as long as an octave-down one."""
+        for pitch in np.arange(42.0, 56.0, 0.5):
+            freq, decay = subbass.tuned_burst(pitch, 0.06)
+            self.assertLess(freq, pitch - 5, pitch)
+            self.assertGreaterEqual(freq, subbass.TUNED_MIN_HZ, pitch)
+        # Rapture: 36 ms on the kick before; now about Party All the Time's 55.
+        _, decay = subbass.tuned_burst(50.0, 0.083)
+        self.assertGreater(decay, 0.05)
 
     def test_a_hertz_either_side_does_not_double_the_sub(self):
         # Maniac: 63 Hz one run, 62 the next. Both an octave-ish under.

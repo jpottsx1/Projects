@@ -569,9 +569,10 @@ enum Help {
         was used. A track gets no sub only if too few kicks are left.
 
         The sub is also tuned to each track's own kick, measured on the drum \
-        track: an octave below the kick's pitch (or at the kick's pitch, if \
-        an octave down would be below 31.5 Hz), and fading when the kick \
-        does. Measured on 1988 dance records, kicks sat at 58-84 Hz and \
+        track: an octave below the kick's pitch, or a fifth below for a low \
+        kick where an octave would fall under 28 Hz (a 50 Hz disco kick gets \
+        33 Hz), and fading when the kick does. A sub on the kick's own pitch \
+        made a low kick louder rather than deeper. Measured on 1988 dance records, kicks sat at 58-84 Hz and \
         faded in 74-252 ms, under a fixed burst of 45 Hz that rang for about \
         280 ms -- a second, lower note after every kick, which added no drum \
         depth and sounded like part of the bass line. The log says what each \

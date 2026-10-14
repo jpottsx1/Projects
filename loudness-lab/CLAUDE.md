@@ -945,6 +945,32 @@ dB): added to each track's measured shortfall before the cap, so +3 is 3
 dB more than matching the reference, and a track at the cap needs the cap
 raised too.
 
+### Low kicks: a fifth under, not the kick's own note (2026-10-14)
+
+Jeff, A/B on one 1980s run (same settings, reference MODERN DANCE): Party
+All the Time and The Rain gained a plainly heavier four-on-the-floor;
+Rapture and Sex Shooter hardly did -- though Rapture was given MORE sub
+(+7.1 dB) than Party All the Time (+4.6). The report on all six
+(`measure_stem_kicks.py --files`, the run's own stems):
+
+- **Not the kicks.** Rapture fits quarters at 0.99, 103-107 kicks a
+  minute at its 108 tag (a ten-minute mix, so its 1068 kept hits are one
+  a beat); Sex Shooter quarters at 0.94. Selection was fine.
+- **The pitch.** Kicks on the drum stem: Party All the Time 59 Hz (sub
+  32), The Rain 87 (sub 43), Rapture 50 (sub 50), Sex Shooter 47 (sub
+  47). Under 56 Hz the octave falls below `SUB_FLOOR_HZ`, so the sub sat
+  ON the kick: the same note louder, not a deeper one, and the
+  level-matched A/B takes much of a louder note back. And four cycles at
+  50 Hz is 36 ms against 55 at 32.
+
+So `tuned_burst` now goes a fifth down (two thirds) where the octave does
+not fit: 42-56 Hz kicks get 31.5-37 Hz, Rapture 33, Sex Shooter 31.5 (52
+ms). Under 42 Hz even that is below the floor and the kick's own pitch
+stays. Kicks from 56 Hz up are unchanged. A judgement from one listen,
+not a measurement: it wants the same A/B on those two tracks. The edge
+at 56 Hz now moves the sub 31.5 -> 37 Hz for a hertz of measurement --
+not the doubling Maniac showed, but an edge.
+
 ### Drum machines: two numbers to tell them from drummers
 
 Synth-pop -- New Order, Pet Shop Boys, Yazoo, Erasure, Depeche Mode -- is

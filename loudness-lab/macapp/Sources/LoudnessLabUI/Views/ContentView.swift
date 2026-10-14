@@ -58,6 +58,9 @@ struct ContentView: View {
     @State private var chosen: Manifest.Track?
     @State private var blind = false
     @State private var rightTab = RightTab.survey
+    /// Processed files sent to the Intro tab from Results. While set, the
+    /// tab works on these rather than the ticked tracks.
+    @State private var sentToIntro: [URL]?
     @State private var wideWaveform = false
     @State private var confirmingClearOutput = false
     /// Set only when the search fails and the file is pointed at by hand.
@@ -185,8 +188,29 @@ struct ContentView: View {
                         case .results:
                             ResultsPanel(manifest: engine.manifest, chosen: $chosen)
                         case .intro:
-                            IntroPanel(engine: intro,
-                                       ticked: queue.items.filter(\.included))
+                            if let sent = sentToIntro {
+                                // Files sent from Results: the processed
+                                // versions, which are not in the queue.
+                                VStack(alignment: .leading, spacing: 0) {
+                                    HStack {
+                                        Label("\(sent.count) processed track\(sent.count == 1 ? "" : "s") from Results",
+                                              systemImage: "arrow.turn.down.right")
+                                            .font(.callout).foregroundStyle(.secondary)
+                                        Spacer()
+                                        Button("Use Ticked Tracks") { sentToIntro = nil }
+                                            .help("Go back to making edits from the tracks ticked in the list")
+                                    }
+                                    .padding(.horizontal, 12).padding(.vertical, 6)
+                                    Divider()
+                                    IntroPanel(engine: intro,
+                                               ticked: LoudnessLabIntroView.items(for: sent),
+                                               emptyText: "No processed tracks to make edits from.",
+                                               batchNoun: "processed track")
+                                }
+                            } else {
+                                IntroPanel(engine: intro,
+                                           ticked: queue.items.filter(\.included))
+                            }
                         }
                         // The A/B player is for a processing run's versions;
                         // the Intro tab has its own player for its own files.
@@ -217,6 +241,13 @@ struct ContentView: View {
         .onChange(of: rightTab) { old, new in
             if old == .intro { intro.stopPlaying() }
             if new == .intro { player.stop() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .loudnessLabSendToIntro)) { note in
+            // A host with its own intro view takes these itself.
+            guard showsIntro, let urls = note.object as? [URL], let first = urls.first else { return }
+            sentToIntro = urls
+            intro.focus(first.path)
+            rightTab = .intro
         }
         .onReceive(NotificationCenter.default.publisher(for: .loudnessLabShowIntro)) { note in
             guard showsIntro else { return }

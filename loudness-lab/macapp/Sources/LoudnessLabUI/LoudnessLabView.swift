@@ -164,6 +164,8 @@ extension Notification.Name {
     public static let loudnessLabAddSources = Notification.Name("loudnesslab.addSources")
     /// Posted by `LoudnessLab.showIntro`: switches the right pane to Intro.
     public static let loudnessLabShowIntro = Notification.Name("loudnesslab.showIntro")
+    /// Posted by `LoudnessLab.sendToIntro`, carrying `[URL]` as `object`.
+    public static let loudnessLabSendToIntro = Notification.Name("loudnesslab.sendToIntro")
     /// Posted by `LoudnessLab.togglePreview`: play or stop the queue's highlighted track.
     public static let loudnessLabTogglePreview = Notification.Name("loudnesslab.togglePreview")
     /// Posted by `LoudnessLab.skipPreview`, carrying seconds (`Double`) as `object`.
@@ -215,5 +217,14 @@ public enum LoudnessLab {
     /// means that song.
     public static func showIntro(focus: URL? = nil) {
         NotificationCenter.default.post(name: .loudnessLabShowIntro, object: focus)
+    }
+
+    /// Hands finished files to the intro/outro editor -- the Results tab's
+    /// "Send to Intro/Outro", for the edit that comes after processing. The
+    /// standalone app's own Intro tab takes them; a host that shows intro
+    /// edits in a view of its own (`showsIntro: false`) listens for
+    /// `.loudnessLabSendToIntro` and puts them there.
+    public static func sendToIntro(_ urls: [URL]) {
+        NotificationCenter.default.post(name: .loudnessLabSendToIntro, object: urls)
     }
 }

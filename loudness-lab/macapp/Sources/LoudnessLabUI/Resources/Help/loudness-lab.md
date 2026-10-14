@@ -777,6 +777,8 @@ Mud is how far the 200-400 Hz band came down (hover for why a track got none).
 
 Up and down arrows step through the songs. While one is playing the next starts from the top, on the same version (A or B) you were hearing; stopped stays stopped.
 
+Right-click a song for Send to Intro/Outro, which opens the intro and outro editor on its processed version (the B) to finish the edit, or Show in Finder.
+
 Asked is what the sub was asked for: with per-track sizing, how far the track's low end sat under the reference (capped). Why says why it got what it got -- "already within 0.3 dB of the reference" for a track whose bottom end was already there, a reason it was declined, or what the kicks and bass line did. A small Sub with a small Asked is a track that needed little; a small Sub with a large Asked is one worth a look.
 
 Clips is the number of clipped runs restored. Lift is the median amount one restored peak gained -- deliberately not the change in the file's peak, because on an MP3 of a clipped master the file peak is set by codec overshoot and barely moves however many runs are restored. One track here decoded at +2.27 dBFS and read +0.00 dB of change while 402 runs had been lifted by a median of 0.29 dB.

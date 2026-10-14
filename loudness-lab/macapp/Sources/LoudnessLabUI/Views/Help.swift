@@ -811,6 +811,10 @@ enum Help {
         next starts from the top, on the same version (A or B) you were \
         hearing; stopped stays stopped.
 
+        Right-click a song for Send to Intro/Outro, which opens the intro and \
+        outro editor on its processed version (the B) to finish the edit, or \
+        Show in Finder.
+
         Asked is what the sub was asked for: with per-track sizing, how far \
         the track's low end sat under the reference (capped). Why says why \
         it got what it got -- "already within 0.3 dB of the reference" for a \

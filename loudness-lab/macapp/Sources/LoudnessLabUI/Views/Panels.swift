@@ -586,6 +586,18 @@ struct ResultsPanel: View {
                         Text(row.subNote ?? "").help(row.subNote ?? "")
                     }
                 }
+                .contextMenu(forSelectionType: Manifest.Track.ID.self) { ids in
+                    let files = Self.processedFiles(manifest.tracks.filter { ids.contains($0.id) })
+                    Button(files.count > 1 ? "Send \(files.count) to Intro/Outro"
+                                           : "Send to Intro/Outro") {
+                        LoudnessLab.sendToIntro(files)
+                    }
+                    .disabled(files.isEmpty)
+                    Button("Show in Finder") {
+                        NSWorkspace.shared.activateFileViewerSelecting(files)
+                    }
+                    .disabled(files.isEmpty)
+                }
                 .help(Help.results.detail)
             } else {
                 Text("Nothing processed yet.")
@@ -594,6 +606,17 @@ struct ResultsPanel: View {
             }
         }
         .frame(minHeight: 180)
+    }
+}
+
+extension ResultsPanel {
+    /// The processed version of each track, the one an intro or outro is
+    /// made on: the "B" of a comparison, or the only file a finished run
+    /// writes. A track the run wrote nothing new for has none.
+    static func processedFiles(_ tracks: [Manifest.Track]) -> [URL] {
+        tracks.compactMap { track in
+            track.variants.first { $0.kind == "processed" }?.url
+        }
     }
 }
 

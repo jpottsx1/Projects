@@ -30,6 +30,8 @@ struct ItemListView: View {
         Group {
             if library.sidebar == .timeline {
                 LibraryTimeline(items: allItems)
+            } else if library.sidebar == .tasks {
+                TasksView()
             } else {
                 switch sizeClass == .compact ? .list : library.layout {
                 case .grid: grid(items)
@@ -40,12 +42,12 @@ struct ItemListView: View {
             }
         }
         .overlay {
-            if items.isEmpty, library.sidebar != .timeline { emptyState }
+            if items.isEmpty, library.sidebar != .timeline, library.sidebar != .tasks { emptyState }
         }
         .safeAreaInset(edge: .top, spacing: 0) {
             VStack(spacing: 0) {
                 if library.sidebar == .recents { RecentsBar() }
-                if library.isShowingTagFilter || !library.tagFilter.isEmpty, library.sidebar != .timeline {
+                if library.isShowingTagFilter || !library.tagFilter.isEmpty, library.sidebar != .timeline, library.sidebar != .tasks {
                     TagFilterBar(items: items)
                 }
             }

@@ -132,6 +132,8 @@ struct BatchMenus: View {
             }
         }
         PDFToolMenu(items: live)
+        PictureToolMenu(items: live)
+        PageFormatMenu(items: live)
         let notable = live.filter(Library.canMakeNote(from:))
         if !notable.isEmpty {
             Button(notable.count > 1 ? "Make Notes" : "Make a Note") { library.makeNotes(from: notable) }

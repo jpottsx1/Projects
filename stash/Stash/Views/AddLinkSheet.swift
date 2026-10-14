@@ -5,6 +5,7 @@ struct AddLinkSheet: View {
     @Environment(Library.self) private var library
     @Environment(\.dismiss) private var dismiss
     @State private var address = ""
+    @AppStorage("addLinkSaveAs") private var saveAs = PageFormat.link.rawValue
     @FocusState private var focused: Bool
 
     var body: some View {
@@ -22,6 +23,9 @@ struct AddLinkSheet: View {
                     guard let url = urls.first else { return }
                     Task { @MainActor in address = url.absoluteString }
                 }
+                Picker("Also Save As", selection: $saveAs) {
+                    ForEach(PageFormat.allCases) { Text($0 == .link ? "Nothing Else" : $0.name).tag($0.rawValue) }
+                }
             }
             .formStyle(.grouped)
             .navigationTitle("Add Link")
@@ -35,7 +39,7 @@ struct AddLinkSheet: View {
                 }
             }
         }
-        .sheetSize(minWidth: 400, minHeight: 200)
+        .sheetSize(minWidth: 400, minHeight: 240)
         .onAppear { focused = true }
     }
 
@@ -43,7 +47,7 @@ struct AddLinkSheet: View {
 
     private func add() {
         guard let url else { return }
-        library.addLink(url)
+        library.addLink(url, savingAs: PageFormat(rawValue: saveAs) ?? .link)
         dismiss()
     }
 }

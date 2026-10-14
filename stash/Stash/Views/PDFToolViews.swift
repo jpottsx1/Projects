@@ -45,6 +45,15 @@ struct PDFToolSheets: ViewModifier {
             .sheet(isPresented: Binding(get: { library.imprintingItems != nil }, set: { if !$0 { library.imprintingItems = nil } })) {
                 ImprintSheet(items: library.imprintingItems ?? [])
             }
+            .sheet(isPresented: $library.isManagingBackups) {
+                AutoBackupView()
+            }
+            .sheet(item: $library.croppingPicture) { item in
+                CropSheet(item: item)
+            }
+            .sheet(isPresented: Binding(get: { library.resizingPictures != nil }, set: { if !$0 { library.resizingPictures = nil } })) {
+                ResizeSheet(items: library.resizingPictures ?? [])
+            }
     }
 }
 

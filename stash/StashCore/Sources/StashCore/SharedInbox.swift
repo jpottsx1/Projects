@@ -21,6 +21,9 @@ public struct SharedEntry: Codable, Equatable {
     /// A category to make and file it in, as a path ("Work › Clients"),
     /// when none of the existing ones would do. Nil from older extensions.
     public var newCategory: String?
+    /// A link to keep as something else besides (a `PageFormat`'s raw
+    /// value); nil to keep just the link.
+    public var saveAs: String?
     public var createdAt: Date
 
     public init(id: UUID = UUID(), kind: Kind, title: String, url: String? = nil, text: String = "",
@@ -35,6 +38,23 @@ public struct SharedEntry: Codable, Equatable {
         self.tags = tags
         self.categoryID = categoryID
         self.createdAt = createdAt
+    }
+}
+
+/// DEVONthink's clip formats: a web page kept as a PDF, a Markdown note,
+/// or a web archive document, besides the link.
+public enum PageFormat: String, Codable, CaseIterable, Identifiable {
+    case link, pdf, markdown, webArchive
+
+    public var id: String { rawValue }
+
+    public var name: String {
+        switch self {
+        case .link: "Link Only"
+        case .pdf: "PDF"
+        case .markdown: "Markdown Note"
+        case .webArchive: "Web Archive"
+        }
     }
 }
 

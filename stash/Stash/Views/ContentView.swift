@@ -24,6 +24,8 @@ struct ContentView: View {
             Group {
             if library.multiSelection.count > 1 {
                 BulkEditView(items: library.selectedItems)
+            } else if case .notebook(let notebook) = library.sidebar {
+                StudyView(notebook: notebook, item: library.selection)
             } else if let item = library.selection {
                 ItemDetailView(item: item)
                     .id(item.persistentModelID)
@@ -138,42 +140,8 @@ struct ContentView: View {
         .sheet(item: $library.viewingHistoryOf) { item in
             NoteHistoryView(item: item)
         }
-        #if os(iOS)
-        .sheet(isPresented: $library.isShowingGraph) {
-            LinkGraphView()
-        }
-        .sheet(isPresented: $library.isAskingLibrary) {
-            AskLibraryView()
-        }
-        .sheet(isPresented: $library.isShowingStatistics) {
-            StatisticsView()
-        }
-        .sheet(isPresented: $library.isShowingConcordance) {
-            ConcordanceView()
-        }
-        #else
-        .onChange(of: library.isShowingConcordance) {
-            guard library.isShowingConcordance else { return }
-            library.isShowingConcordance = false
-            openWindow(id: "concordance")
-        }
-        .onChange(of: library.isShowingStatistics) {
-            guard library.isShowingStatistics else { return }
-            library.isShowingStatistics = false
-            openWindow(id: "stats")
-        }
-        .onChange(of: library.isAskingLibrary) {
-            guard library.isAskingLibrary else { return }
-            library.isAskingLibrary = false
-            openWindow(id: "ask")
-        }
-        // On a Mac the graph has a window of its own.
-        .onChange(of: library.isShowingGraph) {
-            guard library.isShowingGraph else { return }
-            library.isShowingGraph = false
-            openWindow(id: "graph")
-        }
-        #endif
+        .modifier(ToolWindows(library: library))
+        .modifier(WorkspaceSheets(library: library))
         .sheet(isPresented: $library.isEditingRules) {
             RulesView()
         }
@@ -295,6 +263,8 @@ private struct BackupPanels: View {
                 exported = try await library.exportEverything()
             case .highlights:
                 exported = try library.exportHighlights()
+            case .feeds:
+                exported = try library.exportFeeds()
             }
         } catch {
             message = ("Couldn’t Export", error.localizedDescription)
@@ -416,5 +386,54 @@ private struct LibraryAlerts: ViewModifier {
             } message: {
                 Text(library.importError ?? "")
             }
+    }
+}
+
+/// The tools that open beside the library: sheets on an iPhone or iPad,
+/// windows of their own on a Mac.
+private struct ToolWindows: ViewModifier {
+    @Bindable var library: Library
+    #if os(macOS)
+    @Environment(\.openWindow) private var openWindow
+    #endif
+
+    func body(content: Content) -> some View {
+        content
+            #if os(iOS)
+            .sheet(isPresented: $library.isShowingGraph) {
+                LinkGraphView()
+            }
+            .sheet(isPresented: $library.isAskingLibrary) {
+                AskLibraryView()
+            }
+            .sheet(isPresented: $library.isShowingStatistics) {
+                StatisticsView()
+            }
+            .sheet(isPresented: $library.isShowingConcordance) {
+                ConcordanceView()
+            }
+            #else
+            .onChange(of: library.isShowingConcordance) {
+                guard library.isShowingConcordance else { return }
+                library.isShowingConcordance = false
+                openWindow(id: "concordance")
+            }
+            .onChange(of: library.isShowingStatistics) {
+                guard library.isShowingStatistics else { return }
+                library.isShowingStatistics = false
+                openWindow(id: "stats")
+            }
+            .onChange(of: library.isAskingLibrary) {
+                guard library.isAskingLibrary else { return }
+                library.isAskingLibrary = false
+                openWindow(id: "ask")
+            }
+            // On a Mac the graph has a window of its own.
+            .onChange(of: library.isShowingGraph) {
+                guard library.isShowingGraph else { return }
+                library.isShowingGraph = false
+                openWindow(id: "graph")
+            }
+            #endif
     }
 }

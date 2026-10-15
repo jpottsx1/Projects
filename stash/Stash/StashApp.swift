@@ -36,7 +36,7 @@ final class StashStore {
 
     static let schema = Schema([Item.self, Tag.self, ItemCategory.self, SmartFilter.self, Highlight.self, SmartRule.self,
                                 NoteVersion.self, NoteAttachment.self, Feed.self, IndexedFolder.self, Vault.self,
-                                ItemList.self, FieldDefinition.self])
+                                ItemList.self, FieldDefinition.self, Notebook.self, StudyCard.self])
 
     private static var librariesKey: String { isTestLibrary ? "testLibraries" : "libraries" }
     private static var currentKey: String { isTestLibrary ? "testCurrentLibrary" : "currentLibrary" }
@@ -326,7 +326,8 @@ struct StashCommands: Commands {
             Button("Import from Evernote…") { library.isImportingEvernote = true }
             Button("Import Notes Folder…") { library.isImportingNotesFolder = true }
             Button("Import Mailbox…") { library.isImportingMailbox = true }
-            Button("Import Bookmarks…") { library.isImportingBookmarks = true }
+            Button("Import Bookmarks or Links…") { library.isImportingBookmarks = true }
+            Button("Import Feeds (OPML)…") { library.isImportingFeeds = true }
             Divider()
             Button(chosenItems.count > 1 ? "Export Items…" : "Export Item…") {
                 let chosen = chosenItems
@@ -425,6 +426,7 @@ struct StashCommands: Commands {
                 .keyboardShortcut("a", modifiers: [.command, .option])
             Button("Statistics") { library.isShowingStatistics = true }
             Button("Concordance") { library.isShowingConcordance = true }
+            Button("New Notebook") { library.newNotebook() }
             Button("Link Graph") { library.isShowingGraph = true }
                 .keyboardShortcut("g", modifiers: [.command, .option])
             Button("Smart Rules…") { library.isEditingRules = true }
@@ -442,8 +444,14 @@ struct StashCommands: Commands {
                 .keyboardShortcut("]")
                 .disabled(!library.canGoForward)
             Divider()
+            Button("Command Palette…") { library.isShowingPalette = true }
+                .keyboardShortcut("p", modifiers: [.command, .shift])
+            WorkspaceMenu()
+                .environment(library)
+            Divider()
             Button("Recents") { library.sidebar = .recents }
             Button("Unfiled") { library.sidebar = .unfiled }
+            Button("Tasks") { library.sidebar = .tasks }
             Button(library.isShowingTagFilter ? "Hide Tag Filter" : "Show Tag Filter") { library.isShowingTagFilter.toggle() }
         }
     }
@@ -512,6 +520,11 @@ struct PadCommands: Commands {
                 .keyboardShortcut("3")
             Button("Recents") { library.sidebar = .recents }
                 .keyboardShortcut("4")
+            Divider()
+            Button("Command Palette…") { library.isShowingPalette = true }
+                .keyboardShortcut("p", modifiers: [.command, .shift])
+            WorkspaceMenu()
+                .environment(library)
         }
     }
 }

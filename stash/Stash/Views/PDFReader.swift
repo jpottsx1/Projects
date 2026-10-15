@@ -68,6 +68,11 @@ struct PDFReader: View {
                 controller.reveal(highlight)
                 library.revealedHighlight = nil
             }
+            .onChange(of: library.revealedPage) { _, request in
+                guard let request, request.itemID == item.uuid else { return }
+                controller.go(toPage: request.page)
+                library.revealedPage = nil
+            }
             .toolbar {
                 ToolbarItem {
                     HighlightMenu(action: { color, withNote in highlightSelection(color, withNote: withNote) },

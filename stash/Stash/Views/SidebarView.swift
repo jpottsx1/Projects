@@ -66,6 +66,8 @@ struct SidebarView: View {
 
             FeedsSection()
 
+            NotebooksSection()
+
             ListsSection { filter in editingFilter = FilterEditing(filter: filter) } newFilter: { scope in
                 editingFilter = FilterEditing(filter: nil, scope: scope)
             }
@@ -125,6 +127,8 @@ struct SidebarView: View {
             ToolbarItem {
                 Menu {
                     Button("Quick Open…") { library.quickOpen = .open }
+                    Button("Command Palette…") { library.isShowingPalette = true }
+                    WorkspaceMenu()
                     Menu("Library") { LibraryMenuItems() }
                     Divider()
                     Button("Today’s Note") { library.openToday() }
@@ -148,11 +152,15 @@ struct SidebarView: View {
                     Button("Import from Evernote…") { library.isImportingEvernote = true }
                     Button("Import Notes Folder…") { library.isImportingNotesFolder = true }
                     Button("Import Mailbox…") { library.isImportingMailbox = true }
-                    Button("Import Bookmarks…") { library.isImportingBookmarks = true }
+                    Button("Import Bookmarks or Links…") { library.isImportingBookmarks = true }
+                        .help("A browser's bookmarks, or a Pocket, Instapaper or Raindrop export")
+                    Button("Import Feeds (OPML)…") { library.isImportingFeeds = true }
+                    Button("Export Feeds (OPML)…") { library.exportRequest = .feeds }
                     Button("Export All Highlights…") { library.exportRequest = .highlights }
                     Button("Export Everything…") { library.exportRequest = .everything }
                     Button("Restore from Backup…") { library.isRestoring = true }
                     Button("Automatic Backups…") { library.isManagingBackups = true }
+                    Button("Markdown Folder Mirror…") { library.isManagingMirror = true }
                     if StashStore.isTestLibrary {
                         Divider()
                         Button("Add 10,000 Test Items") { library.generateTestItems(10_000) }

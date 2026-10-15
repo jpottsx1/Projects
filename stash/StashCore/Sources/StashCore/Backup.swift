@@ -14,6 +14,9 @@ public struct BackupManifest: Codable, Equatable {
     public var smartFilters: [SmartFilterRecord]
     /// Nil in exports made before rules existed.
     public var rules: [RuleRecord]?
+    /// Study notebooks and their cards; nil in exports made before them.
+    public var notebooks: [NotebookRecord]?
+    public var cards: [CardRecord]?
     /// Feed subscriptions; nil in exports made before feeds.
     public var feeds: [FeedRecord]?
     /// The keys locked items are encrypted with, each still under its
@@ -136,6 +139,53 @@ public struct BackupManifest: Codable, Equatable {
             self.category = category
             self.seenIDs = seenIDs
             self.addedAt = addedAt
+        }
+    }
+
+    public struct NotebookRecord: Codable, Equatable {
+        public var id: UUID
+        public var name: String
+        public var createdAt: Date
+        public var documents: [UUID]
+
+        public init(id: UUID, name: String, createdAt: Date, documents: [UUID]) {
+            self.id = id
+            self.name = name
+            self.createdAt = createdAt
+            self.documents = documents
+        }
+    }
+
+    public struct CardRecord: Codable, Equatable {
+        public var id: UUID
+        public var notebook: UUID
+        public var parent: UUID?
+        public var order: Int
+        public var title: String
+        public var excerpt: String
+        public var comment: String
+        public var color: String
+        public var highlight: UUID?
+        public var source: UUID?
+        public var page: Int
+        public var links: [UUID]
+        public var createdAt: Date
+
+        public init(id: UUID, notebook: UUID, parent: UUID?, order: Int, title: String, excerpt: String, comment: String,
+                    color: String, highlight: UUID?, source: UUID?, page: Int, links: [UUID], createdAt: Date) {
+            self.id = id
+            self.notebook = notebook
+            self.parent = parent
+            self.order = order
+            self.title = title
+            self.excerpt = excerpt
+            self.comment = comment
+            self.color = color
+            self.highlight = highlight
+            self.source = source
+            self.page = page
+            self.links = links
+            self.createdAt = createdAt
         }
     }
 

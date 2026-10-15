@@ -327,6 +327,7 @@ struct ImportPanels: View {
 
     static let enex = UTType(filenameExtension: "enex", conformingTo: .xml) ?? .xml
     static let mbox = UTType(filenameExtension: "mbox", conformingTo: .data) ?? .data
+    static let opml = UTType(filenameExtension: "opml", conformingTo: .xml) ?? .xml
 
     var body: some View {
         @Bindable var library = library
@@ -348,9 +349,14 @@ struct ImportPanels: View {
                     run { await library.importMailbox(url) }
                 }
             Color.clear
-                .fileImporter(isPresented: $library.isImportingBookmarks, allowedContentTypes: [.html]) { result in
+                .fileImporter(isPresented: $library.isImportingBookmarks, allowedContentTypes: [.html, .commaSeparatedText]) { result in
                     guard case .success(let url) = result else { return }
                     run { await library.importBookmarks(url) }
+                }
+            Color.clear
+                .fileImporter(isPresented: $library.isImportingFeeds, allowedContentTypes: [Self.opml, .xml]) { result in
+                    guard case .success(let url) = result else { return }
+                    run { await library.importFeeds(url) }
                 }
             Color.clear
                 .fileImporter(isPresented: $library.isChoosingFolderToIndex, allowedContentTypes: [.folder]) { result in

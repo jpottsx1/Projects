@@ -71,7 +71,7 @@ extension Library {
         return try await export(items, everything: true, named: "Stash Backup \(date)")
     }
 
-    private func prepareExport(_ items: [Item], everything: Bool) throws -> ExportJob {
+    func prepareExport(_ items: [Item], everything: Bool) throws -> ExportJob {
         let allCategories = try context.fetch(FetchDescriptor<ItemCategory>())
         // A partial export only needs the categories its items are in.
         var used: Set<UUID> = []
@@ -109,6 +109,15 @@ extension Library {
             manifest.feeds = try context.fetch(FetchDescriptor<Feed>()).map {
                 .init(id: $0.uuid, title: $0.title, url: $0.urlString, siteURL: $0.siteURLString,
                       category: $0.categoryID, seenIDs: $0.seenIDs, addedAt: $0.addedAt)
+            }
+            manifest.notebooks = try context.fetch(FetchDescriptor<Notebook>()).map {
+                .init(id: $0.uuid, name: $0.name, createdAt: $0.createdAt, documents: $0.orderedItems.map(\.uuid))
+            }
+            manifest.cards = try context.fetch(FetchDescriptor<StudyCard>()).compactMap { card in
+                guard let notebook = card.notebook else { return nil }
+                return .init(id: card.uuid, notebook: notebook.uuid, parent: card.parent?.uuid, order: card.order, title: card.title,
+                             excerpt: card.excerpt, comment: card.comment, color: card.colorRaw, highlight: card.highlightID,
+                             source: card.sourceItemID, page: card.sourcePage, links: card.links, createdAt: card.createdAt)
             }
             manifest.rules = try context.fetch(FetchDescriptor<SmartRule>()).map { rule in
                 var record = BackupManifest.RuleRecord(
@@ -468,6 +477,43 @@ extension Library {
             if !targets.isEmpty { item.linksTo = (item.linksTo ?? []) + targets }
         }
 
+        // Study notebooks and their cards, after the documents they're made from.
+        var notebooks = Dictionary(try context.fetch(FetchDescriptor<Notebook>()).map { ($0.uuid, $0) },
+                                   uniquingKeysWith: { first, _ in first })
+        for record in manifest.notebooks ?? [] where notebooks[record.id] == nil {
+            let notebook = Notebook(name: record.name)
+            notebook.uuid = record.id
+            notebook.createdAt = record.createdAt
+            notebook.order = record.documents
+            context.insert(notebook)
+            notebook.items = record.documents.compactMap { everyItem[$0] }
+            notebooks[record.id] = notebook
+        }
+        var cards = Dictionary(try context.fetch(FetchDescriptor<StudyCard>()).map { ($0.uuid, $0) },
+                               uniquingKeysWith: { first, _ in first })
+        let newCards = (manifest.cards ?? []).filter { cards[$0.id] == nil }
+        for record in newCards {
+            guard let notebook = notebooks[record.notebook] else { continue }
+            let card = StudyCard(title: record.title, excerpt: record.excerpt)
+            card.uuid = record.id
+            card.order = record.order
+            card.comment = record.comment
+            card.colorRaw = record.color
+            card.highlightID = record.highlight
+            card.sourceItemID = record.source
+            card.sourcePage = record.page
+            card.links = record.links
+            card.createdAt = record.createdAt
+            context.insert(card)
+            card.notebook = notebook
+            cards[record.id] = card
+        }
+        for record in newCards {
+            if let parent = record.parent, let card = cards[record.id], let found = cards[parent], found != card {
+                card.parent = found
+            }
+        }
+
         save()
         refreshAfterStoreChange()
         summary.added = added.count
@@ -486,9 +532,12 @@ enum ExportRequest: Identifiable {
     case everything
     /// Every highlight in the library, as one Markdown file.
     case highlights
+    /// The feeds subscribed to, as OPML.
+    case feeds
 
     var id: String {
         switch self {
+        case .feeds: "feeds"
         case .highlights: "highlights"
         case .items(let items, let name): name + items.map(\.uuid.uuidString).joined()
         case .everything: "everything"

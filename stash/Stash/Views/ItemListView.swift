@@ -481,6 +481,9 @@ struct ItemListView: View {
             case .recents:
                 ContentUnavailableView("Nothing Recent", systemImage: "clock",
                                        description: Text("Items added, looked at or changed in the last \(library.recentsDays) days appear here."))
+            case .notebook:
+                ContentUnavailableView("No Documents Yet", systemImage: "book.pages",
+                                       description: Text("Add documents with Add to Notebook in their menus, or drop them here."))
             case .unfiled:
                 ContentUnavailableView("Everything Is Filed", systemImage: "questionmark.folder",
                                        description: Text("Items with no category appear here."))

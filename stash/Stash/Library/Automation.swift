@@ -100,6 +100,7 @@ extension Library {
     func startRunningRules() {
         guard ruleTimer == nil else { return }
         runRules(atLaunch: true)
+        scheduleMirror()
         ruleTimer = Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(5 * 60))

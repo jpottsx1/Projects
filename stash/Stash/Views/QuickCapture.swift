@@ -1,3 +1,4 @@
+import CloudKit
 import SwiftUI
 import StashCore
 #if os(macOS)
@@ -204,6 +205,17 @@ final class StashAppDelegate: NSObject, UIApplicationDelegate {
 
 /// Quick actions chosen while Stash is already running.
 final class StashSceneDelegate: NSObject, UIWindowSceneDelegate {
+    /// Opened from an invitation to a category shared through iCloud.
+    func scene(_ scene: UIScene, willConnectTo session: UISceneSession, options connectionOptions: UIScene.ConnectionOptions) {
+        if let metadata = connectionOptions.cloudKitShareMetadata {
+            Task { @MainActor in await Sharing.shared?.accept(metadata) }
+        }
+    }
+
+    func windowScene(_ windowScene: UIWindowScene, userDidAcceptCloudKitShareWith cloudKitShareMetadata: CKShare.Metadata) {
+        Task { @MainActor in await Sharing.shared?.accept(cloudKitShareMetadata) }
+    }
+
     func windowScene(_ windowScene: UIWindowScene, performActionFor shortcutItem: UIApplicationShortcutItem,
                      completionHandler: @escaping (Bool) -> Void) {
         MainActor.assumeIsolated { QuickActions.perform(shortcutItem.type) }

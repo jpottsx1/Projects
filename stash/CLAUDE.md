@@ -77,5 +77,13 @@ SwiftData, one multiplatform target. Read README.md first.
 - **The search index syncs by signature** (`Library.indexSignature`): if
   something new goes into an item's index entry, put it in the signature
   too, or changes to it won't be indexed until something else changes.
+- **Sharing with other people goes through CloudKit directly** (`Sharing`,
+  two `CKSyncEngine`s), never SwiftData: SwiftData's sync can't share. A
+  shared category is a zone of its own (`SharedZones.zoneName`), a record
+  per item named by its uuid; the engine on your private database only
+  fetches those zones, leaving SwiftData's zone alone. What others share
+  arrives in the *Shared with Me* library (`LibraryInfo.sharedID`), on this
+  device only. All of it runs only when `Sharing.shared` exists, which is
+  only with `ICLOUD_SYNC` on.
 - The search index can always be rebuilt from the library. Never store
   anything in it that exists nowhere else.

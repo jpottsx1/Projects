@@ -77,6 +77,8 @@ final class Library {
     let isMain: Bool
     /// Where its files, search index and so on are kept.
     let supportFolder: URL
+    /// The library of categories shared with you: read only, for now.
+    var isShared: Bool { supportFolder.lastPathComponent == LibraryInfo.sharedID.uuidString }
     /// Reminders' notifications, for the main library only.
     private var reminders: Reminders? { isMain ? Reminders.shared : nil }
 
@@ -547,8 +549,12 @@ final class Library {
     var imprintingItems: [Item]?
     var isManagingBackups = false
     var isImportingFeeds = false
+    /// The category whose sharing sheet is showing.
+    var sharingCategory: ItemCategory?
     var isManagingMirror = false
     var isShowingPalette = false
+    /// Option-Cmd-F: the search (and tags chosen) to save as a smart filter.
+    var isSavingSearch = false
     var isSavingWorkspace = false
     var isManagingWorkspaces = false
     /// Pictures being cropped or resized (see PictureTools).
@@ -1974,7 +1980,15 @@ final class Library {
     /// A search as typed, knowing the custom fields there are.
     func compile(_ text: String) -> CompiledSearch {
         let fields = fieldDefinitions()
-        return CompiledSearch(SearchQuery(text, fields: fields.map(\.name)), index: index, fields: fields)
+        let byID = Dictionary(fields.map { ($0.uuid, $0) }, uniquingKeysWith: { first, _ in first })
+        // Searches run on the main thread, where the library is.
+        let resolve: (Item, UUID) -> (String, CustomField.Kind) = { [weak self] item, id in
+            MainActor.assumeIsolated {
+                guard let self, let field = byID[id] else { return ("", .text) }
+                return self.resolvedValue(of: field, for: item, fields: fields)
+            }
+        }
+        return CompiledSearch(SearchQuery(text, fields: fields.map(\.name)), index: index, fields: fields, resolve: resolve)
     }
 
     private func entry(for item: Item) -> SearchIndex.Entry {
@@ -2029,6 +2043,7 @@ final class Library {
         scheduleWidgetUpdate()
         scheduleFinderUpdate()
         scheduleMirror()
+        if isMain { Sharing.shared?.schedulePublish() }
     }
 
     /// Goes up with every save, so counts worked out from the store (the

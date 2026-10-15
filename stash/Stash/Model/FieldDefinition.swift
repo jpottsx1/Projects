@@ -14,6 +14,8 @@ final class FieldDefinition {
     /// Where it comes in the side panel and the columns.
     var order: Int = 0
     var createdAt: Date = Date()
+    /// For a rollup or formula: how it's worked out (`FieldConfig`, as JSON).
+    var config: String = ""
 
     init(name: String, kind: CustomField.Kind, order: Int) {
         self.name = name
@@ -24,6 +26,11 @@ final class FieldDefinition {
     var kind: CustomField.Kind {
         get { CustomField.Kind(rawValue: kindRaw) ?? .text }
         set { kindRaw = newValue.rawValue }
+    }
+
+    var fieldConfig: FieldConfig {
+        get { FieldConfig(json: config) }
+        set { config = newValue.json }
     }
 
     var choiceList: [String] {

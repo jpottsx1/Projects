@@ -103,8 +103,11 @@ extension Library {
             manifest.lists = try context.fetch(FetchDescriptor<ItemList>()).map {
                 .init(id: $0.uuid, name: $0.name, order: $0.orderedItems.map(\.uuid), createdAt: $0.createdAt)
             }
-            manifest.fields = try context.fetch(FetchDescriptor<FieldDefinition>()).map {
-                .init(id: $0.uuid, name: $0.name, kind: $0.kindRaw, choices: $0.choices, order: $0.order)
+            manifest.fields = try context.fetch(FetchDescriptor<FieldDefinition>()).map { field in
+                var record = BackupManifest.FieldRecord(id: field.uuid, name: field.name, kind: field.kindRaw,
+                                                        choices: field.choices, order: field.order)
+                record.config = field.config.isEmpty ? nil : field.config
+                return record
             }
             manifest.feeds = try context.fetch(FetchDescriptor<Feed>()).map {
                 .init(id: $0.uuid, title: $0.title, url: $0.urlString, siteURL: $0.siteURLString,
@@ -329,6 +332,7 @@ extension Library {
             let field = FieldDefinition(name: record.name, kind: CustomField.Kind(rawValue: record.kind) ?? .text, order: record.order)
             field.uuid = record.id
             field.choices = record.choices
+            field.config = record.config ?? ""
             context.insert(field)
         }
         var listsByID = Dictionary(try context.fetch(FetchDescriptor<ItemList>()).map { ($0.uuid, $0) },

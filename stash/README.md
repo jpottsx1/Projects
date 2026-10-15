@@ -142,6 +142,8 @@ Capabilities* for each target, find App Groups, and tick
 | **Workspaces** | *Go › Workspaces › Save Workspace…* keeps what the window shows -- the sidebar place, the search, the tag filter, the view and sort, and the item open -- under a name, as DEVONthink's workspaces; choose it there (or in the palette) to come back to it. |
 | **Markdown folder mirror** | *Markdown Folder Mirror…* (the sidebar's ⋯ menu) keeps a folder in step with the library, one way: notes and links as Markdown, documents as themselves, a folder per category, `[[links]]` intact, so Obsidian or any editor can read it. Changes are written a few seconds after you make them. Locked items and saved web pages stay out. |
 | **More imports** | *Import Bookmarks or Links…* also takes Pocket, Instapaper and Raindrop exports (HTML or CSV), with their tags, folders, dates and notes. *Import Feeds (OPML)…* subscribes to a feed reader's list, folders becoming categories; *Export Feeds (OPML)…* writes yours. *Import Notes Folder…* reads Bear's and Ulysses's TextBundles. |
+| **Databases** | As Notion's: besides text, number, date, yes-or-no and choice fields (*Edit Fields…* in the side panel), a **Relation** field links an item to others (*Add…* beside it; the other items list it under *Related From*), a **Rollup** sums up a field across the related items (count, sum, average, smallest, largest, earliest, latest, or a list), and a **Formula** works a value out from other fields: `{Price} * {Quantity}`, `if({Done}, "✓", "")`, `days({Due}, today())`, with round, min, max, abs, dateAdd, year, length, upper, contains and more. They show in the side panel and as columns, and search finds them (`Total:>100`). The **Calendar** view (beside List, Grid, Columns and Board) puts the items shown on a month by any date -- added, changed, reminder, or a date field -- and dragging one to another day moves its reminder or date there. |
+| **Sharing** | With iCloud sync on (`ICLOUD_SYNC`): right-click a top-level category and *Share…* to invite people through Messages, Mail or a link. They see it, and everything in it, in *Shared with Me* in their Stash (the sidebar, or the Library menu), with your changes as you make them; read only for now. *Sharing…* shows who's in and stops sharing; *Leave This Share* on their side. Locked items aren't shared. |
 | **Image search** | *Search Image With* (a picture's menu, or *Item* on a Mac) looks it up with Google Lens, Bing Visual Search, TinEye or Yandex Images. Those sites can only fetch a picture from the web, never a file on your device, so a picture is searched for by the address it came from: the Mac's "Where from" on a download, the page it was dragged out of, a link straight to a picture, or one typed into *Came From* in the side panel. A picture with no address is copied instead, and the site's search page opened to paste it into. |
 | **Import destination** | Right-click a category and choose *Use as Import Destination*: things that arrive with no category (shared, saved from Safari, Services, Shortcuts, quick capture, files dropped on the window) go there instead of the Inbox, as Keep It's default import destination. |
 | **Inbox** | Links, documents and things shared from other apps or saved by Shortcuts arrive in the Inbox unless they already have a category. Giving one a category files it; *Done* takes it out without one. |
@@ -187,42 +189,37 @@ Dropping files or web addresses onto the list adds them.
 
 ## Keyboard shortcuts
 
-On a Mac (most are also on an iPad with a keyboard, marked iPad). Any menu
-command's shortcut can be changed in *System Settings › Keyboard › Keyboard
-Shortcuts › App Shortcuts*.
+Command and a letter or number for each command; Option and the same key
+for its second form. The same on a Mac and an iPad with a keyboard (iPad
+marked where it has it). Any menu command's shortcut can be changed in
+*System Settings › Keyboard › Keyboard Shortcuts › App Shortcuts*.
 
-| Shortcut | Command | Menu |
+| Key | Cmd | Option-Cmd |
 |---|---|---|
-| Cmd-N | New Note (iPad) | File |
-| Shift-Cmd-T | Today’s Note (iPad) | File |
-| Shift-Cmd-R | New Voice Note (iPad) | File |
-| Shift-Cmd-L | Add Link… (iPad) | File |
-| Shift-Cmd-I | Import Documents… (iPad) | File |
-| Shift-Cmd-E | Export Item(s)… | File |
-| Cmd-O | Quick Open… (iPad) | File, Go |
-| Cmd-P | Print… (iPad) | File |
-| Shift-Cmd-P | Command Palette… (iPad) | Go |
-| Cmd-[ / Cmd-] | Back / Forward (iPad) | Go |
-| Cmd-1 … Cmd-4 | Inbox, All Items, Read Later, Recents (iPad only) | Go |
-| Option-Cmd-O | Open in New Window | Item |
-| Option-Shift-Cmd-T | Open in New Tab | Item |
-| Control-Cmd-C | Copy Item Link | Item |
-| Cmd-D | Add to / Remove from Favorites (iPad) | Item |
-| Shift-Cmd-U | Mark as Read / Unread | Item |
-| Option-Cmd-T | Add Tags… (iPad) | Item |
-| Control-Cmd-R | Read Later (iPad) | Item |
-| Control-Cmd-L | Lock / Remove Lock | Item |
-| Control-Cmd-M | Move to Category… (Quick File) | Item |
-| Cmd-Delete | Move to Trash (iPad) | Item |
-| Shift-Cmd-K | Check Feeds Now | Item |
-| Option-Cmd-A | Ask Your Library… (iPad) | Item |
-| Option-Cmd-G | Link Graph (iPad) | Item |
-| Option-Cmd-R | Smart Rules… | Item |
-| Control-Cmd-1 … 9 | Switch to library 1 to 9 | Library |
-| Control-Cmd-S | Sorter | Window |
-| Cmd-B / Cmd-I / Cmd-K | Bold / Italic / Link, in a note | |
-| Tab / Return / Delete | Add branch / node beside / delete, in a mind map | |
-| Shift-Cmd-K (anywhere) | Save to Stash (Services) | Services |
+| N | New Note (iPad) | New Voice Note (iPad) |
+| 0 | Today’s Note (iPad) | |
+| 1 … 9 | Inbox, All Items, Favorites, Recents, Tasks, Read Later, Reminders, Unfiled, Trash (iPad) | Switch to library 1 … 9 |
+| O | Quick Open… (iPad) | Command Palette… (iPad) |
+| L | Add Link… (iPad) | Copy Item Link (iPad) |
+| T | Add Tags… (iPad) | Show / Hide Tag Filter (iPad) |
+| D | Add to / Remove from Favorites (iPad) | Duplicate |
+| R | Read Later (iPad) | Mark as Read / Unread (iPad) |
+| G | Move to Category… (iPad) | Show in Category |
+| J | Lock / Remove Lock | Lock All Again |
+| E | Export Item(s)… | Export Everything… |
+| P | Print… (iPad) | Save as PDF… |
+| U | Check Feeds Now (iPad) | Subscribe to Feed… |
+| F | Search | Save Search as Smart Filter… |
+| S | Save Workspace… (iPad) | Sorter |
+| I | *Italic, in a note* | Import Documents… (iPad) |
+| A | *Select All* | Ask Your Library… (iPad) |
+| [ / ] | Back / Forward (iPad) | |
+| Delete | Move to Trash (iPad) | |
+
+In a note, Cmd-B, Cmd-I and Cmd-K make bold, italics and a link; in a
+mind map, Tab, Return and Delete add a branch, add a node beside, and
+delete. Save to Stash in other apps' Services menu is Shift-Cmd-K, since a
+plain Cmd shortcut there would clash with every app's own.
 
 ## How it's built
 

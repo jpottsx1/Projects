@@ -38,6 +38,7 @@ struct ItemListView: View {
                 case .table: table(items)
                 case .list: list(items)
                 case .board: BoardView(items: items, menu: { AnyView(menu(for: $0)) })
+                case .calendar: CalendarLayout(items: items, menu: { AnyView(menu(for: $0)) })
                 }
             }
         }
@@ -46,6 +47,7 @@ struct ItemListView: View {
         }
         .safeAreaInset(edge: .top, spacing: 0) {
             VStack(spacing: 0) {
+                if library.isShared { SharedLibraryBanner() }
                 if library.sidebar == .recents { RecentsBar() }
                 if library.isShowingTagFilter || !library.tagFilter.isEmpty, library.sidebar != .timeline, library.sidebar != .tasks {
                     TagFilterBar(items: items)
@@ -92,6 +94,7 @@ struct ItemListView: View {
                         Label("Grid", systemImage: "square.grid.2x2").tag(ItemLayout.grid)
                         Label("Columns", systemImage: "tablecells").tag(ItemLayout.table)
                         Label("Board", systemImage: "rectangle.split.3x1").tag(ItemLayout.board)
+                        Label("Calendar", systemImage: "calendar").tag(ItemLayout.calendar)
                     }
                     .pickerStyle(.segmented)
                     .help("Show as a list, a grid, or columns")
@@ -134,6 +137,13 @@ struct ItemListView: View {
             if chosen.allSatisfy(\.isTrashed) { confirmingDelete = chosen } else { library.moveToTrash(chosen) }
         }
         #endif
+        .onChange(of: library.isSavingSearch) {
+            guard library.isSavingSearch else { return }
+            library.isSavingSearch = false
+            let tags = library.tagFilter.map { "#" + TagName.key($0) }
+            let query = ([library.searchText] + tags).filter { !$0.isEmpty }.joined(separator: " ")
+            if !query.isEmpty { savingSearch = query }
+        }
         .sheet(item: Binding(get: { savingSearch.map(SearchDraft.init) }, set: { savingSearch = $0?.query })) { draft in
             SmartFilterEditor(filter: nil, query: draft.query, scope: currentScope) {
                 library.searchText = ""
@@ -336,7 +346,7 @@ struct ItemListView: View {
             // Your own fields.
             TableColumnForEach(fields) { field in
                 TableColumn(field.name) { item in
-                    Text(CustomField.display(library.value(of: field, for: item), kind: field.kind))
+                    Text(library.displayValue(of: field, for: item))
                         .foregroundStyle(.secondary)
                 }
                 .width(min: 60, ideal: 100)

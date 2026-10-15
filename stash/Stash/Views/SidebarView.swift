@@ -26,6 +26,14 @@ struct SidebarView: View {
         let counts = library.sidebarCounts()
         List(selection: $library.sidebar) {
             Section("Library") {
+                if library.isMain, let shared = StashStore.shared.libraries.first(where: \.isShared) {
+                    Button {
+                        StashStore.shared.switchTo(shared)
+                    } label: {
+                        Label("Shared with Me", systemImage: "person.2")
+                    }
+                    .buttonStyle(.plain)
+                }
                 Label("Inbox", systemImage: "tray.and.arrow.down")
                     .badge(counts.inbox)
                     .tag(SidebarSelection.inbox)
@@ -200,6 +208,12 @@ struct SidebarView: View {
         Label {
             HStack {
                 Text(category.name)
+                if !category.sharedZoneName.isEmpty {
+                    Image(systemName: "person.2.fill")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .help(library.isShared ? "Shared with you" : "Shared")
+                }
                 if isDestination {
                     Spacer()
                     Image(systemName: "tray.and.arrow.down")
@@ -214,6 +228,15 @@ struct SidebarView: View {
         .tag(SidebarSelection.category(category))
         .contextMenu {
             Button("New Category Inside…") { startNaming(.new(parent: category)) }
+            if Sharing.shared != nil, library.isMain, category.parent == nil {
+                Button(category.sharedZoneName.isEmpty ? "Share…" : "Sharing…") { library.sharingCategory = category }
+            }
+            if library.isShared, category.parent == nil, category.sharedZoneName.contains("|") {
+                Button("Leave This Share", role: .destructive) {
+                    let parts = category.sharedZoneName.split(separator: "|").map(String.init)
+                    Task { try? await Sharing.shared?.leave(zoneNamed: parts[0], ownedBy: parts[1]) }
+                }
+            }
             Button("New Smart Filter Here…") { editingFilter = FilterEditing(filter: nil, scope: .category(category)) }
             Button(isDestination ? "Stop Using as Import Destination" : "Use as Import Destination") {
                 library.setImportDestination(isDestination ? nil : category)

@@ -83,7 +83,12 @@ SwiftData, one multiplatform target. Read README.md first.
   per item named by its uuid; the engine on your private database only
   fetches those zones, leaving SwiftData's zone alone. What others share
   arrives in the *Shared with Me* library (`LibraryInfo.sharedID`), on this
-  device only. All of it runs only when `Sharing.shared` exists, which is
-  only with `ICLOUD_SYNC` on.
+  device only. Both sides remember the signature of what they last sent or
+  took in (`SharedItemPayload.signature`, which leaves out anything worked
+  out, like read text and hashes, or every device would keep resending);
+  `SharedMerge` decides whose change wins. Changes to your categories that
+  arrive while another library is open wait in `Sharing/Waiting` (the main
+  store syncs through SwiftData, so it's never opened twice). All of it
+  runs only when `Sharing.shared` exists, which is only with `ICLOUD_SYNC` on.
 - The search index can always be rebuilt from the library. Never store
   anything in it that exists nowhere else.

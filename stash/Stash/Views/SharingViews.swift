@@ -10,9 +10,8 @@ struct CategoryShare: Transferable {
 
     static var transferRepresentation: some TransferRepresentation {
         CKShareTransferRepresentation { transfer in
-            .prepareShare(container: Sharing.container ?? CKContainer.default(),
-                          allowedSharingOptions: CKAllowedSharingOptions(allowedParticipantPermissionOptions: .readOnly,
-                                                                         allowedParticipantAccessOptions: .specifiedRecipientsOnly)) {
+            // The standard choices: who can open it, and whether they can make changes.
+            .prepareShare(container: Sharing.container ?? CKContainer.default(), allowedSharingOptions: .standard) {
                 guard let sharing = await Sharing.shared else { throw CKError(.notAuthenticated) }
                 return try await sharing.prepareShare(for: transfer.category)
             }
@@ -38,12 +37,14 @@ struct ShareCategorySheet: View {
                         Label(category.sharedZoneName.isEmpty ? "Invite People…" : "Invite More People…", systemImage: "person.crop.circle.badge.plus")
                     }
                 } footer: {
-                    Text("People you invite see “\(category.name)” and everything in it, in Shared with Me in their Stash, and see changes as you make them. They can read and search it, but not change it yet. Locked items aren't shared. They need Stash and an iCloud account.")
+                    Text("People you invite see “\(category.name)” and everything in it, in Shared with Me in their Stash, with changes as they're made. Invite them to view only, or to make changes: theirs come back here (anything they delete goes to your Trash). If you both change an item, the later change wins and the other's note text is kept in its history. Locked items aren't shared. They need Stash and an iCloud account.")
                 }
                 if let share, !share.participants.filter({ $0.role != .owner }).isEmpty {
                     Section("Shared With") {
                         ForEach(share.participants.filter { $0.role != .owner }, id: \.self) { participant in
-                            LabeledContent(Self.name(of: participant), value: Self.status(of: participant))
+                            LabeledContent(Self.name(of: participant),
+                                           value: [Self.status(of: participant), participant.permission == .readWrite ? "Can make changes" : "View only"]
+                                               .filter { !$0.isEmpty }.joined(separator: " · "))
                         }
                     }
                 } else if isLoading, !category.sharedZoneName.isEmpty {
@@ -106,7 +107,7 @@ struct ShareCategorySheet: View {
 /// Shared with Me, read only for now: says so above the list.
 struct SharedLibraryBanner: View {
     var body: some View {
-        Label("Shared with you. Read only for now: changes made here are replaced when the owner changes them.",
+        Label("Shared with you. Where you're allowed (a two-person mark beside the category), your changes go back to its owner; where you can only view (an eye), changes made here are replaced by the owner's.",
               systemImage: "person.2")
             .font(.caption)
             .foregroundStyle(.secondary)

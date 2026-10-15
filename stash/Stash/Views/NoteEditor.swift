@@ -16,6 +16,8 @@ struct NoteEditor: View {
     enum Mode: String {
         /// Formatted as it's typed (`LiveMarkdownEditor`).
         case write
+        /// Notion's blocks, to move and turn into other kinds (`BlockEditor`).
+        case blocks
         /// The plain Markdown.
         case edit
         case split, preview
@@ -61,6 +63,8 @@ struct NoteEditor: View {
                 preview
             case .write:
                 liveEditor
+            case .blocks:
+                BlockEditor(item: item)
             case .edit:
                 editor
             case .split:
@@ -112,6 +116,7 @@ struct NoteEditor: View {
             ToolbarItem {
                 Picker("Mode", selection: $mode) {
                     Text("Write").tag(Mode.write)
+                    Text("Blocks").tag(Mode.blocks)
                     Text("Source").tag(Mode.edit)
                     if sizeClass != .compact {
                         Text("Split").tag(Mode.split)
@@ -622,6 +627,12 @@ struct MarkdownView: View {
             .background(Color.secondary.opacity(0.1), in: RoundedRectangle(cornerRadius: 6))
         case .rule:
             Divider()
+        case .toggle(let title, let body, let line):
+            ToggleSection(title: title) {
+                MarkdownView(text: body, onToggleTask: { onToggleTask(line + $0) }, pictureURL: pictureURL, autoLinks: autoLinks)
+            } label: {
+                inline(title.isEmpty ? "Toggle" : title).bold()
+            }
         }
     }
 

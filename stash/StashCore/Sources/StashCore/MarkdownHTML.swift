@@ -44,6 +44,8 @@ public enum MarkdownHTML {
                         let width = sized.width.map { " width=\"\($0)\"" } ?? ""
                         html.append("<p><img src=\"\(escape(resolved))\" alt=\"\(escape(sized.alt))\"\(width)></p>")
                     }
+                case .toggle(let title, let body, _):
+                    html.append("<details><summary>\(inline(title))</summary>\(render(body, picture: picture))</details>")
                 case .table(let header, let rows):
                     let head = header.map { "<th>\(inline($0))</th>" }.joined()
                     let body = rows.map { row in "<tr>" + row.map { "<td>\(inline($0))</td>" }.joined() + "</tr>" }.joined()

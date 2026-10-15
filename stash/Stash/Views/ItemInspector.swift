@@ -82,6 +82,8 @@ struct ItemInspector: View {
 
             FieldsSection(item: item)
             RelatedFromSection(item: item)
+            if !item.lastEditedBy.isEmpty { Section { LastChangedBy(item: item) } }
+            if item.kind != .note || !item.referenceJSON.isEmpty { ReferenceSection(item: item) }
             ListsAndReadingSection(item: item)
             CalendarSection(item: item)
             if !item.isLocked { AssistantSection(item: item) }

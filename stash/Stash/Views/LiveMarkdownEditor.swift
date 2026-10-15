@@ -37,6 +37,11 @@ struct LiveMarkdownEditor {
     /// Tab (false) or Shift-Tab (true) on a Mac: indents a list line, if
     /// the cursor's on one; returns whether it did.
     var onIndent: ((Bool) -> Bool)?
+    /// Arrows, Return, Tab and Escape while suggestions are showing (`[[`
+    /// links, `/` commands): true if the suggestions took the key.
+    var onSuggestionKey: ((SuggestionKey) -> Bool)?
+
+    enum SuggestionKey { case up, down, accept, cancel }
 
     @MainActor func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -181,6 +186,9 @@ struct LiveMarkdownEditor {
                 storage.addAttribute(.foregroundColor, value: PlatformColor.secondaryLabelColor, range: range)
             case .task(let done):
                 storage.addAttribute(.foregroundColor, value: done ? tint : PlatformColor.secondaryLabelColor, range: range)
+            case .toggleTitle:
+                addTrait(.bold, to: range, in: storage)
+                storage.addAttribute(.foregroundColor, value: tint, range: range)
             case .tableRow:
                 // Fixed-width, so the columns of a tidied table line up.
                 storage.addAttribute(.font, value: PlatformFont.monospacedSystemFont(ofSize: Self.bodySize * 0.92, weight: .regular), range: range)
@@ -458,6 +466,17 @@ extension LiveMarkdownEditor: NSViewRepresentable {
 extension LiveMarkdownEditor.Coordinator: NSTextViewDelegate {
     /// Tab and Shift-Tab on a list line nest it, as in other outliners.
     func textView(_ textView: NSTextView, doCommandBy selector: Selector) -> Bool {
+        // Suggestions showing take the arrows, Return, Tab and Escape first.
+        if let onSuggestionKey = parent.onSuggestionKey {
+            let key: LiveMarkdownEditor.SuggestionKey? = switch selector {
+            case #selector(NSResponder.moveUp(_:)): .up
+            case #selector(NSResponder.moveDown(_:)): .down
+            case #selector(NSResponder.insertNewline(_:)), #selector(NSResponder.insertTab(_:)): .accept
+            case #selector(NSResponder.cancelOperation(_:)): .cancel
+            default: nil
+            }
+            if let key, onSuggestionKey(key) { return true }
+        }
         guard selector == #selector(NSResponder.insertTab(_:)) || selector == #selector(NSResponder.insertBacktab(_:)),
               let onIndent = parent.onIndent else { return false }
         return onIndent(selector == #selector(NSResponder.insertBacktab(_:)))

@@ -17,6 +17,9 @@ public enum MarkdownBlock: Equatable {
     case image(alt: String, source: String)
     /// A table: its heading row, then the rest, cells as written.
     case table(header: [String], rows: [[String]])
+    /// A section that opens and closes: `<details><summary>title</summary>…</details>`.
+    /// `line` is where its contents start in the source, for ticking tasks inside.
+    case toggle(title: String, body: String, line: Int)
 }
 
 /// The block structure of a note: enough Markdown for everyday notes, not
@@ -60,6 +63,17 @@ public enum MarkdownBlocks {
                 blocks.append(.code(language: language.isEmpty ? nil : language,
                                     text: code.joined(separator: "\n")))
                 index += 1  // past the closing fence
+                continue
+            }
+
+            if trimmed.lowercased().hasPrefix("<details") {
+                flush()
+                let (title, body, next) = NoteBlocks.toggle(at: index, in: lines)
+                // Its contents' first line in the source, for ticking tasks inside.
+                let firstLine = body.components(separatedBy: "\n").first ?? ""
+                let line = (index..<next).first { lines[$0] == firstLine } ?? index + 1
+                blocks.append(.toggle(title: title, body: body, line: line))
+                index = next
                 continue
             }
 

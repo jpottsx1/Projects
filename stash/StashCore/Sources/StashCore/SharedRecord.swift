@@ -96,3 +96,40 @@ public enum SharedZones {
         return (save, delete)
     }
 }
+
+extension SharedItemPayload {
+    /// Everything someone can change about the item, and nothing worked out
+    /// from it (read text, hashes), so the same item gives the same
+    /// signature on every device that has it.
+    public var signature: String {
+        let highlights = highlights.sorted { $0.id.uuidString < $1.id.uuidString }
+            .map { [$0.id.uuidString, $0.text, $0.note, $0.color, $0.customColor].joined(separator: "\u{1}") }
+        let fields: [String] = [kind, title, body, url ?? "", summary, String(Int(modifiedAt.timeIntervalSince1970)),
+                                tags.sorted().joined(separator: ","), folders.joined(separator: "/"), contentType ?? "",
+                                fileName ?? ""] + highlights
+        return MD5.hex(Data(fields.joined(separator: "\u{0}").utf8))
+    }
+}
+
+/// When an item someone else changed arrives: whether to take their change.
+public enum SharedMerge {
+    public enum Decision: Equatable {
+        /// Nothing new: an echo of a change from here, or the same as here.
+        case ignore
+        /// Theirs replaces what's here.
+        case apply
+        /// Both changed it; what's here is newer, and goes out in turn.
+        case keepLocal
+    }
+
+    /// `sent`: the signature last sent from here or taken in here; `local`:
+    /// the item's here now (nil if it isn't here).
+    public static func decide(incoming: String, incomingModified: Date, sent: String?, local: String?,
+                              localModified: Date?) -> Decision {
+        if incoming == sent || incoming == local { return .ignore }
+        guard let local else { return .apply }
+        // Not changed here since: theirs is simply the latest.
+        if local == sent || sent == nil { return .apply }
+        return (localModified ?? .distantPast) > incomingModified ? .keepLocal : .apply
+    }
+}

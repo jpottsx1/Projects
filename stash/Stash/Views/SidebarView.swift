@@ -209,10 +209,11 @@ struct SidebarView: View {
             HStack {
                 Text(category.name)
                 if !category.sharedZoneName.isEmpty {
-                    Image(systemName: "person.2.fill")
+                    let theirs = Sharing.TheirZone(category.sharedZoneName)
+                    Image(systemName: theirs.map { $0.canEdit ? "person.2.fill" : "eye" } ?? "person.2.fill")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
-                        .help(library.isShared ? "Shared with you" : "Shared")
+                        .help(theirs.map { $0.canEdit ? "Shared with you: your changes go back to its owner" : "Shared with you to read" } ?? "Shared")
                 }
                 if isDestination {
                     Spacer()
@@ -231,10 +232,9 @@ struct SidebarView: View {
             if Sharing.shared != nil, library.isMain, category.parent == nil {
                 Button(category.sharedZoneName.isEmpty ? "Share…" : "Sharing…") { library.sharingCategory = category }
             }
-            if library.isShared, category.parent == nil, category.sharedZoneName.contains("|") {
+            if library.isShared, category.parent == nil, Sharing.TheirZone(category.sharedZoneName) != nil {
                 Button("Leave This Share", role: .destructive) {
-                    let parts = category.sharedZoneName.split(separator: "|").map(String.init)
-                    Task { try? await Sharing.shared?.leave(zoneNamed: parts[0], ownedBy: parts[1]) }
+                    Task { try? await Sharing.shared?.leave(category) }
                 }
             }
             Button("New Smart Filter Here…") { editingFilter = FilterEditing(filter: nil, scope: .category(category)) }

@@ -2043,7 +2043,7 @@ final class Library {
         scheduleWidgetUpdate()
         scheduleFinderUpdate()
         scheduleMirror()
-        if isMain { Sharing.shared?.schedulePublish() }
+        if isMain || isShared { Sharing.shared?.schedulePublish() }
     }
 
     /// Goes up with every save, so counts worked out from the store (the

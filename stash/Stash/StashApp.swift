@@ -144,6 +144,8 @@ final class StashStore {
         library = opened.library
         current = info
         UserDefaults.standard.set(info.id.uuidString, forKey: Self.currentKey)
+        // Changes to shared categories that waited for this library.
+        Sharing.shared?.schedulePublish()
     }
 
     @discardableResult

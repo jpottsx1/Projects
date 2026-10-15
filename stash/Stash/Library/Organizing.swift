@@ -207,9 +207,13 @@ extension Library {
             summary.failed.append(url.lastPathComponent)
             return summary
         }
-        let html = String(data: data, encoding: .utf8) ?? String(decoding: data, as: UTF8.self)
-        let bookmarks = await Task.detached(priority: .userInitiated) { BookmarksFile.parse(html) }.value
-        guard let root = importCategory(named: "Bookmarks", in: nil) else { return summary }
+        let text = String(data: data, encoding: .utf8) ?? String(decoding: data, as: UTF8.self)
+        // A browser's bookmarks (HTML), or a read-later service's export (CSV: Pocket, Instapaper, Raindrop).
+        let isCSV = url.pathExtension.lowercased() == "csv"
+        let bookmarks = await Task.detached(priority: .userInitiated) {
+            isCSV ? (LinkExport.parse(csv: text) ?? []) : BookmarksFile.parse(text)
+        }.value
+        guard let root = importCategory(named: isCSV ? "Imported Links" : "Bookmarks", in: nil) else { return summary }
         summary.categoryName = root.path
         var added: [Item] = []
         for (number, bookmark) in bookmarks.enumerated() {
@@ -219,6 +223,7 @@ extension Library {
             if ((try? context.fetchCount(existing)) ?? 0) > 0 { continue }
             let item = Item(kind: .link, title: bookmark.title)
             item.urlString = address
+            item.body = bookmark.note
             if let added = bookmark.added {
                 item.createdAt = added
                 item.modifiedAt = added

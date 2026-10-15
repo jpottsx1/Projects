@@ -48,6 +48,9 @@ struct PDFToolSheets: ViewModifier {
             .sheet(isPresented: $library.isManagingBackups) {
                 AutoBackupView()
             }
+            .sheet(isPresented: $library.isManagingMirror) {
+                MirrorView()
+            }
             .sheet(item: $library.croppingPicture) { item in
                 CropSheet(item: item)
             }

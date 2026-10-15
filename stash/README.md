@@ -137,6 +137,11 @@ Capabilities* for each target, find App Groups, and tick
 | **Automatic backups** | *Automatic Backups…* (the sidebar's ⋯ menu) backs up the whole library, as *Export Everything* does, every day or week while Stash is open, into a folder you choose on that device, keeping the newest few. *Back Up Now* makes one; any of them can be restored from there. |
 | **Save pages as** | A link's *Save Page As* menu keeps its page as a PDF (as it looked), a Markdown note (its article) or a web archive document, beside the link and linked from it, as DEVONthink's clip formats. *Add Link* can do it as the link is added (*Also Save As*), and in Safari, right-click the Save to Stash button or the page for *Save to Stash as PDF*, *as Markdown Note* or *as Web Archive*. |
 | **Picture tools** | The *Picture* menu on pictures rotates, flips, crops (drag across the picture) and resizes them (no side longer than a size you choose), in place; *Revert to Original* puts them back. *Convert To* makes a JPEG, PNG or HEIC copy beside the original. |
+| **Study notebooks** | As MarginNote: a notebook (*New Notebook* in the sidebar, or *Add to Notebook* in an item's menu) holds documents and a map of cards. Choose it and the document you're reading sits beside the map. Everything you highlight there becomes a card -- the excerpt, its note and colour -- under the card chosen (click one; click the notebook's name for the top). Double-click a card to go back to its passage. Drag cards onto each other to reorganise them; right-click to add cards of your own, colour, move, indent, merge into the card above, or delete; *Edit…* gives a card a title and comment, and links it to others (dashed lines). *Outline* shows the same cards as an indented list. *Auto Map* makes cards for highlights already made, for a PDF's table of contents (each going to its page), or groups the notebook's highlights into concepts by the words they share. *Title Links* finds where the titles of cards in any notebook turn up in the document you're reading, page by page, with what you noted. *Export* copies the outline or saves the map as a mind map note. |
+| **Command palette** | Shift-Cmd-P (the Go menu, or the sidebar's ⋯ menu) runs any command by typing a little of its name, with its shortcut shown: new things, imports and exports, tools, places, views, and what can be done to the items chosen. |
+| **Workspaces** | *Go › Workspaces › Save Workspace…* keeps what the window shows -- the sidebar place, the search, the tag filter, the view and sort, and the item open -- under a name, as DEVONthink's workspaces; choose it there (or in the palette) to come back to it. |
+| **Markdown folder mirror** | *Markdown Folder Mirror…* (the sidebar's ⋯ menu) keeps a folder in step with the library, one way: notes and links as Markdown, documents as themselves, a folder per category, `[[links]]` intact, so Obsidian or any editor can read it. Changes are written a few seconds after you make them. Locked items and saved web pages stay out. |
+| **More imports** | *Import Bookmarks or Links…* also takes Pocket, Instapaper and Raindrop exports (HTML or CSV), with their tags, folders, dates and notes. *Import Feeds (OPML)…* subscribes to a feed reader's list, folders becoming categories; *Export Feeds (OPML)…* writes yours. *Import Notes Folder…* reads Bear's and Ulysses's TextBundles. |
 | **Image search** | *Search Image With* (a picture's menu, or *Item* on a Mac) looks it up with Google Lens, Bing Visual Search, TinEye or Yandex Images. Those sites can only fetch a picture from the web, never a file on your device, so a picture is searched for by the address it came from: the Mac's "Where from" on a download, the page it was dragged out of, a link straight to a picture, or one typed into *Came From* in the side panel. A picture with no address is copied instead, and the site's search page opened to paste it into. |
 | **Import destination** | Right-click a category and choose *Use as Import Destination*: things that arrive with no category (shared, saved from Safari, Services, Shortcuts, quick capture, files dropped on the window) go there instead of the Inbox, as Keep It's default import destination. |
 | **Inbox** | Links, documents and things shared from other apps or saved by Shortcuts arrive in the Inbox unless they already have a category. Giving one a category files it; *Done* takes it out without one. |
@@ -179,6 +184,45 @@ Capabilities* for each target, find App Groups, and tick
 
 New items go into whatever category or tag the sidebar is showing.
 Dropping files or web addresses onto the list adds them.
+
+## Keyboard shortcuts
+
+On a Mac (most are also on an iPad with a keyboard, marked iPad). Any menu
+command's shortcut can be changed in *System Settings › Keyboard › Keyboard
+Shortcuts › App Shortcuts*.
+
+| Shortcut | Command | Menu |
+|---|---|---|
+| Cmd-N | New Note (iPad) | File |
+| Shift-Cmd-T | Today’s Note (iPad) | File |
+| Shift-Cmd-R | New Voice Note (iPad) | File |
+| Shift-Cmd-L | Add Link… (iPad) | File |
+| Shift-Cmd-I | Import Documents… (iPad) | File |
+| Shift-Cmd-E | Export Item(s)… | File |
+| Cmd-O | Quick Open… (iPad) | File, Go |
+| Cmd-P | Print… (iPad) | File |
+| Shift-Cmd-P | Command Palette… (iPad) | Go |
+| Cmd-[ / Cmd-] | Back / Forward (iPad) | Go |
+| Cmd-1 … Cmd-4 | Inbox, All Items, Read Later, Recents (iPad only) | Go |
+| Option-Cmd-O | Open in New Window | Item |
+| Option-Shift-Cmd-T | Open in New Tab | Item |
+| Control-Cmd-C | Copy Item Link | Item |
+| Cmd-D | Add to / Remove from Favorites (iPad) | Item |
+| Shift-Cmd-U | Mark as Read / Unread | Item |
+| Option-Cmd-T | Add Tags… (iPad) | Item |
+| Control-Cmd-R | Read Later (iPad) | Item |
+| Control-Cmd-L | Lock / Remove Lock | Item |
+| Control-Cmd-M | Move to Category… (Quick File) | Item |
+| Cmd-Delete | Move to Trash (iPad) | Item |
+| Shift-Cmd-K | Check Feeds Now | Item |
+| Option-Cmd-A | Ask Your Library… (iPad) | Item |
+| Option-Cmd-G | Link Graph (iPad) | Item |
+| Option-Cmd-R | Smart Rules… | Item |
+| Control-Cmd-1 … 9 | Switch to library 1 to 9 | Library |
+| Control-Cmd-S | Sorter | Window |
+| Cmd-B / Cmd-I / Cmd-K | Bold / Italic / Link, in a note | |
+| Tab / Return / Delete | Add branch / node beside / delete, in a mind map | |
+| Shift-Cmd-K (anywhere) | Save to Stash (Services) | Services |
 
 ## How it's built
 

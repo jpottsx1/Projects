@@ -228,6 +228,8 @@ public enum BookmarksFile {
         /// The folders it's in, outermost first.
         public var folders: [String]
         public var tags: [String]
+        /// A note or excerpt saved with it (read-later exports).
+        public var note: String = ""
     }
 
     public static func parse(_ html: String) -> [Bookmark] {
@@ -252,7 +254,8 @@ public enum BookmarksFile {
             case ("a", false):
                 guard let href = attributes["href"], let url = URL(string: href),
                       ["http", "https"].contains(url.scheme?.lowercased() ?? "") else { continue }
-                let added = attributes["add_date"].flatMap(Double.init).map { seconds in
+                // Pocket's HTML export says time_added.
+                let added = (attributes["add_date"] ?? attributes["time_added"]).flatMap(Double.init).map { seconds in
                     // Chrome and Firefox write microseconds; Safari seconds.
                     Date(timeIntervalSince1970: seconds > 100_000_000_000 ? seconds / 1_000_000 : seconds)
                 }

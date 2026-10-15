@@ -32,6 +32,8 @@ enum SidebarSelection: Hashable {
     case unfiled
     /// Every checkbox in every note.
     case tasks
+    /// A study notebook: its documents, beside its map of cards.
+    case notebook(Notebook)
     /// Items with a reminder, soonest first.
     case reminders
     case kind(ItemKind)
@@ -212,6 +214,8 @@ final class Library {
     @ObservationIgnored var arrivalTarget: ArrivalTarget?
     /// Every item's names, for automatic links, kept until the next save.
     @ObservationIgnored var autoLinkCache: (version: Int, names: [AutoLink.Name])?
+    /// The Markdown folder mirror's next update, a moment after changes stop.
+    @ObservationIgnored var pendingMirror: Task<Void, Never>?
     /// Indexed folders open this session, by the folder's uuid, and what's
     /// watching them for changes.
     @ObservationIgnored var indexedFolderURLs: [UUID: URL] = [:]
@@ -435,6 +439,9 @@ final class Library {
             list.order = list.order + [item.uuid]
         case .readLater:
             item.readLaterAt = .now
+        case .notebook(let notebook):
+            item.notebooks = [notebook]
+            notebook.order = notebook.order + [item.uuid]
         case .templates, .feed:
             sidebar = .all
         case .kind(let kind) where kind != item.kind:
@@ -530,10 +537,20 @@ final class Library {
     var isAskingLibrary = false
     var isShowingStatistics = false
     var isShowingConcordance = false
+    /// The card new excerpts go under, in the notebook being studied; nil for the top.
+    var chosenCardID: UUID?
+    /// A page to show in a PDF (a card from a table of contents, or a title link).
+    var revealedPage: PageRequest?
+    var editingCard: StudyCard?
     /// A PDF being split, and PDFs being imprinted (see PDFToolViews).
     var splittingPDF: Item?
     var imprintingItems: [Item]?
     var isManagingBackups = false
+    var isImportingFeeds = false
+    var isManagingMirror = false
+    var isShowingPalette = false
+    var isSavingWorkspace = false
+    var isManagingWorkspaces = false
     /// Pictures being cropped or resized (see PictureTools).
     var croppingPicture: Item?
     var resizingPictures: [Item]?
@@ -1267,6 +1284,10 @@ final class Library {
         let highlight = Highlight(text: text, anchor: anchor, position: position, color: color)
         context.insert(highlight)
         highlight.item = item
+        // Studying in a notebook: the excerpt becomes a card in its map.
+        if case .notebook(let notebook) = sidebar, (item.notebooks ?? []).contains(notebook) {
+            addCard(from: highlight, in: notebook)
+        }
         didEdit(item)
         save()
         return highlight
@@ -1283,6 +1304,7 @@ final class Library {
         let item = highlight.item
         if revealedHighlight == highlight { revealedHighlight = nil }
         if editingHighlight == highlight { editingHighlight = nil }
+        removeCards(madeFrom: highlight)
         context.delete(highlight)
         save()
         if let item { didEdit(item) }
@@ -1590,6 +1612,7 @@ final class Library {
         case .recents: "Recents"
         case .unfiled: "Unfiled"
         case .tasks: "Tasks"
+        case .notebook(let notebook): notebook.name
         case .reminders: "Reminders"
         case .kind(let kind): kind.pluralName
         case .category(let category): category.name
@@ -1647,6 +1670,7 @@ final class Library {
             return Recents.isRecent(date, days: recentsDays)
         case .unfiled: return item.category == nil
         case .tasks: return item.kind == .note && !item.isLocked && CompiledSearch.hasChecklist(item.body)
+        case .notebook(let notebook): return (item.notebooks ?? []).contains(notebook)
         case .feed(let feed): return item.feed == feed
         case .list(let list): return (item.lists ?? []).contains(list)
         case .readLater: return item.readLaterAt != nil
@@ -2004,6 +2028,7 @@ final class Library {
         storeVersion += 1
         scheduleWidgetUpdate()
         scheduleFinderUpdate()
+        scheduleMirror()
     }
 
     /// Goes up with every save, so counts worked out from the store (the

@@ -9,6 +9,7 @@ struct ImportSummary {
     var documents = 0
     var emails = 0
     var links = 0
+    var feeds = 0
     /// Files that couldn't be read, by name.
     var failed: [String] = []
     var categoryName: String?
@@ -19,6 +20,7 @@ struct ImportSummary {
         if documents > 0 { parts.append(documents == 1 ? "1 document" : "\(documents) documents") }
         if emails > 0 { parts.append(emails == 1 ? "1 email" : "\(emails) emails") }
         if links > 0 { parts.append(links == 1 ? "1 link" : "\(links) links") }
+        if feeds > 0 { parts.append(feeds == 1 ? "1 feed" : "\(feeds) feeds") }
         var text = parts.isEmpty ? "Nothing was imported." : "Imported " + parts.joined(separator: " and ")
         if !parts.isEmpty, let categoryName { text += " into “\(categoryName)”" }
         if !parts.isEmpty { text += "." }
@@ -134,8 +136,11 @@ extension Library {
                 }
                 let notebook = importCategory(named: (name as NSString).deletingPathExtension, in: category(for: file.path))
                 await importEvernoteNotes(notes, into: notebook, summary: &summary)
+            } else if MarkdownImport.isTextBundleExtra(file.path) {
+                used.insert(file.path)
             } else if MarkdownImport.markdownExtensions.contains(ext) || MarkdownImport.htmlExtensions.contains(ext) {
                 used.insert(file.path)
+                let bundle = MarkdownImport.textBundle(file.path)
                 guard let text = Self.readText(fileURL) else {
                     summary.failed.append(name)
                     continue
@@ -150,13 +155,14 @@ extension Library {
                         return picture(source.removingPercentEncoding ?? source, from: file.path, for: item)
                     }
                 } else {
-                    var read = MarkdownImport.note(fromMarkdown: text, fileName: name)
+                    // Bear and Ulysses export TextBundles: the note is the bundle's text.
+                    var read = MarkdownImport.note(fromMarkdown: text, fileName: bundle.map { $0.name + ".md" } ?? name)
                     read.body = MarkdownImport.replacingLocalPictures(in: read.body) { picture($0, from: file.path, for: item) }
                     note = read
                 }
                 item.title = note.title
                 item.body = note.body
-                finishImported(item, tags: note.tags, category: category(for: file.path),
+                finishImported(item, tags: note.tags, category: category(for: bundle.map { $0.folder.isEmpty ? "x" : $0.folder + "/x" } ?? file.path),
                                created: note.created ?? dates?.creationDate,
                                modified: note.modified ?? dates?.contentModificationDate)
                 summary.notes += 1

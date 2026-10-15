@@ -115,6 +115,7 @@ struct QuickOpenView: View {
             ]
             places += categories.map { place($0.path, "folder", .category($0)) }
             places += library.itemLists().map { place($0.name, "list.bullet.rectangle", .list($0)) }
+            places += library.notebooks().map { place($0.name, "book.pages", .notebook($0)) }
             places += library.smartFiltersInOrder().map { place($0.name, "line.3.horizontal.decrease.circle", .smartFilter($0)) }
             places += library.feeds().map { place($0.title, "dot.radiowaves.up.forward", .feed($0)) }
             places += ((try? library.context.fetch(FetchDescriptor<Tag>(sortBy: [SortDescriptor(\.name)]))) ?? [])

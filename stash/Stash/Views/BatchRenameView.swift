@@ -131,6 +131,7 @@ struct BatchMenus: View {
                 }
             }
         }
+        NotebookMenu(items: live)
         PDFToolMenu(items: live)
         PictureToolMenu(items: live)
         PageFormatMenu(items: live)

@@ -159,6 +159,8 @@ final class Item {
     @Relationship(inverse: \Tag.items) var tags: [Tag]? = []
     /// The lists it's been put in, besides its category.
     @Relationship(inverse: \ItemList.items) var lists: [ItemList]? = []
+    /// Study notebooks it's read in (see `Notebook`).
+    var notebooks: [Notebook]? = []
     /// Items this one has been linked to by hand. `[[Title]]` links written
     /// in a note are read from its text instead, so they can't go stale.
     @Relationship(inverse: \Item.linkedFrom) var linksTo: [Item]? = []

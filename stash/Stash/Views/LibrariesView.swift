@@ -19,7 +19,7 @@ struct LibraryMenuItems: View {
                 }
             }
             if withShortcuts, position < 9 {
-                button.keyboardShortcut(KeyEquivalent(Character(String(position + 1))), modifiers: [.command, .control])
+                button.keyboardShortcut(KeyEquivalent(Character(String(position + 1))), modifiers: [.command, .option])
             } else {
                 button
             }

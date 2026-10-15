@@ -51,6 +51,9 @@ struct PDFToolSheets: ViewModifier {
             .sheet(isPresented: $library.isManagingMirror) {
                 MirrorView()
             }
+            .sheet(item: $library.sharingCategory) { category in
+                ShareCategorySheet(category: category)
+            }
             .sheet(item: $library.croppingPicture) { item in
                 CropSheet(item: item)
             }

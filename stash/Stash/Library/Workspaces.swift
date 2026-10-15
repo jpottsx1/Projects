@@ -54,6 +54,14 @@ extension Library {
         selection = workspace.selection.flatMap { items(withIDs: [$0]).first }
     }
 
+    /// The sidebar showing the item's category, with the item chosen.
+    func showInCategory(_ item: Item) {
+        guard let category = item.category else { return }
+        searchText = ""
+        sidebar = .category(category)
+        selection = item
+    }
+
     func deleteWorkspace(_ workspace: Workspace) {
         workspaces = workspaces.filter { $0.id != workspace.id }
     }

@@ -6,6 +6,9 @@ import Foundation
 public enum CustomField {
     public enum Kind: String, CaseIterable, Codable {
         case text, number, date, yesNo, choice
+        /// Notion's database fields: links to other items, a summary of a
+        /// field on them, and a value worked out from other fields.
+        case relation, rollup, formula
 
         public var name: String {
             switch self {
@@ -14,8 +17,14 @@ public enum CustomField {
             case .date: "Date"
             case .yesNo: "Yes or No"
             case .choice: "Choice"
+            case .relation: "Relation"
+            case .rollup: "Rollup"
+            case .formula: "Formula"
             }
         }
+
+        /// Worked out, never typed.
+        public var isComputed: Bool { self == .rollup || self == .formula }
     }
 
     /// Dates are kept as 2026-10-12, which sorts and compares as text.
@@ -100,7 +109,7 @@ public enum CustomField {
             case "<=": return prefix <= wanted
             default: return prefix == wanted
             }
-        case .text, .choice:
+        case .text, .choice, .relation, .rollup, .formula:
             return stored.range(of: wanted, options: [.caseInsensitive, .diacriticInsensitive]) != nil
         }
     }
@@ -113,6 +122,16 @@ public enum CustomField {
         case "<=": value <= target
         default: value == target
         }
+    }
+
+    /// A relation's value: the related items' uuids.
+    public static func relatedIDs(_ stored: String) -> [UUID] {
+        stored.split(separator: ",").compactMap { UUID(uuidString: $0.trimmingCharacters(in: .whitespaces)) }
+    }
+
+    public static func storedRelation(_ ids: [UUID]) -> String {
+        var seen: Set<UUID> = []
+        return ids.filter { seen.insert($0).inserted }.map(\.uuidString).joined(separator: ",")
     }
 
     /// Values (`[field id: stored value]`) as kept on an item.

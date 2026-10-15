@@ -95,6 +95,8 @@ public struct BackupManifest: Codable, Equatable {
         public var kind: String
         public var choices: String
         public var order: Int
+        /// A rollup's or formula's set-up; nil for other fields and older exports.
+        public var config: String?
 
         public init(id: UUID, name: String, kind: String, choices: String, order: Int) {
             self.id = id

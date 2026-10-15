@@ -10,6 +10,10 @@
 	<key>StashAppGroup</key>
 	<string>$(APP_GROUP)</string>
 	<!-- Where SyncMonitor checks the iCloud account. -->
+	<!-- Lets Stash take invitations to categories shared through iCloud
+	     (see Sharing); only used when ICLOUD_SYNC is on. -->
+	<key>CKSharingSupported</key>
+	<true/>
 	<key>StashICloudContainer</key>
 	<string>$(ICLOUD_CONTAINER)</string>
 	<!-- Scanning documents with the iPhone or iPad camera. -->

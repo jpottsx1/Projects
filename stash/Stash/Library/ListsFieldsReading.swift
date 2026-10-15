@@ -116,6 +116,7 @@ extension Library {
     }
 
     func setValue(_ value: String, of field: FieldDefinition, for items: [Item]) {
+        guard !field.kind.isComputed else { return }
         for item in items {
             var values = CustomField.decode(item.customFields)
             values[field.uuid] = value

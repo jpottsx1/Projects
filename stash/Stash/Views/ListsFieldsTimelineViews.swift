@@ -183,6 +183,19 @@ struct FieldEditor: View {
                 Text("None").tag("")
                 ForEach(field.choiceList, id: \.self) { Text($0).tag($0) }
             }
+        case .relation:
+            if let item = items.first { RelationEditor(field: field, item: item) }
+        case .rollup, .formula:
+            if let item = items.first {
+                LabeledContent(field.name) {
+                    if field.kind == .formula, !field.fieldConfig.formula.isEmpty, let error = library.formulaError(field, for: item) {
+                        Text(error).font(.caption).foregroundStyle(.red)
+                    } else {
+                        Text(library.displayValue(of: field, for: item)).textSelection(.enabled)
+                    }
+                }
+                .help(field.kind == .formula ? field.fieldConfig.formula : "A rollup across related items")
+            }
         }
     }
 
@@ -271,6 +284,18 @@ private struct FieldDefinitionRow: View {
                     get: { field.choiceList.joined(separator: ", ") },
                     set: { field.choiceList = $0.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) } }))
                     .font(.callout)
+            }
+            if field.kind == .rollup { RollupSetup(field: field) }
+            if field.kind == .formula {
+                TextField("Formula", text: Binding(
+                    get: { field.fieldConfig.formula },
+                    set: { var config = field.fieldConfig; config.formula = $0; library.setFieldConfig(config, of: field) }),
+                    prompt: Text("{Price} * {Quantity}"), axis: .vertical)
+                    .font(.callout.monospaced())
+                    .autocorrectionDisabled()
+                Text("Fields in braces, or Title, Created, Modified, Rating. + − × ÷ (* /), & joins text; if(), round(), min(), max(), abs(), today(), days(a, b), dateAdd(date, n), year(), month(), day(), length(), upper(), lower(), contains(), empty(); and, or, not; == != < > <= >=.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
             }
         }
     }
@@ -464,5 +489,112 @@ extension ListsSection {
                 Divider()
                 Button("Delete List", role: .destructive) { library.delete(list) }
             }
+    }
+}
+
+// MARK: - Relations and rollups
+
+/// The items a relation field leads to, with a way to add and remove them,
+/// and those relating back here.
+struct RelationEditor: View {
+    @Environment(Library.self) private var library
+    let field: FieldDefinition
+    let item: Item
+    @State private var isPicking = false
+
+    var body: some View {
+        let _ = library.revision
+        let related = library.relatedItems(library.value(of: field, for: item))
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text(field.name)
+                Spacer()
+                Button("Add…") { isPicking = true }.buttonStyle(.borderless)
+            }
+            if related.isEmpty {
+                Text("None").foregroundStyle(.secondary).font(.callout)
+            }
+            FlowLayout(spacing: 6) {
+                ForEach(related) { other in
+                    HStack(spacing: 3) {
+                        Button(other.displayTitle) { library.show(other) }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(.tint)
+                        Button {
+                            library.unrelate(item, from: other, through: field)
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.secondary)
+                    }
+                    .font(.callout)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.secondary.opacity(0.12), in: Capsule())
+                }
+            }
+        }
+        .sheet(isPresented: $isPicking) {
+            ItemPicker(excluding: item) { other in library.relate(item, to: other, through: field) }
+        }
+    }
+}
+
+/// Items whose relation fields lead to this one: the other side.
+struct RelatedFromSection: View {
+    @Environment(Library.self) private var library
+    let item: Item
+
+    var body: some View {
+        let _ = library.revision
+        let relating = library.itemsRelating(to: item)
+        if !relating.isEmpty {
+            Section("Related From") {
+                ForEach(Array(relating.enumerated()), id: \.offset) { _, pair in
+                    Button { library.show(pair.0) } label: {
+                        LabeledContent(pair.0.displayTitle, value: pair.1.name)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+}
+
+/// A rollup's set-up: which relation, what on the items it leads to, and how summed up.
+private struct RollupSetup: View {
+    @Environment(Library.self) private var library
+    @Query(sort: \FieldDefinition.order) private var fields: [FieldDefinition]
+    let field: FieldDefinition
+
+    var body: some View {
+        let config = field.fieldConfig
+        VStack(alignment: .leading, spacing: 4) {
+            Picker("Relation", selection: Binding(get: { config.relation }, set: { change { $0.relation = $1 }($0) })) {
+                Text("Choose…").tag(UUID?.none)
+                ForEach(fields.filter { $0.kind == .relation }) { Text($0.name).tag(Optional($0.uuid)) }
+            }
+            Picker("Of", selection: Binding(get: { config.target }, set: { change { $0.target = $1 }($0) })) {
+                Text("Their Titles").tag(UUID?.none)
+                ForEach(fields.filter { $0 != field && $0.kind != .relation }) { Text($0.name).tag(Optional($0.uuid)) }
+            }
+            Picker("Show", selection: Binding(get: { config.function }, set: { value in
+                var updated = field.fieldConfig
+                updated.function = value
+                library.setFieldConfig(updated, of: field)
+            })) {
+                ForEach(Rollup.Function.allCases) { Text($0.name).tag($0) }
+            }
+        }
+        .font(.callout)
+    }
+
+    private func change(_ apply: @escaping (inout FieldConfig, UUID?) -> Void) -> (UUID?) -> Void {
+        { value in
+            var updated = field.fieldConfig
+            apply(&updated, value)
+            library.setFieldConfig(updated, of: field)
+        }
     }
 }

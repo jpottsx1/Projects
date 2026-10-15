@@ -20,10 +20,14 @@ struct CompiledSearch {
     private let calendar: Calendar
     /// The custom fields searched, by name.
     private let fields: [String: (id: UUID, kind: CustomField.Kind)]
+    /// Relations, rollups and formulas, worked out (by the library) for searching.
+    private let resolve: ((Item, UUID) -> (String, CustomField.Kind))?
 
     init(_ query: SearchQuery, index: SearchIndex?, fields: [FieldDefinition] = [],
+         resolve: ((Item, UUID) -> (String, CustomField.Kind))? = nil,
          now: Date = .now, calendar: Calendar = .current) {
         self.query = query
+        self.resolve = resolve
         self.fields = Dictionary(fields.map { ($0.name, ($0.uuid, $0.kind)) }, uniquingKeysWith: { first, _ in first })
         usesIndex = index != nil
         if let index, let expression = query.ftsExpression {
@@ -88,8 +92,10 @@ struct CompiledSearch {
         if !query.fieldFilters.isEmpty {
             let values = CustomField.decode(item.customFields)
             for filter in query.fieldFilters {
-                guard let field = fields[filter.name],
-                      CustomField.matches(values[field.id] ?? "", kind: field.kind, filter: filter.value) else { return false }
+                guard let field = fields[filter.name] else { return false }
+                var (value, kind) = (values[field.id] ?? "", field.kind)
+                if field.kind.isComputed || field.kind == .relation, let resolve { (value, kind) = resolve(item, field.id) }
+                guard CustomField.matches(value, kind: kind, filter: filter.value) else { return false }
             }
         }
         if !query.labels.isEmpty, !query.labels.contains(item.label) { return false }
@@ -149,7 +155,7 @@ extension SearchQuery.Kind {
 }
 
 enum ItemLayout: String, CaseIterable {
-    case list, grid, table, board
+    case list, grid, table, board, calendar
 }
 
 /// How the list is ordered when it isn't showing search results best first.

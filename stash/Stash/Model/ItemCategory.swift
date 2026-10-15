@@ -22,6 +22,8 @@ final class ItemCategory {
     @Relationship(deleteRule: .nullify, inverse: \SmartFilter.category) var smartFilters: [SmartFilter]? = []
     /// Where things arrive instead of the Inbox (see `Library.importDestination`).
     var isImportDestination: Bool = false
+    /// The iCloud zone it's shared through (see Sharing); empty when it isn't shared.
+    var sharedZoneName: String = ""
 
     init(name: String, parent: ItemCategory? = nil) {
         self.name = name

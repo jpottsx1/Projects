@@ -1,5 +1,6 @@
 #if os(macOS)
 import AppKit
+import CloudKit
 import StashCore
 import UniformTypeIdentifiers
 
@@ -55,6 +56,11 @@ final class StashMacAppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.servicesProvider = StashServices.shared
         NSUpdateDynamicServices()
+    }
+
+    /// An invitation to a category shared through iCloud.
+    func application(_ application: NSApplication, userDidAcceptCloudKitShareWith metadata: CKShare.Metadata) {
+        Task { @MainActor in await Sharing.shared?.accept(metadata) }
     }
 }
 #endif

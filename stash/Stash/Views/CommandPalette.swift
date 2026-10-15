@@ -78,32 +78,33 @@ struct CommandPalette: View {
     static func commands(for library: Library) -> [Command] {
         var commands: [Command] = [
             Command(title: "New Note", shortcut: "⌘N", icon: "square.and.pencil") { library.newNote() },
-            Command(title: "Today’s Note", shortcut: "⇧⌘T", icon: "calendar") { library.openToday() },
-            Command(title: "New Voice Note", shortcut: "⇧⌘R", icon: "mic") { library.isRecording = true },
+            Command(title: "Today’s Note", shortcut: "⌘0", icon: "calendar") { library.openToday() },
+            Command(title: "New Voice Note", shortcut: "⌥⌘N", icon: "mic") { library.isRecording = true },
             Command(title: "New Mind Map", icon: "point.3.connected.trianglepath.dotted") { library.newMindMap() },
             Command(title: "New Sheet", icon: "tablecells") { library.newSheet() },
-            Command(title: "Add Link…", shortcut: "⇧⌘L", icon: "link.badge.plus") { library.isAddingLink = true },
-            Command(title: "Import Documents…", shortcut: "⇧⌘I", icon: "doc.badge.plus") { library.isImporting = true },
+            Command(title: "Add Link…", shortcut: "⌘L", icon: "link.badge.plus") { library.isAddingLink = true },
+            Command(title: "Import Documents…", shortcut: "⌥⌘I", icon: "doc.badge.plus") { library.isImporting = true },
             Command(title: "Quick Open…", shortcut: "⌘O", icon: "magnifyingglass") { library.quickOpen = .open },
-            Command(title: "Subscribe to Feed…", icon: "dot.radiowaves.up.forward") { library.isAddingFeed = true },
-            Command(title: "Check Feeds Now", shortcut: "⇧⌘K", icon: "arrow.clockwise") { Task { await library.checkFeeds(all: true) } },
+            Command(title: "Subscribe to Feed…", shortcut: "⌥⌘U", icon: "dot.radiowaves.up.forward") { library.isAddingFeed = true },
+            Command(title: "Check Feeds Now", shortcut: "⌘U", icon: "arrow.clockwise") { Task { await library.checkFeeds(all: true) } },
             Command(title: "Ask Your Library…", shortcut: "⌥⌘A", icon: "sparkles") { library.isAskingLibrary = true },
-            Command(title: "Link Graph", shortcut: "⌥⌘G", icon: "point.3.connected.trianglepath.dotted") { library.isShowingGraph = true },
+            Command(title: "Link Graph", icon: "point.3.connected.trianglepath.dotted") { library.isShowingGraph = true },
             Command(title: "New Notebook", icon: "book.pages") { library.newNotebook() },
             Command(title: "Concordance", icon: "textformat.abc") { library.isShowingConcordance = true },
             Command(title: "Statistics", icon: "chart.bar") { library.isShowingStatistics = true },
-            Command(title: "Smart Rules…", shortcut: "⌥⌘R", icon: "wand.and.stars") { library.isEditingRules = true },
-            Command(title: library.isShowingTagFilter ? "Hide Tag Filter" : "Show Tag Filter", icon: "tag") { library.isShowingTagFilter.toggle() },
+            Command(title: "Smart Rules…", icon: "wand.and.stars") { library.isEditingRules = true },
+            Command(title: library.isShowingTagFilter ? "Hide Tag Filter" : "Show Tag Filter", shortcut: "⌥⌘T", icon: "tag") { library.isShowingTagFilter.toggle() },
             Command(title: "Show as List", icon: "list.bullet") { library.layout = .list },
             Command(title: "Show as Grid", icon: "square.grid.2x2") { library.layout = .grid },
             Command(title: "Show as Columns", icon: "tablecells") { library.layout = .table },
             Command(title: "Show as Board", icon: "rectangle.split.3x1") { library.layout = .board },
-            Command(title: "Save Workspace…", icon: "rectangle.stack.badge.plus") { library.isSavingWorkspace = true },
+            Command(title: "Show as Calendar", icon: "calendar") { library.layout = .calendar },
+            Command(title: "Save Workspace…", shortcut: "⌘S", icon: "rectangle.stack.badge.plus") { library.isSavingWorkspace = true },
             Command(title: "Manage Workspaces…", icon: "rectangle.stack") { library.isManagingWorkspaces = true },
             Command(title: "Manage Libraries…", icon: "books.vertical") { library.isManagingLibraries = true },
             Command(title: "Automatic Backups…", icon: "clock.arrow.circlepath") { library.isManagingBackups = true },
             Command(title: "Markdown Folder Mirror…", icon: "folder.badge.gearshape") { library.isManagingMirror = true },
-            Command(title: "Export Everything…", icon: "square.and.arrow.up") { library.exportRequest = .everything },
+            Command(title: "Export Everything…", shortcut: "⌥⌘E", icon: "square.and.arrow.up") { library.exportRequest = .everything },
             Command(title: "Restore from Backup…", icon: "arrow.uturn.backward") { library.isRestoring = true },
             Command(title: "Import Bookmarks or Links…", icon: "bookmark") { library.isImportingBookmarks = true },
             Command(title: "Import Feeds (OPML)…", icon: "dot.radiowaves.up.forward") { library.isImportingFeeds = true },
@@ -119,7 +120,10 @@ struct CommandPalette: View {
             ("Reminders", "bell", .reminders), ("Read Later", "book", .readLater), ("Timeline", "calendar", .timeline),
             ("Templates", "doc.on.doc", .templates), ("Trash", "trash", .trash),
         ]
-        commands += places.map { name, icon, place in Command(title: "Go to " + name, icon: icon) { library.sidebar = place } }
+        commands += places.map { name, icon, place in
+            let key = PlaceCommands.places.firstIndex { $0.1 == place }.map { "⌘\($0 + 1)" } ?? ""
+            return Command(title: "Go to " + name, shortcut: key, icon: icon) { library.sidebar = place }
+        }
         commands += library.workspaces.map { workspace in
             Command(title: "Workspace: " + workspace.name, icon: "rectangle.stack") { library.open(workspace) }
         }
@@ -132,21 +136,25 @@ struct CommandPalette: View {
                 Command(title: allFavorite ? "Remove from Favorites" : "Add to Favorites", shortcut: "⌘D", icon: "star") {
                     library.setFavorite(live, !allFavorite)
                 },
-                Command(title: anyUnread ? "Mark as Read" : "Mark as Unread", shortcut: "⇧⌘U", icon: "circle.badge") {
+                Command(title: anyUnread ? "Mark as Read" : "Mark as Unread", shortcut: "⌥⌘R", icon: "circle.badge") {
                     library.setUnread(live, !anyUnread)
                 },
-                Command(title: allQueued ? "Remove from Read Later" : "Read Later", shortcut: "⌃⌘R", icon: "book") {
+                Command(title: allQueued ? "Remove from Read Later" : "Read Later", shortcut: "⌘R", icon: "book") {
                     library.setReadLater(live, !allQueued)
                 },
-                Command(title: "Add Tags…", shortcut: "⌥⌘T", icon: "number") { library.taggingItems = live },
-                Command(title: "Move to Category…", shortcut: "⌃⌘M", icon: "folder") { library.quickOpen = .file(live) },
+                Command(title: "Add Tags…", shortcut: "⌘T", icon: "number") { library.taggingItems = live },
+                Command(title: "Move to Category…", shortcut: "⌘G", icon: "folder") { library.quickOpen = .file(live) },
+                Command(title: "Show in Category", shortcut: "⌥⌘G", icon: "folder.badge.questionmark") {
+                    if let item = live.first { library.showInCategory(item) }
+                },
+                Command(title: "Duplicate", shortcut: "⌥⌘D", icon: "plus.square.on.square") { library.duplicate(live) },
                 Command(title: "Rename…", icon: "pencil") { library.renamingItems = live },
-                Command(title: "Lock", shortcut: "⌃⌘L", icon: "lock") { library.lock(live) },
+                Command(title: "Lock", shortcut: "⌘J", icon: "lock") { library.lock(live) },
                 Command(title: "Move to Trash", shortcut: "⌘⌫", icon: "trash") { library.moveToTrash(live) },
             ]
             if live.count == 1 {
                 commands += [
-                    Command(title: "Copy Item Link", shortcut: "⌃⌘C", icon: "link") { library.copyItemLink(live[0]) },
+                    Command(title: "Copy Item Link", shortcut: "⌥⌘L", icon: "link") { library.copyItemLink(live[0]) },
                     Command(title: "Copy Markdown Link", icon: "link") { library.copyMarkdownLink(live[0]) },
                     Command(title: "Print…", shortcut: "⌘P", icon: "printer") { library.printRequest = live[0] },
                 ]

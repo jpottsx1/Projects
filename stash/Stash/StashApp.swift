@@ -10,8 +10,11 @@ struct LibraryInfo: Codable, Identifiable, Equatable, Hashable {
 
     /// The main library's id: it was the only one before there were others.
     static let mainID = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
+    /// Where categories other people share with you are kept (see Sharing).
+    static let sharedID = UUID(uuidString: "00000000-0000-0000-0000-000000000002")!
 
     var isMain: Bool { id == Self.mainID }
+    var isShared: Bool { id == Self.sharedID }
 }
 
 /// The open library, made at launch and whenever another is chosen.
@@ -97,10 +100,8 @@ final class StashStore {
             }
         } else {
             // Other libraries stay on this device.
-            support = otherLibrariesFolder.appendingPathComponent(info.id.uuidString, isDirectory: true)
-            try? FileManager.default.createDirectory(at: support, withIntermediateDirectories: true)
-            configuration = ModelConfiguration(info.id.uuidString, schema: schema, url: support.appendingPathComponent("Library.store"),
-                                               cloudKitDatabase: .none)
+            support = supportFolder(for: info)
+            configuration = localConfiguration(for: info)
         }
         let container: ModelContainer
         do {
@@ -109,6 +110,28 @@ final class StashStore {
             fatalError("Couldn't open the library “\(info.name)”: \(error)")
         }
         return (container, Library(context: container.mainContext, support: support, isMain: info.isMain))
+    }
+
+    /// A library other than the main one: its folder, and its store, on this device only.
+    static func supportFolder(for info: LibraryInfo) -> URL {
+        let folder = otherLibrariesFolder.appendingPathComponent(info.id.uuidString, isDirectory: true)
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        return folder
+    }
+
+    static func localConfiguration(for info: LibraryInfo) -> ModelConfiguration {
+        ModelConfiguration(info.id.uuidString, schema: schema, url: supportFolder(for: info).appendingPathComponent("Library.store"),
+                           cloudKitDatabase: .none)
+    }
+
+    /// The library shared categories arrive in, made the first time one does.
+    @discardableResult
+    func ensureSharedLibrary() -> LibraryInfo {
+        if let existing = libraries.first(where: \.isShared) { return existing }
+        let info = LibraryInfo(id: LibraryInfo.sharedID, name: "Shared with Me", createdAt: .now)
+        libraries.append(info)
+        saveList()
+        return info
     }
 
     // MARK: - Managing
@@ -168,6 +191,11 @@ struct StashApp: App {
 
     private var container: ModelContainer { store.container }
     private var library: Library { store.library }
+
+    init() {
+        // Sharing through iCloud, once the store's open (only with sync on).
+        Task { @MainActor in Sharing.shared?.start() }
+    }
 
     var body: some Scene {
         #if os(macOS)
@@ -245,7 +273,7 @@ struct StashApp: App {
         .windowLevel(.floating)
         .windowResizability(.contentSize)
         .defaultPosition(.topTrailing)
-        .keyboardShortcut("s", modifiers: [.command, .control])
+        .keyboardShortcut("s", modifiers: [.command, .option])
 
         Window("Link Graph", id: "graph") {
             LinkGraphView()
@@ -293,12 +321,14 @@ struct StashCommands: Commands {
         CommandGroup(replacing: .newItem) {
             Button("New Note") { library.newNote() }
                 .keyboardShortcut("n")
-            Button("Today’s Note") { library.openToday() }
-                .keyboardShortcut("t", modifiers: [.command, .shift])
             Button("New Voice Note") { library.isRecording = true }
-                .keyboardShortcut("r", modifiers: [.command, .shift])
+                .keyboardShortcut("n", modifiers: [.command, .option])
+            Button("Today’s Note") { library.openToday() }
+                .keyboardShortcut("0")
             Button("Quick Open…") { library.quickOpen = .open }
                 .keyboardShortcut("o")
+            Button("Command Palette…") { library.isShowingPalette = true }
+                .keyboardShortcut("o", modifiers: [.command, .option])
             Button("New Mind Map") { library.newMindMap() }
             Button("New Sheet") { library.newSheet() }
             Button("New Note for Event…") { library.eventPicking = .newNote }
@@ -309,10 +339,12 @@ struct StashCommands: Commands {
             }
             Divider()
             Button("Add Link…") { library.isAddingLink = true }
-                .keyboardShortcut("l", modifiers: [.command, .shift])
+                .keyboardShortcut("l")
             Button("Subscribe to Feed…") { library.isAddingFeed = true }
+                .keyboardShortcut("u", modifiers: [.command, .option])
+            // Cmd-I is italic in a note, so importing has only the Option form.
             Button("Import Documents…") { library.isImporting = true }
-                .keyboardShortcut("i", modifiers: [.command, .shift])
+                .keyboardShortcut("i", modifiers: [.command, .option])
             Button("Index Folder…") { library.isChoosingFolderToIndex = true }
         }
         CommandGroup(replacing: .printItem) {
@@ -320,6 +352,7 @@ struct StashCommands: Commands {
                 .keyboardShortcut("p")
                 .disabled(windowItem == nil && library.selection == nil)
             Button("Save as PDF…") { library.pdfRequest = windowItem ?? library.selection }
+                .keyboardShortcut("p", modifiers: [.command, .option])
                 .disabled(windowItem == nil && library.selection == nil)
         }
         CommandGroup(replacing: .importExport) {
@@ -334,9 +367,10 @@ struct StashCommands: Commands {
                 let name = chosen.count == 1 ? chosen[0].displayTitle : "\(chosen.count) Items"
                 library.exportRequest = .items(chosen, name: name)
             }
-            .keyboardShortcut("e", modifiers: [.command, .shift])
+            .keyboardShortcut("e")
             .disabled(chosenItems.isEmpty)
             Button("Export Everything…") { library.exportRequest = .everything }
+                .keyboardShortcut("e", modifiers: [.command, .option])
             Button("Export All Highlights…") { library.exportRequest = .highlights }
             Divider()
             Button("Restore from Backup…") { library.isRestoring = true }
@@ -344,16 +378,14 @@ struct StashCommands: Commands {
         CommandMenu("Item") {
             let chosen = chosenItems
             Button("Open in New Window") { for item in chosen { openWindow.item(item, asTab: false) } }
-                .keyboardShortcut("o", modifiers: [.command, .option])
                 .disabled(chosen.isEmpty || windowItem != nil)
             Button("Open in New Tab") { for item in chosen { openWindow.item(item, asTab: true) } }
-                .keyboardShortcut("t", modifiers: [.command, .option, .shift])
                 .disabled(chosen.isEmpty || windowItem != nil)
             Divider()
             let live = chosen.filter { !$0.isTrashed }
             if live.count == 1 {
                 Button("Copy Item Link") { library.copyItemLink(live[0]) }
-                    .keyboardShortcut("c", modifiers: [.command, .control])
+                    .keyboardShortcut("l", modifiers: [.command, .option])
                 Button("Copy Markdown Link") { library.copyMarkdownLink(live[0]) }
                 ImageSearchMenu(item: live[0])
                     .environment(library)
@@ -368,25 +400,27 @@ struct StashCommands: Commands {
             Button(anyUnread ? "Mark as Read" : "Mark as Unread") {
                 library.setUnread(chosen, !anyUnread)
             }
-            .keyboardShortcut("u", modifiers: [.command, .shift])
+            .keyboardShortcut("r", modifiers: [.command, .option])
             .disabled(chosen.isEmpty)
             Button("Done (Take Out of Inbox)") { library.markFiled(chosen) }
                 .disabled(!chosen.contains(where: \.inInbox))
             Button("Add Tags…") { library.taggingItems = live }
-                .keyboardShortcut("t", modifiers: [.command, .option])
+                .keyboardShortcut("t")
                 .disabled(live.isEmpty)
             Button("Remind Me…") { library.remindingItems = live }
                 .disabled(live.isEmpty)
             let allQueued = !live.isEmpty && live.allSatisfy { $0.readLaterAt != nil }
             Button(allQueued ? "Remove from Read Later" : "Read Later") { library.setReadLater(live, !allQueued) }
-                .keyboardShortcut("r", modifiers: [.command, .control])
+                .keyboardShortcut("r")
                 .disabled(live.isEmpty)
             let allLocked = !live.isEmpty && live.allSatisfy(\.isLocked)
             Button(allLocked ? "Remove Lock…" : "Lock") {
                 if allLocked { Task { await library.removeLock(from: live) } } else { library.lock(live) }
             }
-            .keyboardShortcut("l", modifiers: [.command, .control])
+            .keyboardShortcut("j")
             .disabled(live.isEmpty)
+            Button("Lock All Again") { library.relockAll() }
+                .keyboardShortcut("j", modifiers: [.command, .option])
             Divider()
             Button("Move to Trash") { library.moveToTrash(live) }
                 .keyboardShortcut(.delete)
@@ -404,9 +438,13 @@ struct StashCommands: Commands {
             Button(chosen.count > 1 ? "Rename Items…" : "Rename…") { library.renamingItems = live }
                 .disabled(live.isEmpty)
             Button("Move to Category…") { library.quickOpen = .file(live) }
-                .keyboardShortcut("m", modifiers: [.command, .control])
+                .keyboardShortcut("g")
                 .disabled(live.isEmpty)
+            Button("Show in Category") { if let item = live.first { library.showInCategory(item) } }
+                .keyboardShortcut("g", modifiers: [.command, .option])
+                .disabled(live.first?.category == nil)
             Button("Duplicate") { library.duplicate(live) }
+                .keyboardShortcut("d", modifiers: [.command, .option])
                 .disabled(!live.contains { !$0.isLocked })
             Menu("Convert To") {
                 ForEach(ConversionFormat.allCases) { format in
@@ -420,7 +458,7 @@ struct StashCommands: Commands {
                 .disabled(chosen.count != 1 || (chosen.first?.highlights ?? []).isEmpty)
             Divider()
             Button("Check Feeds Now") { Task { await library.checkFeeds(all: true) } }
-                .keyboardShortcut("k", modifiers: [.command, .shift])
+                .keyboardShortcut("u")
             Button("Indexed Folders…") { library.isManagingIndexedFolders = true }
             Button("Ask Your Library…") { library.isAskingLibrary = true }
                 .keyboardShortcut("a", modifiers: [.command, .option])
@@ -428,9 +466,7 @@ struct StashCommands: Commands {
             Button("Concordance") { library.isShowingConcordance = true }
             Button("New Notebook") { library.newNotebook() }
             Button("Link Graph") { library.isShowingGraph = true }
-                .keyboardShortcut("g", modifiers: [.command, .option])
             Button("Smart Rules…") { library.isEditingRules = true }
-                .keyboardShortcut("r", modifiers: [.command, .option])
         }
         CommandMenu("Library") {
             LibraryMenuItems(withShortcuts: true)
@@ -444,15 +480,18 @@ struct StashCommands: Commands {
                 .keyboardShortcut("]")
                 .disabled(!library.canGoForward)
             Divider()
-            Button("Command Palette…") { library.isShowingPalette = true }
-                .keyboardShortcut("p", modifiers: [.command, .shift])
+            PlaceCommands(library: library)
+            Divider()
+            Button("Save Search as Smart Filter…") { library.isSavingSearch = true }
+                .keyboardShortcut("f", modifiers: [.command, .option])
+                .disabled(library.searchText.isEmpty && library.tagFilter.isEmpty)
+            Button(library.isShowingTagFilter ? "Hide Tag Filter" : "Show Tag Filter") { library.isShowingTagFilter.toggle() }
+                .keyboardShortcut("t", modifiers: [.command, .option])
+            Divider()
+            Button("Save Workspace…") { library.isSavingWorkspace = true }
+                .keyboardShortcut("s")
             WorkspaceMenu()
                 .environment(library)
-            Divider()
-            Button("Recents") { library.sidebar = .recents }
-            Button("Unfiled") { library.sidebar = .unfiled }
-            Button("Tasks") { library.sidebar = .tasks }
-            Button(library.isShowingTagFilter ? "Hide Tag Filter" : "Show Tag Filter") { library.isShowingTagFilter.toggle() }
         }
     }
 }
@@ -467,14 +506,14 @@ struct PadCommands: Commands {
         CommandGroup(replacing: .newItem) {
             Button("New Note") { library.newNote() }
                 .keyboardShortcut("n")
-            Button("Today’s Note") { library.openToday() }
-                .keyboardShortcut("t", modifiers: [.command, .shift])
             Button("New Voice Note") { library.isRecording = true }
-                .keyboardShortcut("r", modifiers: [.command, .shift])
+                .keyboardShortcut("n", modifiers: [.command, .option])
+            Button("Today’s Note") { library.openToday() }
+                .keyboardShortcut("0")
             Button("Add Link…") { library.isAddingLink = true }
-                .keyboardShortcut("l", modifiers: [.command, .shift])
+                .keyboardShortcut("l")
             Button("Import Documents…") { library.isImporting = true }
-                .keyboardShortcut("i", modifiers: [.command, .shift])
+                .keyboardShortcut("i", modifiers: [.command, .option])
         }
         CommandMenu("Item") {
             let live = library.selectedItems.filter { !$0.isTrashed }
@@ -484,11 +523,21 @@ struct PadCommands: Commands {
                 .disabled(live.isEmpty)
             let allQueued = !live.isEmpty && live.allSatisfy { $0.readLaterAt != nil }
             Button(allQueued ? "Remove from Read Later" : "Read Later") { library.setReadLater(live, !allQueued) }
-                .keyboardShortcut("r", modifiers: [.command, .control])
+                .keyboardShortcut("r")
+                .disabled(live.isEmpty)
+            let anyUnread = live.contains(where: \.isUnread)
+            Button(anyUnread ? "Mark as Read" : "Mark as Unread") { library.setUnread(live, !anyUnread) }
+                .keyboardShortcut("r", modifiers: [.command, .option])
                 .disabled(live.isEmpty)
             Button("Add Tags…") { library.taggingItems = live }
-                .keyboardShortcut("t", modifiers: [.command, .option])
+                .keyboardShortcut("t")
                 .disabled(live.isEmpty)
+            Button("Move to Category…") { library.quickOpen = .file(live) }
+                .keyboardShortcut("g")
+                .disabled(live.isEmpty)
+            Button("Copy Item Link") { if let item = live.first { library.copyItemLink(item) } }
+                .keyboardShortcut("l", modifiers: [.command, .option])
+                .disabled(live.count != 1)
             Button("Print…") { library.printRequest = library.selection }
                 .keyboardShortcut("p")
                 .disabled(library.selection == nil)
@@ -499,8 +548,8 @@ struct PadCommands: Commands {
             Divider()
             Button("Ask Your Library…") { library.isAskingLibrary = true }
                 .keyboardShortcut("a", modifiers: [.command, .option])
-            Button("Link Graph") { library.isShowingGraph = true }
-                .keyboardShortcut("g", modifiers: [.command, .option])
+            Button("Check Feeds Now") { Task { await library.checkFeeds(all: true) } }
+                .keyboardShortcut("u")
         }
         CommandMenu("Go") {
             Button("Back") { library.goBack() }
@@ -511,21 +560,33 @@ struct PadCommands: Commands {
                 .disabled(!library.canGoForward)
             Button("Quick Open…") { library.quickOpen = .open }
                 .keyboardShortcut("o")
-            Divider()
-            Button("Inbox") { library.sidebar = .inbox }
-                .keyboardShortcut("1")
-            Button("All Items") { library.sidebar = .all }
-                .keyboardShortcut("2")
-            Button("Read Later") { library.sidebar = .readLater }
-                .keyboardShortcut("3")
-            Button("Recents") { library.sidebar = .recents }
-                .keyboardShortcut("4")
-            Divider()
             Button("Command Palette…") { library.isShowingPalette = true }
-                .keyboardShortcut("p", modifiers: [.command, .shift])
-            WorkspaceMenu()
-                .environment(library)
+                .keyboardShortcut("o", modifiers: [.command, .option])
+            Divider()
+            PlaceCommands(library: library)
+            Divider()
+            Button(library.isShowingTagFilter ? "Hide Tag Filter" : "Show Tag Filter") { library.isShowingTagFilter.toggle() }
+                .keyboardShortcut("t", modifiers: [.command, .option])
+            Button("Save Workspace…") { library.isSavingWorkspace = true }
+                .keyboardShortcut("s")
         }
     }
 }
 #endif
+
+/// Cmd-1 to 9: the sidebar's places (Option-Cmd-1 to 9 switch libraries).
+struct PlaceCommands: View {
+    let library: Library
+
+    static let places: [(String, SidebarSelection)] = [
+        ("Inbox", .inbox), ("All Items", .all), ("Favorites", .favorites), ("Recents", .recents), ("Tasks", .tasks),
+        ("Read Later", .readLater), ("Reminders", .reminders), ("Unfiled", .unfiled), ("Trash", .trash),
+    ]
+
+    var body: some View {
+        ForEach(Array(Self.places.enumerated()), id: \.offset) { index, place in
+            Button(place.0) { library.sidebar = place.1 }
+                .keyboardShortcut(KeyEquivalent(Character(String(index + 1))))
+        }
+    }
+}

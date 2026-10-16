@@ -32,6 +32,8 @@ public enum MarkdownStyling {
         case image(source: String, width: Int? = nil)
         /// A line of a table, shown in fixed-width type so its columns line up.
         case tableRow
+        /// A toggle's title, between `<summary>` and `</summary>`: its tags are markers.
+        case toggleTitle
     }
 
     public struct Span: Equatable {
@@ -83,6 +85,20 @@ public enum MarkdownStyling {
         var contentStart = 0
         let leading = line.prefix { $0 == " " || $0 == "\t" }.utf16.count
         let body = String(line.dropFirst(line.prefix { $0 == " " || $0 == "\t" }.count))
+
+        // Toggles (<details>): the tags out of the way, the title bold.
+        let lowered = body.lowercased().trimmingCharacters(in: .whitespaces)
+        if lowered == "<details>" || lowered == "</details>" || lowered.hasPrefix("<details ") {
+            return [Span(start..<(start + units), .marker)]
+        }
+        if lowered.hasPrefix("<summary>"), let close = lowered.range(of: "</summary>") {
+            let open = leading + "<summary>".utf16.count
+            let closeStart = leading + lowered.utf16.distance(from: lowered.startIndex, to: close.lowerBound)
+            var spans = [Span(start..<(start + open), .marker)]
+            if closeStart > open { spans.append(Span((start + open)..<(start + closeStart), .toggleTitle)) }
+            spans.append(Span((start + closeStart)..<(start + units), .marker))
+            return spans
+        }
 
         if let picture = MarkdownBlocks.image(body.trimmingCharacters(in: .whitespaces)) {
             return [Span(start..<(start + units), .image(source: picture.source, width: MarkdownBlocks.pictureSize(picture.alt).width))]

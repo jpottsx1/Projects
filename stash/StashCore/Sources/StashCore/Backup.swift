@@ -298,6 +298,7 @@ public struct BackupManifest: Codable, Equatable {
         public var lastViewedAt: Date?
         public var sourceAddress: String?
         public var aliases: String?
+        public var reference: String?
         /// Words read from its pictures, by picture name, so they needn't be read again.
         public var pictureText: [String: String]?
         /// The lists it's in, its own fields' values (`CustomField.encode`),

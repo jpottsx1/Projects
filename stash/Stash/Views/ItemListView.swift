@@ -444,6 +444,12 @@ struct ItemListView: View {
                 Divider()
             }
             #endif
+            if Sharing.shared != nil, library.isMain, !item.isLocked {
+                Button(item.sharedZoneName.isEmpty ? "Share…" : "Sharing…") { library.sharingTarget = .item(item) }
+            }
+            if library.isShared, Sharing.TheirZone(item.sharedZoneName) != nil {
+                Button("Leave This Share", role: .destructive) { Task { try? await Sharing.shared?.leave(item.sharedZoneName) } }
+            }
             Menu("Copy Link") {
                 Button("Copy Item Link") { library.copyItemLink(item) }
                 Button("Copy Markdown Link") { library.copyMarkdownLink(item) }

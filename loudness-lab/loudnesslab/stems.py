@@ -475,3 +475,33 @@ def load_air_guide(cache_dir: Path, x: np.ndarray,
     share = np.where(total > 0, tonal / np.maximum(total, 1e-30), 0.0)
     frames = np.arange(share.size) * (rate // GUIDE_RATE)
     return np.interp(np.arange(x.shape[0]), frames, share).astype(np.float32)
+
+
+def keep_extra(cache_dir: Path, x: np.ndarray, arrays: dict[str, np.ndarray]) -> Path:
+    """Add `arrays` to what is kept for `x`, keeping everything already
+    there: for a measuring tool's own summaries of a separation
+    (tools/measure_drift.py keeps its bleed envelopes here), so a song is
+    still separated once whichever tool runs first."""
+    path = _cache_path(cache_dir, audio_key(x))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    partial = path.with_name(path.stem + ".partial.npz")
+    earlier = {}
+    if path.exists():
+        with np.load(path) as stored:
+            earlier = {k: stored[k] for k in stored.files}
+    np.savez_compressed(partial, **{**earlier, **arrays})
+    partial.replace(path)
+    return path
+
+
+def load_extra(cache_dir: Path, x: np.ndarray,
+               names: tuple[str, ...]) -> dict[str, np.ndarray] | None:
+    """The arrays `keep_extra` kept for `x` under `names`, or None unless
+    every one of them was."""
+    path = _cache_path(cache_dir, audio_key(x))
+    if not path.exists():
+        return None
+    with np.load(path) as stored:
+        if not all(n in stored.files for n in names):
+            return None
+        return {n: stored[n] for n in names}

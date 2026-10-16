@@ -276,7 +276,8 @@ loudnesslab/     the Python: bs1770, spectrum, subbass, declip, expand,
                  intro (intro edits: a cold-start track given an intro
                  made from its own instrumental; Session = `intro --serve`)
 tests/           its tests
-tools/           make_golden.py, build_help.py, the five checkers, measure_stem_kicks.py
+tools/           make_golden.py, build_help.py, the five checkers, measure_stem_kicks.py,
+                 measure_drift.py
 docs/help/       guide.md, the hand-written half of the help
 macapp/
   Sources/LoudnessKit/    the port: DSP, Loudness, Process, IO, Library
@@ -1763,6 +1764,59 @@ AFTER the exit); `IntroPanel` has the switch, the outro options and "Make outro"
 **Make Outro Edit...**). Tests: `tests/test_outro.py` (42), `OutroTests.swift`
 (decoding against REAL event lines, the exit maths, the engine against a
 stand-in tool that logs what it was asked).
+
+## Tempo drift: measured before any beat is replaced (2026-10-16)
+
+Jeff asked whether a 1960s/70s record with a live drummer (Sweet Caroline)
+could have its drums and bass replaced by a modern sampled rhythm section
+that follows the drummer's drift, so the new beat stays on the old vocals
+and instruments. Possibly; **nothing of it is built.** First the drift and
+the beat map get measured on real records: `tools/measure_drift.py <folders>`,
+or `Measure Tempo Drift.command` from Finder (pulls first, saves the report
+in `scans/tempo-drift-*.txt` with the version at the top). Per track:
+
+- **Tempo per bar** from beats FOLLOWED one at a time on the drum part
+  (`intro.follow`, the intro's bar-follower -- pulled out of `_layout` for
+  this, unchanged for the intro -- run a beat at a time), not a global
+  tempo: start, end, lowest, highest, spread, the largest bar-to-bar step,
+  and single beats' push and pull against the line through their
+  neighbours. A bar's tempo is a line through 3 bars of found beats (a beat
+  pushed 20 ms moves a bar read alone by 1%, the feel and not the tempo);
+  the drift (spread, start, end) through 9.
+- **Lock**: beats and bar lines on a real onset vs carried on, the longest
+  stretch with none and where, and how often the beat was found again
+  (`relock`) after one.
+- **Held by**: each beat is tried on the kick, then the snare, then anything
+  on the drum part, and the report says which held, and how each would do
+  alone. The kicks are `select_kicks`' by weight: on a drum part the kick
+  detector fires on snares too, and without the filter "the kick held" read
+  100% on a kit with kicks only on 1 and 3. Snare onsets within 30 ms of a
+  kick are that kick's click.
+- **Drum bleed** in "other" and "vocals": transient energy (a
+  harmonic/percussive split per STFT frame) that FOLLOWS the drums -- on the
+  hits, less what the stem has between them -- against the drum part's, in
+  dB. Kept in the shared cache beside the rest (`stems.keep_extra`), as
+  envelopes at 100 frames a second. A steady noise pad reads -19 dB by the
+  plain split and nothing by this one; that is why it is netted.
+- **Bass per bar** (`bassline.track`): the record's offset from concert
+  pitch (tape speed) taken out first, then the share of bars with a clear
+  note, notes per bar, and how much of the notes' time is runs under 60 ms.
+
+Checked on synthetic drummers with the drift put in by hand
+(`tests/test_measure_drift.py`): +4% over 40 bars, every beat 5-20 ms early
+or late, a two-bar stop, kick on 1 and 3, snare on 2 and 4. Found beats sit
+within 6 ms of the beats as played (median under 2), bar tempo within 0.6%
+RMS of the curve, spread within 0.4 points of the true 3.4%, the stop as
+the longest unlocked stretch (8 beats), push/pull within 2 ms of what was
+put in, a 3% step found at its bar, a kick 27 dB down for 12 bars handed to
+the snare there and back after, 10 dB more bleed reading 10 dB more, a bass
+30 cents sharp read as +30 with its one note in every bar. Eleven breakages
+of the code each turned a test red.
+
+**Not yet run on Jeff's records.** Synthetic drums are a weak proxy here as
+everywhere (see Stems); in particular Demucs on a 1960s kit, quiet kicks,
+room mics and tape are the unknowns the report is for. The first run wants
+a folder of live-drummer records with Sweet Caroline in it.
 
 ## Open
 

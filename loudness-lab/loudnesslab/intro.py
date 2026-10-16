@@ -467,6 +467,54 @@ def relock(sample: float, kicks: np.ndarray, period: float) -> float | None:
     return best
 
 
+def follow(drums_abs: np.ndarray, start: int, count: int, step: float,
+           period: float, rate: int, snap_to: tuple[np.ndarray, ...],
+           relock_to: tuple[np.ndarray, ...] | None = None
+           ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """`count` lines after `start`, each `step` samples on (a bar for the
+    intro's bar lines, a beat for tools/measure_drift.py): (lines, whether
+    each sat on an onset, which onset list held it).
+
+    Lines are followed, not computed: each is looked for one step after the
+    LAST ONE FOUND, so a tempo the fit has slightly wrong (or a drummer who
+    pushes) is re-synchronised every line instead of piling up. Where no
+    onset is near (a breakdown) the grid carries on from the last real one,
+    and when the onsets come back further off than `snap` accepts, `relock`
+    finds the beat they are on.
+
+    `snap_to` are tried in order, so a line falls back from the kicks to
+    another drum's onsets only where no kick is near; `relock_to` (default
+    the same lists) likewise. `held[i]` is the index into `snap_to` that
+    held line i, len(snap_to) + j for relock list j, -1 for none. The first
+    line is `start` itself and counts as held by nothing: the caller knows
+    what it is."""
+    relock_to = snap_to if relock_to is None else relock_to
+    lines, found, held = [int(start)], [False], [-1]
+    for _ in range(count):
+        guess = lines[-1] + step
+        line, hit, by = int(round(guess)), False, -1
+        for i, onsets in enumerate(snap_to):
+            line, hit = attack(drums_abs, guess, onsets, period, rate)
+            if hit:
+                by = i
+                break
+        if not hit:
+            for j, onsets in enumerate(relock_to):
+                beat = relock(guess, onsets, period)
+                if beat is not None:
+                    line, hit = attack(drums_abs, beat, onsets, period, rate)
+                    by = len(snap_to) + j
+                    break
+            else:
+                # As before there was more than one list: carried on from
+                # where the first list's `attack` put it.
+                line, _ = attack(drums_abs, guess, snap_to[0], period, rate)
+        lines.append(line)
+        found.append(hit)
+        held.append(by)
+    return np.array(lines), np.array(found), np.array(held)
+
+
 def _low_band(x: np.ndarray, rate: int) -> np.ndarray:
     mono = x.mean(axis=1).astype(np.float64)
     return np.abs(sosfiltfilt(butter(2, 150.0, btype="low", fs=rate,
@@ -593,23 +641,10 @@ def _layout(x: np.ndarray, instrumental: np.ndarray, vocals: np.ndarray,
     pickup = min(pickup, int(grid.bar))
 
     last = int((len(x) - join) // grid.bar)
-    # Bar lines are followed, not computed: each is looked for one bar
-    # after the LAST ONE FOUND, so a tempo the fit has slightly wrong (or a
-    # drummer who pushes) is re-synchronised every bar instead of piling
-    # up. Where no kick is near (a breakdown) the grid carries on from the
-    # last real one, and when the kicks come back further off than `snap`
-    # accepts, `relock` finds the beat they are on.
-    lines, found = [join], [join_found]
-    for _ in range(last):
-        line, hit = attack(drums_abs, lines[-1] + grid.bar, kicks, period, rate)
-        if not hit:
-            beat_one = relock(lines[-1] + grid.bar, kicks, period)
-            if beat_one is not None:
-                line, hit = attack(drums_abs, beat_one, kicks, period, rate)
-        lines.append(line)
-        found.append(hit)
-    bar_lines = np.array(lines)
-    snapped = np.array(found)
+    lines, found, _ = follow(drums_abs, join, last, grid.bar, period, rate, (kicks,))
+    found[0] = join_found
+    bar_lines = lines
+    snapped = found
 
     warnings = []
     if coherence < MIN_COHERENCE:

@@ -16,6 +16,15 @@ The Mac version runs with no setup. To run it on **your own iPhone**, choose the
 Stash target, open *Signing & Capabilities*, pick your Apple ID under
 *Team*, and change the Bundle Identifier if Xcode says it's taken.
 
+## App icon
+
+To use your own icon, give a square PNG (1024x1024 or larger) to the script
+and rebuild:
+
+    Scripts/set-app-icon.sh ~/Downloads/icon.png
+
+It makes every Mac and iPhone size and puts them in the asset catalog.
+
 ## Syncing between Mac and iPhone
 
 Sync goes through your iCloud account and is **off until you turn it on**,

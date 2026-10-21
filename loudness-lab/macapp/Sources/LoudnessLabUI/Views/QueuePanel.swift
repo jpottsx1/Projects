@@ -155,7 +155,11 @@ struct QueuePanel: View {
         let rows = shown
         guard !rows.isEmpty else { return .ignored }
         let at = rows.firstIndex { $0.path == highlighted } ?? (step > 0 ? -1 : rows.count)
-        highlighted = rows[min(max(at + step, 0), rows.count - 1)].path
+        let next = rows[min(max(at + step, 0), rows.count - 1)].path
+        highlighted = next
+        // A preview playing follows the highlight, as in Finder: the next
+        // track plays. Nothing starts when nothing was playing.
+        if previewPlayer.isPlaying, previewing != next { onPreview(next) }
         return .handled
     }
 

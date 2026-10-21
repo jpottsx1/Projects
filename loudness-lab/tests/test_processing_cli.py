@@ -294,14 +294,21 @@ class TestDynamicsThroughTheCommand(unittest.TestCase):
         self.assertEqual(events[-1]["event"], "done")
         self.assertEqual(events[-1]["written"], 2)
 
-    def test_without_any_of_them_it_still_declines(self):
+    def test_without_any_of_them_it_only_levels(self):
+        out = self.dir / "levelled"
         buffer = io.StringIO()
         with contextlib.redirect_stdout(buffer):
             code = cli.main(["subbass", str(self.src), "--db",
-                             str(self.dir / "l.db"), "--amount", "0",
-                             "--porcelain"])
-        self.assertEqual(code, 0)
-        self.assertIn("changes nothing", buffer.getvalue())
+                             str(self.dir / "l.db"), "--out", str(out),
+                             "--amount", "0", "--jobs", "1", "--porcelain"])
+        self.assertEqual(code, 0, buffer.getvalue())
+        # Porcelain stays JSON only, and the run writes one levelled file
+        # a track rather than an A/B pair of identical ones.
+        events = [json.loads(line) for line in buffer.getvalue().splitlines()
+                  if line.strip()]
+        self.assertEqual(events[-1]["event"], "done")
+        self.assertEqual(events[-1]["written"], 2)
+        self.assertFalse(list(out.glob("*A original*")))
 
     def test_the_range_reaches_the_target_through_the_whole_chain(self):
         """End to end, not just in the stage: the levelling that follows

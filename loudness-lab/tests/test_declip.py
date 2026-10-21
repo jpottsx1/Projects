@@ -503,12 +503,13 @@ class ThroughTheCommand(unittest.TestCase):
         self.assertIn("run(s) restored", text)
         self.assertEqual(len(list(out_dir.glob("*.flac"))), 1)
 
-    def test_without_the_flag_it_still_declines(self):
-        code, text, _ = self.run_subbass("--amount", "0")
-        self.assertEqual(code, 0)
-        self.assertIn("changes nothing", text)
-        # And says where the work it declined actually belongs.
-        self.assertIn("gain", text)
+    def test_without_the_flag_it_only_levels(self):
+        code, text, out_dir = self.run_subbass("--amount", "0")
+        self.assertEqual(code, 0, text)
+        self.assertIn("Only levelling is on", text)
+        # One levelled file a track, not an A/B pair of identical ones.
+        self.assertFalse(list(out_dir.glob("*A original*")))
+        self.assertTrue(list(out_dir.glob("*.flac")))
 
     def test_the_written_file_no_longer_clips(self):
         _, text, out_dir = self.run_subbass("--amount", "0", "--declip",

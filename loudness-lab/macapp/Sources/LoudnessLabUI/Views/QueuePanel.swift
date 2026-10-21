@@ -118,14 +118,21 @@ struct QueuePanel: View {
     }
 
     private var list: some View {
-        ScrollView {
-            LazyVStack(spacing: 0) {
-                ForEach(shown) { item in
-                    row(item, inRange: willProcess.contains(item.path))
-                        .contentShape(Rectangle())
-                        .onTapGesture { highlighted = item.path; listFocused = true }
-                    Divider()
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(spacing: 0) {
+                    ForEach(shown) { item in
+                        row(item, inRange: willProcess.contains(item.path))
+                            .contentShape(Rectangle())
+                            .onTapGesture { highlighted = item.path; listFocused = true }
+                        Divider()
+                    }
                 }
+            }
+            // The arrows move the highlight; the list follows it, scrolling
+            // only as far as it takes to show the track.
+            .onChange(of: highlighted) { _, path in
+                if let path { proxy.scrollTo(path) }
             }
         }
         // Space plays the highlighted track, arrows move the highlight.

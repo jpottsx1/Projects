@@ -384,11 +384,32 @@ class TestComparisonPairs(unittest.TestCase):
                                  "--quiet"])
             output = buffer.getvalue()
         self.assertEqual(code, 0)
-        self.assertNotIn("kicks/min", output)
-        # level-only is a gain policy: subbass must decline rather than
-        # decode everything, change nothing and write identical pairs.
-        self.assertIn("changes nothing", output)
-        self.assertIn("gain", output)
+        # level-only levels and nothing else: no A/B pair, which would be
+        # two identical files, just the track at the target.
+        self.assertIn("Only levelling is on", output)
+
+    def test_level_only_writes_the_track_at_the_target(self):
+        from loudnesslab import bs1770, cli, decode
+        x, _ = programme(seconds=6.0)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "src"
+            root.mkdir()
+            subbass.write_flac(root / "a.flac", x * 0.3, RATE)
+            out_dir = Path(tmp) / "out"
+            with contextlib.redirect_stdout(io.StringIO()):
+                code = cli.main(["subbass", str(root), "--db",
+                                 str(Path(tmp) / "q.db"), "--profile",
+                                 "level-only", "--target", "-20",
+                                 "--estimator", "lufs_i", "--format", "flac",
+                                 "--out", str(out_dir), "--jobs", "1",
+                                 "--quiet"])
+            self.assertEqual(code, 0)
+            written = sorted(p for p in out_dir.rglob("*.flac"))
+            self.assertEqual(len(written), 1, written)
+            self.assertNotIn("A original", written[0].name)
+            audio = decode.decode(written[0])
+            self.assertAlmostEqual(bs1770.measure(audio)["lufs_i"], -20.0,
+                                   delta=0.3)
 
     def test_auto_without_a_reference_is_refused(self):
         from loudnesslab import cli

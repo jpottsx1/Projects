@@ -854,15 +854,17 @@ def cmd_subbass(args: argparse.Namespace) -> int:
         return 2
     if (not args.auto and args.amount <= 0 and args.punch <= 0
             and not args.declip and args.target_lra <= 0
-            and args.transient <= 0 and args.air <= 0):
-        # level-only is a gain policy. Running this command under it would
-        # decode every track, change nothing, and write pairs of identical
-        # files -- worse than useless, because it looks like work happened.
-        return fail(
-            "This profile changes nothing (sub, punch, declip, range, "
-            "attack and air are all off).\nNothing to do -- levelling is the "
-            "gain command:\n  ./loudness-lab gain <path> --profile "
-            f"{args.profile or 'level-only'}", 0)
+            and args.transient <= 0 and args.air <= 0
+            and getattr(args, "mud", 0) <= 0 and getattr(args, "body", 0) <= 0
+            and not args.no_compare):
+        # Nothing but levelling. A comparison would be a pair of identical
+        # files, since B is level-matched to A, so write the levelled track
+        # alone. This used to refuse and point at the gain command, but
+        # that works only on MP3: a FLAC, WAV or AAC library had no way to
+        # be brought to the target at all.
+        out("Only levelling is on, so there is nothing to compare: writing "
+            f"each track at {args.target:+.1f} ({args.estimator}).")
+        args.no_compare = True
     if getattr(args, "replace_originals", False):
         # The one place processing touches originals, so it has to be
         # asked for twice and cannot be asked for by accident: a finished

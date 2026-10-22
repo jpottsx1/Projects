@@ -140,6 +140,9 @@ public struct LoudnessLabIntroView: View {
         }
         .onChange(of: focus) { _, new in if let new { engine.focus(new.path) } }
         .onChange(of: tracks) { _, _ in if let focus { engine.focus(focus.path) } }
+        .onReceive(NotificationCenter.default.publisher(for: .loudnessLabStopPreview)) { _ in
+            engine.stopPlaying()
+        }
     }
 }
 
@@ -170,6 +173,8 @@ extension Notification.Name {
     public static let loudnessLabTogglePreview = Notification.Name("loudnesslab.togglePreview")
     /// Posted by `LoudnessLab.skipPreview`, carrying seconds (`Double`) as `object`.
     public static let loudnessLabSkipPreview = Notification.Name("loudnesslab.skipPreview")
+    /// Posted by `LoudnessLab.stopPreview`.
+    public static let loudnessLabStopPreview = Notification.Name("loudnesslab.stopPreview")
     /// Posted by `LoudnessLab.moveHighlight`, carrying `Int` (+1/-1) as `object`.
     public static let loudnessLabMoveHighlight = Notification.Name("loudnesslab.moveHighlight")
 }
@@ -203,6 +208,13 @@ public enum LoudnessLab {
     /// Jumps the running preview ahead by `seconds`, clamped to the track's end.
     public static func skipPreview(by seconds: Double = 30) {
         NotificationCenter.default.post(name: .loudnessLabSkipPreview, object: seconds)
+    }
+
+    /// Stops whatever the Lab is playing -- the queue preview, the A/B
+    /// player and the intro editor's -- for a host whose own preview is
+    /// starting, so the two don't play over each other.
+    public static func stopPreview() {
+        NotificationCenter.default.post(name: .loudnessLabStopPreview, object: nil)
     }
 
     /// Moves the queue's highlight for a host that has claimed the arrow keys.

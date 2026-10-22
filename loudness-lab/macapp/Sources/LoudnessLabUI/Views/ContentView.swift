@@ -242,6 +242,11 @@ struct ContentView: View {
             if old == .intro { intro.stopPlaying() }
             if new == .intro { player.stop() }
         }
+        // A host's own preview is starting.
+        .onReceive(NotificationCenter.default.publisher(for: .loudnessLabStopPreview)) { _ in
+            intro.stopPlaying()
+            player.stop()
+        }
         .onReceive(NotificationCenter.default.publisher(for: .loudnessLabSendToIntro)) { note in
             // A host with its own intro view takes these itself.
             guard showsIntro, let urls = note.object as? [URL], let first = urls.first else { return }

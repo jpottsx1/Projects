@@ -74,21 +74,35 @@ public struct NoteBlock: Equatable, Identifiable {
 
 public enum NoteBlocks {
     public static func split(_ markdown: String) -> [NoteBlock] {
+        splitWithLines(markdown).map(\.block)
+    }
+
+    /// The blocks, and the line each starts on.
+    public static func splitWithLines(_ markdown: String) -> [(block: NoteBlock, line: Int)] {
         let lines = MarkdownBlocks.sourceLines(markdown)
-        var blocks: [NoteBlock] = []
+        var blocks: [(block: NoteBlock, line: Int)] = []
         var paragraph: [String] = []
+        var paragraphStart = 0
         var quote: [String] = []
-        func flush() {
-            if !paragraph.isEmpty { blocks.append(NoteBlock(kind: .text, text: paragraph.joined(separator: "\n"))) }
-            if !quote.isEmpty { blocks.append(NoteBlock(kind: .quote, text: quote.joined(separator: "\n"))) }
+        var quoteStart = 0
+        func flushParagraph() {
+            if !paragraph.isEmpty { blocks.append((NoteBlock(kind: .text, text: paragraph.joined(separator: "\n")), paragraphStart)) }
             paragraph = []
+        }
+        func flushQuote() {
+            if !quote.isEmpty { blocks.append((NoteBlock(kind: .quote, text: quote.joined(separator: "\n")), quoteStart)) }
             quote = []
+        }
+        func flush() {
+            // In the order they started.
+            if paragraphStart <= quoteStart { flushParagraph(); flushQuote() } else { flushQuote(); flushParagraph() }
         }
         var index = 0
         while index < lines.count {
             let line = lines[index]
             let trimmed = line.trimmingCharacters(in: .whitespaces)
             let indent = MarkdownBlocks.indentLevel(line)
+            let begin = index
 
             if trimmed.hasPrefix("```") {
                 flush()
@@ -99,14 +113,14 @@ public enum NoteBlocks {
                     code.append(lines[index])
                     index += 1
                 }
-                blocks.append(NoteBlock(kind: .code, text: code.joined(separator: "\n"), body: language))
+                blocks.append((NoteBlock(kind: .code, text: code.joined(separator: "\n"), body: language), begin))
                 index += 1
                 continue
             }
             if trimmed.lowercased().hasPrefix("<details") {
                 flush()
                 let (title, body, next) = toggle(at: index, in: lines)
-                blocks.append(NoteBlock(kind: .toggle, text: title, body: body))
+                blocks.append((NoteBlock(kind: .toggle, text: title, body: body), begin))
                 index = next
                 continue
             }
@@ -120,7 +134,7 @@ public enum NoteBlocks {
                     table.append(lines[index])
                     index += 1
                 }
-                blocks.append(NoteBlock(kind: .raw, text: table.joined(separator: "\n")))
+                blocks.append((NoteBlock(kind: .raw, text: table.joined(separator: "\n")), begin))
                 continue
             }
             if trimmed.isEmpty {
@@ -128,41 +142,54 @@ public enum NoteBlocks {
             } else if let (level, text) = MarkdownBlocks.heading(trimmed) {
                 flush()
                 switch level {
-                case 1: blocks.append(NoteBlock(kind: .heading1, text: text))
-                case 2: blocks.append(NoteBlock(kind: .heading2, text: text))
-                case 3: blocks.append(NoteBlock(kind: .heading3, text: text))
-                default: blocks.append(NoteBlock(kind: .raw, text: trimmed))
+                case 1: blocks.append((NoteBlock(kind: .heading1, text: text), begin))
+                case 2: blocks.append((NoteBlock(kind: .heading2, text: text), begin))
+                case 3: blocks.append((NoteBlock(kind: .heading3, text: text), begin))
+                default: blocks.append((NoteBlock(kind: .raw, text: trimmed), begin))
                 }
             } else if MarkdownBlocks.isRule(trimmed) {
                 flush()
-                blocks.append(NoteBlock(kind: .divider))
+                blocks.append((NoteBlock(kind: .divider), begin))
             } else if MarkdownBlocks.image(trimmed) != nil {
                 flush()
-                blocks.append(NoteBlock(kind: .raw, text: trimmed))
+                blocks.append((NoteBlock(kind: .raw, text: trimmed), begin))
             } else if trimmed.hasPrefix(">") {
-                if !paragraph.isEmpty { let held = quote; quote = []; flush(); quote = held }
+                flushParagraph()
+                if quote.isEmpty { quoteStart = begin }
                 quote.append(String(trimmed.dropFirst()).trimmingCharacters(in: .whitespaces))
             } else if let (done, text) = MarkdownBlocks.task(trimmed) {
                 flush()
-                blocks.append(NoteBlock(kind: .todo, text: text, indent: indent, done: done))
+                blocks.append((NoteBlock(kind: .todo, text: text, indent: indent, done: done), begin))
             } else if let text = MarkdownBlocks.bullet(trimmed) {
                 flush()
-                blocks.append(NoteBlock(kind: .bullet, text: text, indent: indent))
+                blocks.append((NoteBlock(kind: .bullet, text: text, indent: indent), begin))
             } else if let (_, text) = MarkdownBlocks.numbered(trimmed) {
                 flush()
-                blocks.append(NoteBlock(kind: .numbered, text: text, indent: indent))
+                blocks.append((NoteBlock(kind: .numbered, text: text, indent: indent), begin))
             } else if line.first?.isWhitespace == true, paragraph.isEmpty, quote.isEmpty,
-                      let last = blocks.last, last.kind.isListItem {
+                      let last = blocks.last, last.block.kind.isListItem {
                 // A list item's text running on to the next line.
-                blocks[blocks.count - 1].text += "\n" + trimmed
+                blocks[blocks.count - 1].block.text += "\n" + trimmed
             } else {
-                if !quote.isEmpty { let held = paragraph; paragraph = []; flush(); paragraph = held }
+                flushQuote()
+                if paragraph.isEmpty { paragraphStart = begin }
                 paragraph.append(trimmed)
             }
             index += 1
         }
         flush()
         return blocks
+    }
+
+    /// The note with the block on `line` moved up (-1) or down (1) a place.
+    /// Nil when there's nowhere to move it. Gives the line it starts on after.
+    public static func movingBlock(at line: Int, by offset: Int, in markdown: String) -> (text: String, line: Int)? {
+        let found = splitWithLines(markdown)
+        guard let index = found.lastIndex(where: { $0.line <= line }), found.indices.contains(index + offset) else { return nil }
+        let moved = moving(found.map(\.block), from: index, to: index + offset)
+        let text = join(moved)
+        let newStart = splitWithLines(text)[index + offset].line
+        return (text, newStart)
     }
 
     /// A `<details>` section starting at `start`: its title, its contents,

@@ -95,6 +95,18 @@ struct ImageSearchMenu: View {
 
     var body: some View {
         if Library.canSearchImage(item) {
+            if item.kind == .link, let url = item.url, ImageSearch.isImageAddress(url.absoluteString) {
+                Button("Save Full-Size Image") { Task { await library.saveFullSizeImage(from: url, page: nil, category: item.category) } }
+            } else if item.sourceAddress != nil, Library.canMarkUp(item) {
+                Button("Get Full-Size Version") {
+                    Task {
+                        if !(await library.getFullSizeVersion(of: item)) {
+                            library.importError = "No bigger version of “\(item.displayTitle)” was found."
+                        }
+                    }
+                }
+                .help("Looks for the biggest version of the picture where it came from, and uses it if it's bigger")
+            }
             Menu("Search Image With") {
                 ForEach(ImageSearch.Engine.allCases) { engine in
                     Button(engine.name) { library.searchImage(item, with: engine) }

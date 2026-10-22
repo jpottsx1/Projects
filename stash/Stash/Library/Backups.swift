@@ -161,6 +161,7 @@ extension Library {
             record.lastViewedAt = item.lastViewedAt
             record.sourceAddress = item.sourceAddress
             record.aliases = item.aliases.isEmpty ? nil : item.aliases
+            record.reference = item.referenceJSON.isEmpty ? nil : item.referenceJSON
             if !item.calendarEventID.isEmpty {
                 record.calendarEventID = item.calendarEventID
                 record.calendarEventTitle = item.calendarEventTitle
@@ -424,6 +425,7 @@ extension Library {
             item.lastViewedAt = record.lastViewedAt
             item.sourceAddress = record.sourceAddress
             item.aliases = record.aliases ?? ""
+            item.referenceJSON = record.reference ?? ""
             item.calendarEventID = record.calendarEventID ?? ""
             item.calendarEventTitle = record.calendarEventTitle ?? ""
             item.calendarEventStart = record.calendarEventStart

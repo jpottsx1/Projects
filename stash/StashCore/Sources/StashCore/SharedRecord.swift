@@ -44,6 +44,8 @@ public struct SharedItemPayload: Codable, Equatable {
     /// The file's name, when one is sent beside it.
     public var fileName: String?
     public var highlights: [Highlight]
+    /// Who made this change, by name, for "last changed by"; not part of the signature.
+    public var editedBy: String?
 
     public static let textLimit = 200_000
 
@@ -87,6 +89,14 @@ public enum SharedZones {
     public static func categoryID(fromZone name: String) -> UUID? {
         guard name.hasPrefix("category-") else { return nil }
         return UUID(uuidString: String(name.dropFirst("category-".count)))
+    }
+
+    /// The zone a single shared item goes in, on its own.
+    public static func zoneName(forItem id: UUID) -> String { "item-" + id.uuidString }
+
+    public static func itemID(fromZone name: String) -> UUID? {
+        guard name.hasPrefix("item-") else { return nil }
+        return UUID(uuidString: String(name.dropFirst("item-".count)))
     }
 
     /// What to send and what to delete, from each item's signature now and as last sent.

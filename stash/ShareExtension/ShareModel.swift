@@ -79,6 +79,7 @@ final class ShareModel {
         case .link: return first.url.map { WebAddress.displayHost(of: $0) } ?? "Link"
         case .file: return first.file?.lastPathComponent ?? "File"
         case .note: return "Note"
+        case .image: return first.url.map { WebAddress.displayHost(of: $0) } ?? "Picture"
         }
     }
 

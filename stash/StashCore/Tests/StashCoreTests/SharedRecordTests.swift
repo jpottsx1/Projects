@@ -18,6 +18,8 @@ final class SharedRecordTests: XCTestCase {
         let id = UUID()
         XCTAssertEqual(SharedZones.categoryID(fromZone: SharedZones.zoneName(forCategory: id)), id)
         XCTAssertNil(SharedZones.categoryID(fromZone: "com.apple.coredata.cloudkit.zone"))
+        XCTAssertEqual(SharedZones.itemID(fromZone: SharedZones.zoneName(forItem: id)), id)
+        XCTAssertNil(SharedZones.itemID(fromZone: SharedZones.zoneName(forCategory: id)))
         let a = UUID(), b = UUID(), c = UUID()
         let changes = SharedZones.changes(now: [a: "1", b: "2"], sent: [a: "1", b: "1", c: "1"])
         XCTAssertEqual(changes.save, [b])
@@ -31,6 +33,8 @@ final class SharedMergeTests: XCTestCase {
                                         createdAt: .distantPast, modifiedAt: Date(timeIntervalSince1970: 10))
         let first = payload.signature
         payload.extractedText = "read again"
+        XCTAssertEqual(payload.signature, first)
+        payload.editedBy = "Ann"
         XCTAssertEqual(payload.signature, first)
         payload.body = "y"
         XCTAssertNotEqual(payload.signature, first)

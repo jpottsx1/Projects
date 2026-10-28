@@ -26,8 +26,11 @@ from pathlib import Path
 # Keys a profile may set, with the value used when nothing says otherwise.
 FIELDS = {
     "description": "",
-    "target": -16.0,        # level to aim at, on `estimator`
-    "estimator": "s_p95",
+    # Level to aim at, on `estimator`. -11.5 integrated is where Platinum
+    # Notes leaves a track: its "Break My Heart" measured -11.52 LUFS-I
+    # (s_p95 -10.13), so Lab and PN files sit at the same level in a set.
+    "target": -11.5,
+    "estimator": "lufs_i",
     "peak_ceiling": -1.0,   # dBTP no gain may exceed
     "auto": False,          # size the sub from each track's own shortfall
     "reference": None,      # the corpus --auto measures against
@@ -78,13 +81,13 @@ BUILT_IN = {
     "level-only": {
         "description": "Lossless levelling and nothing else. No decode, no "
                        "re-encode, reversible.",
-        "target": -16.0, "estimator": "s_p95", "peak_ceiling": -1.0,
+        "target": -11.5, "estimator": "lufs_i", "peak_ceiling": -1.0,
         "auto": False, "amount": 0.0, "punch": 0.0,
     },
     "restore": {
         "description": "Levelling, plus sub sized per track against a "
                        "reference corpus. Needs `reference`. Lossy.",
-        "target": -16.0, "estimator": "s_p95", "peak_ceiling": -1.0,
+        "target": -11.5, "estimator": "lufs_i", "peak_ceiling": -1.0,
         "auto": True, "max_amount": 6.0, "min_activity": 20.0, "punch": 0.0,
     },
     # Measured, not guessed. Three independent 1970s disco corpora -- 108
@@ -99,7 +102,7 @@ BUILT_IN = {
         "description": "1970s disco. Deficit of 6-9 dB across 32-63 Hz, "
                        "agreed by three independent corpora; nothing below "
                        "32 Hz to lift. Needs `reference`. Lossy.",
-        "target": -16.0, "estimator": "s_p95", "peak_ceiling": -1.0,
+        "target": -11.5, "estimator": "lufs_i", "peak_ceiling": -1.0,
         "auto": True, "max_amount": 8.0,
         # Lower than the default 20. Disco is the most groove-locked material
         # in the project and sits nearest the threshold, and on a corpus this
@@ -146,7 +149,7 @@ BUILT_IN = {
         "description": "1980s pop and new wave. Short by 6-11 dB across "
                        "31.5-63 Hz, measured over five discs. Needs "
                        "`reference`. Lossy.",
-        "target": -16.0, "estimator": "s_p95", "peak_ceiling": -1.0,
+        "target": -11.5, "estimator": "lufs_i", "peak_ceiling": -1.0,
         "auto": True,
         # Eleven, just above the thinnest disc measured. It was ten until
         # the full table came back with a reference set: Disc 4 sits 10.92
@@ -224,7 +227,7 @@ BUILT_IN = {
         "description": "Late 1990s pop. Low end nearly there (2.5-3.6 dB "
                        "short), but hard-limited: crest 10.3, LRA 5.4, 44% "
                        "arrived clipped. Needs `reference`. Lossy.",
-        "target": -16.0, "estimator": "s_p95", "peak_ceiling": -1.0,
+        "target": -11.5, "estimator": "lufs_i", "peak_ceiling": -1.0,
         "auto": True,
         "max_amount": 4.0,
         # The default. Nothing has measured sub-octave activity on this

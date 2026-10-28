@@ -359,9 +359,9 @@ struct SettingsPanel: View {
                 Divider()
 
                 slider(Help.target, $profile.target, -24...(-8), "LUFS",
-                       // Measured on this library: at -16 nothing needs
-                       // a boost, at -14 almost nothing does.
-                       sweet: (-16)...(-14))
+                       // Around Platinum Notes' level: -11.52 LUFS-I
+                       // measured on its "Break My Heart" (profiles.py).
+                       sweet: (-12)...(-11))
                 Picker("On", selection: $profile.estimator) {
                     ForEach(Profile.estimators, id: \.self) { Text($0).tag($0) }
                 }

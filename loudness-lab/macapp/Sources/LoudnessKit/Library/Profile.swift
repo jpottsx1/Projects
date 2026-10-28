@@ -16,8 +16,10 @@ import Foundation
 /// started.
 public struct Profile: Codable, Equatable, Sendable {
     public var description: String = ""
-    public var target: Double = -16.0        // level to aim at, on `estimator`
-    public var estimator: String = "s_p95"
+    // Level to aim at, on `estimator`: Platinum Notes' level, measured at
+    // -11.52 LUFS-I on its "Break My Heart" (profiles.py says more).
+    public var target: Double = -11.5
+    public var estimator: String = "lufs_i"
     public var peakCeiling: Double = -1.0    // dBTP no gain may exceed
     public var auto: Bool = false            // size the sub from each track
     public var reference: String?            // the corpus --auto measures against

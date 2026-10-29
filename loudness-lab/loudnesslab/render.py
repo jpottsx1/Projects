@@ -114,6 +114,11 @@ def _level_to_target(audio, job: dict, measured: dict):
     if peak is not None and peak + wanted > job["peak_ceiling"]:
         wanted = job["peak_ceiling"] - peak
     levelled = (audio * (10 ** (wanted / 20))).astype(audio.dtype)
+    # The oversampling is linear, so a gain moves the true peak by exactly
+    # the gain. Measuring the whole track again to learn that cost ~4 s a
+    # five-minute track (2026-10-29), as long as encoding it.
+    if peak is not None:
+        return levelled, wanted, peak + wanted
     return levelled, wanted, bs1770.measure(levelled)["true_peak_dbtp"]
 
 
@@ -301,18 +306,27 @@ def _one(job: dict) -> dict:
                                                           air.DEFAULT_TUNE_HZ),
                                           guide=guide, measure=measure_once)
 
-        kicks = (found[0] if found is not None
-                 else subbass.detect_kicks(audio, decode.TARGET_RATE, drums)[0])
-        # Against the ORIGINAL, not against the de-clipped intermediate: the
-        # columns say "was", and what the track was is what arrived.
-        # Restored transients belong in the snap figure, not hidden in a
-        # baseline that already has them.
-        snap_before = subbass.attack_contrast(original, decode.TARGET_RATE, kicks)
-        snap_after = subbass.attack_contrast(after, decode.TARGET_RATE, kicks)
         before_bands = {b["band_hz"]: b["shape_db"]
                         for b in spectrum.analyse(original, decode.TARGET_RATE)}
-        after_bands = {b["band_hz"]: b["shape_db"]
-                       for b in spectrum.analyse(after, decode.TARGET_RATE)}
+        if after is original:
+            # Every stage handed the track back untouched -- a run that only
+            # levels. Before and after are one array, so the snap change is
+            # zero and the shape is the same, by definition rather than by
+            # measurement. Finding kicks and measuring both sides cost ~4 s
+            # of a level-only track's ~16 s (2026-10-29) to report that.
+            snap_before = snap_after = 0.0
+            after_bands = before_bands
+        else:
+            kicks = (found[0] if found is not None
+                     else subbass.detect_kicks(audio, decode.TARGET_RATE, drums)[0])
+            # Against the ORIGINAL, not against the de-clipped intermediate:
+            # the columns say "was", and what the track was is what arrived.
+            # Restored transients belong in the snap figure, not hidden in a
+            # baseline that already has them.
+            snap_before = subbass.attack_contrast(original, decode.TARGET_RATE, kicks)
+            snap_after = subbass.attack_contrast(after, decode.TARGET_RATE, kicks)
+            after_bands = {b["band_hz"]: b["shape_db"]
+                           for b in spectrum.analyse(after, decode.TARGET_RATE)}
         processed = measure_once(after)
         peak = processed["true_peak_dbtp"]
         out_dir = Path(job["out_dir"])

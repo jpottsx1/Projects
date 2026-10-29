@@ -252,6 +252,42 @@ class TestOutputFormats(unittest.TestCase):
 
 
 @unittest.skipUnless(HAVE_FFMPEG, "ffmpeg/ffprobe not installed")
+class TestTheRateComesBack(unittest.TestCase):
+    """A file goes back out at the rate it came in at. The chain works at
+    48 kHz, and a 44.1 kHz MP3 used to come back a 48 kHz one."""
+
+    def setUp(self):
+        self.dir = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.dir, ignore_errors=True)
+        self.src = self.dir / "src"
+        self.src.mkdir(parents=True)
+        x, _ = programme(seconds=6.0)
+        subbass.write_flac(self.src / "cd.flac", x, 44100)
+
+    def _rates(self, *extra: str) -> list[int]:
+        out = self.dir / "out"
+        shutil.rmtree(out, ignore_errors=True)
+        with contextlib.redirect_stdout(io.StringIO()):
+            code = cli.main(["subbass", str(self.src), "--db",
+                             str(self.dir / "l.db"), "--out", str(out),
+                             "--jobs", "1", "--format", "flac", "--porcelain",
+                             *extra])
+        self.assertEqual(code, 0)
+        written = sorted(p for p in out.iterdir() if p.suffix == ".flac")
+        self.assertTrue(written)
+        return [decode.probe(p)["source_rate"] for p in written]
+
+    def test_levelling_alone_keeps_the_rate(self):
+        self.assertEqual(self._rates("--amount", "0", "--no-compare"), [44100])
+
+    def test_a_processed_track_keeps_the_rate(self):
+        self.assertEqual(self._rates("--amount", "3", "--no-compare"), [44100])
+
+    def test_both_sides_of_a_pair_keep_the_rate(self):
+        self.assertEqual(self._rates("--amount", "3"), [44100, 44100])
+
+
+@unittest.skipUnless(HAVE_FFMPEG, "ffmpeg/ffprobe not installed")
 class TestDynamicsThroughTheCommand(unittest.TestCase):
     """The two dynamics stages, as the app drives them.
 

@@ -86,10 +86,13 @@ def peak_memory_gb() -> float:
     return peak / 2 ** 30 if sys.platform == "darwin" else peak / 2 ** 20
 
 
-def _variant(kind: str, path: Path, label: str, audio) -> dict:
+def _variant(kind: str, path: Path, label: str, audio,
+             measured: dict | None = None) -> dict:
     """One playable rendering of a track, with what the player needs to line
-    it up against the others and monitor it fairly."""
-    measured = bs1770.measure(audio)
+    it up against the others and monitor it fairly. `measured`, where the
+    caller already knows it, saves measuring the whole track again."""
+    if measured is None:
+        measured = bs1770.measure(audio)
     return {
         "kind": kind, "label": label, "path": str(path),
         "seconds": round(audio.shape[0] / decode.TARGET_RATE, 4),
@@ -169,7 +172,16 @@ def _one(job: dict) -> dict:
             measured_arrays[id(audio_array)] = kept
         return kept[1]
     try:
-        audio = original = decode.decode(source)
+        # The probe decode() would make anyway, kept for the rate: the file
+        # goes back out at the rate it came in at.
+        # A file the probe cannot read is decode()'s to report, as before.
+        try:
+            probed = decode.probe(source)
+        except decode.DecodeError:
+            probed = {}
+        channels = probed.get("source_channels")
+        native_rate = probed.get("source_rate") or decode.TARGET_RATE
+        audio = original = decode.decode(source, source_channels=channels)
         # First, on the file as it arrived. De-clipping puts peaks BACK, so
         # it needs the audio before anything has attenuated it, and
         # everything after it has to fit under the peak it restores.
@@ -308,7 +320,8 @@ def _one(job: dict) -> dict:
 
         before_bands = {b["band_hz"]: b["shape_db"]
                         for b in spectrum.analyse(original, decode.TARGET_RATE)}
-        if after is original:
+        untouched = after is original
+        if untouched:
             # Every stage handed the track back untouched -- a run that only
             # levels. Before and after are one array, so the snap change is
             # zero and the shape is the same, by definition rather than by
@@ -344,9 +357,27 @@ def _one(job: dict) -> dict:
             # several dB hot.
             after, match_db, final = _level_to_target(after, job, processed)
             peak = final
-            written = write.write(out_dir / job["stem"], after,
-                                  decode.TARGET_RATE, source, fmt)
-            variants = [_variant("processed", written, job["label"], after)]
+            out_audio, out_audio_rate = after, decode.TARGET_RATE
+            if untouched and native_rate != decode.TARGET_RATE:
+                # Only a gain was asked for, so take it from the file at its
+                # own rate: the original times the gain, never resampled to
+                # 48 kHz and back. The measuring above stays at 48 kHz,
+                # where the BS.1770 coefficients are defined.
+                out_audio = decode.decode(source, rate=native_rate,
+                                          source_channels=channels) \
+                    * np.float32(10 ** (match_db / 20))
+                out_audio_rate = native_rate
+            written = write.write(out_dir / job["stem"], out_audio,
+                                  out_audio_rate, source, fmt,
+                                  out_rate=native_rate)
+            # A gain moves every figure here by the gain, so the measurement
+            # made before it is the measurement after it, shifted. Measuring
+            # the levelled track again cost ~3 s a five-minute track.
+            shifted = {key: (None if processed.get(key) is None
+                             else processed[key] + match_db)
+                       for key in ("lufs_i", "s_p95", "true_peak_dbtp")}
+            variants = [_variant("processed", written, job["label"], after,
+                                 measured=shifted)]
         else:
             # Level-match the pair, or the comparison just measures which is
             # louder: adding sub raises loudness, and louder wins every
@@ -368,9 +399,11 @@ def _one(job: dict) -> dict:
             # Both written in the SAME format from the same decode, so no
             # codec difference can creep into the comparison.
             a_path = write.write(out_dir / f"{job['stem']} -- A original", a,
-                                 decode.TARGET_RATE, source, fmt)
+                                 decode.TARGET_RATE, source, fmt,
+                                 out_rate=native_rate)
             b_path = write.write(out_dir / f"{job['stem']} -- B {job['label']}", b,
-                                 decode.TARGET_RATE, source, fmt)
+                                 decode.TARGET_RATE, source, fmt,
+                                 out_rate=native_rate)
             peak = bs1770.measure(b)["true_peak_dbtp"]
             variants = [_variant("original", a_path, "original", a),
                         _variant("processed", b_path, job["label"], b)]

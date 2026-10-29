@@ -71,8 +71,14 @@ def _encoder_arguments(fmt: str) -> list[str]:
 
 
 def write(path: Path, x: np.ndarray, rate: int, source: Path | None = None,
-          fmt: str = DEFAULT_FORMAT, keep_markers: bool = True) -> Path:
+          fmt: str = DEFAULT_FORMAT, keep_markers: bool = True,
+          out_rate: int | None = None) -> Path:
     """Write `x` beside `path`, in `fmt`, carrying what tags can travel.
+
+    `x` is at `rate`; the file is written at `out_rate` where one is given.
+    The chain works at 48 kHz, and without this a 44.1 kHz MP3 came back
+    a 48 kHz one: a different file from the one handed in, for no reason
+    the listener asked for.
 
     `path` is named without an extension by the caller having one already;
     the one belonging to the format wins, and the path actually written is
@@ -118,6 +124,8 @@ def write(path: Path, x: np.ndarray, rate: int, source: Path | None = None,
     else:
         command += ["-map", "0:a"]
     command += _encoder_arguments(fmt)
+    if out_rate and out_rate != rate:
+        command += ["-ar", str(out_rate)]
     if not carry_whole_tag and source is not None:
         command += ["-c:v", "copy", "-disposition:v", "attached_pic"]
     command += [str(target)]

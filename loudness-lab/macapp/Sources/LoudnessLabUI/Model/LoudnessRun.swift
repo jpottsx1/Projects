@@ -25,6 +25,11 @@ extension Notification.Name {
     /// compare run (not one that replaced originals itself) has written
     /// its files.
     public static let loudnessLabRunFinished = Notification.Name("loudnesslab.runFinished")
+
+    /// Posted with the `[URL]` of the originals a run replaced with their
+    /// processed versions, once it has — the files at those paths are now
+    /// the levelled audio, still tagged as the originals were.
+    public static let loudnessLabOriginalsReplaced = Notification.Name("loudnesslab.originalsReplaced")
 }
 
 extension LoudnessRun {

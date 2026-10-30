@@ -495,6 +495,20 @@ final class Engine: ObservableObject {
                 if !replaceOriginals, report, let manifest {
                     reportFinishedRun(manifest)
                 }
+                // A replacing run's manifest points each swapped track's
+                // processed file at its source: those files are new audio
+                // under old names, carrying the old tags. Any host keeping
+                // readings of them is told which.
+                if replaceOriginals, let manifest {
+                    let replaced = manifest.tracks.compactMap { track -> URL? in
+                        guard track.variants.contains(where: { $0.kind == "processed" && $0.path == track.source })
+                        else { return nil }
+                        return URL(fileURLWithPath: track.source)
+                    }
+                    if !replaced.isEmpty {
+                        NotificationCenter.default.post(name: .loudnessLabOriginalsReplaced, object: replaced)
+                    }
+                }
             } else {
                 say("Nothing was written -- every track was already at the "
                     + "reference, or gated out.")

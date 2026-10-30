@@ -381,9 +381,6 @@ def _one(job: dict) -> dict:
                                           source_channels=channels) \
                     * np.float32(10 ** (match_db / 20))
                 out_audio_rate = native_rate
-            written = write.write(out_dir / job["stem"], out_audio,
-                                  out_audio_rate, source, fmt,
-                                  out_rate=native_rate)
             # A gain moves every figure here by the gain, so the measurement
             # made before it is the measurement after it, shifted. Measuring
             # the levelled track again cost ~3 s a five-minute track.
@@ -393,6 +390,10 @@ def _one(job: dict) -> dict:
                 key: (None if processed.get(key) is None
                       else processed[key] + match_db)
                 for key in ("lufs_i", "s_p95", "true_peak_dbtp")}
+            # The file's LUFS tag gets its new level, not the original's.
+            written = write.write(out_dir / job["stem"], out_audio,
+                                  out_audio_rate, source, fmt,
+                                  out_rate=native_rate, lufs=shifted["lufs_i"])
             variants = [_variant("processed", written, job["label"], after,
                                  measured=shifted)]
         else:

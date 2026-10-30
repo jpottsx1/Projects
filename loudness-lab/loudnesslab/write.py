@@ -17,6 +17,8 @@ from pathlib import Path
 
 import numpy as np
 
+from . import decode
+
 # name on the command line -> (label, extension)
 FORMATS = {
     "flac": ("FLAC", "flac"),
@@ -72,13 +74,18 @@ def _encoder_arguments(fmt: str) -> list[str]:
 
 def write(path: Path, x: np.ndarray, rate: int, source: Path | None = None,
           fmt: str = DEFAULT_FORMAT, keep_markers: bool = True,
-          out_rate: int | None = None) -> Path:
+          out_rate: int | None = None, lufs: float | None = None) -> Path:
     """Write `x` beside `path`, in `fmt`, carrying what tags can travel.
 
     `x` is at `rate`; the file is written at `out_rate` where one is given.
     The chain works at 48 kHz, and without this a 44.1 kHz MP3 came back
     a 48 kHz one: a different file from the one handed in, for no reason
     the listener asked for.
+
+    `lufs`, the written audio's integrated loudness, goes in the LUFS tag
+    in place of the original's: the tags travel, and a reading carried
+    across from the louder or quieter original is wrong the moment the
+    file is written -- Disco Tags' playlists set their gains from it.
 
     `path` is named without an extension by the caller having one already;
     the one belonging to the format wins, and the path actually written is
@@ -123,6 +130,8 @@ def write(path: Path, x: np.ndarray, rate: int, source: Path | None = None,
                     "-map_metadata", "1"]
     else:
         command += ["-map", "0:a"]
+    if lufs is not None and not carry_whole_tag:
+        command += ["-metadata", f"LUFS={lufs:.1f}"]
     command += _encoder_arguments(fmt)
     if out_rate and out_rate != rate:
         command += ["-ar", str(out_rate)]
@@ -140,8 +149,53 @@ def write(path: Path, x: np.ndarray, rate: int, source: Path | None = None,
                 "write MP3. Choose FLAC or AAC. " + message)
         raise RuntimeError(message)
     if carry_whole_tag and source is not None:
-        carry_id3v2(source, target)
+        if carry_id3v2(source, target) and lufs is not None:
+            set_lufs(target, lufs)
     return target
+
+
+def set_lufs(path: Path, lufs: float) -> bool:
+    """Put `lufs` in the MP3's TXXX "LUFS" frame -- Disco Tags' loudness
+    tag, "-9.3" -- dropping any it had. Every other frame is copied byte
+    for byte, as `carry_id3v2` copies the tag. A tag that needs undoing
+    first (whole-tag unsynchronisation, an extended header, a footer, a
+    version before 2.3) is left alone: False, and the old reading stays
+    until the file is measured again."""
+    data = path.read_bytes()
+    length = id3v2_length(data[:10])
+    if length <= 10:
+        return False
+    major, flags = data[3], data[5]
+    if major not in (3, 4) or flags & 0xD0:
+        return False
+    tag = data[10:length]
+    kept, at = bytearray(), 0
+    while at + 10 <= len(tag) and decode._frame_id(tag[at:at + 4]):
+        raw = tag[at + 4:at + 8]
+        size = int.from_bytes(raw, "big")
+        # v2.4 sizes are syncsafe, except where an old iTunes wrote them
+        # plain -- read as `decode._id3_frames` reads them.
+        if major == 4 and not any(b & 0x80 for b in raw):
+            safe = decode._syncsafe(raw)
+            if safe == size or decode._frame_follows(tag, at + 10 + safe) \
+                    or not decode._frame_follows(tag, at + 10 + size):
+                size = safe
+        frame = tag[at:at + 10 + size]
+        if not (frame[:4] == b"TXXX" and
+                decode._frame_name(b"TXXX", frame[10:]).upper() == "TXXX(LUFS)"):
+            kept += frame
+        at += 10 + size
+    padding = len(tag) - at
+    body = b"\0LUFS\0" + f"{lufs:.1f}".encode("latin-1")
+    size = (bytes(((len(body) >> s) & 0x7F) for s in (21, 14, 7, 0)) if major == 4
+            else len(body).to_bytes(4, "big"))
+    kept += b"TXXX" + size + b"\0\0" + body
+    frames = bytes(kept) + b"\0" * max(padding, 0)
+    total = len(frames)
+    header = data[:6] + bytes(((total >> s) & 0x7F) for s in (21, 14, 7, 0))
+    # Written whole, as `carry_id3v2` writes: never a half-written file.
+    path.write_bytes(header + frames + data[length:])
+    return True
 
 
 def id3v2_length(header: bytes) -> int:

@@ -425,8 +425,14 @@ class TestSeratoSurvivesTheCommand(unittest.TestCase):
             self.assertEqual(code, 0)
             written = next(out.glob("*.mp3")).read_bytes()
 
-        self.assertTrue(written.startswith(tag),
+        # The original's frames, byte for byte, at the front of the new
+        # file -- then the new LUFS frame its level is written to.
+        frames = tag[10:].rstrip(b"\0")
+        self.assertEqual(written[:4], tag[:4])
+        self.assertTrue(written[10:].startswith(frames),
                         "the original tag is not at the front of the new file")
+        self.assertEqual(written[10 + len(frames):][:4], b"TXXX")
+        self.assertIn(b"\0LUFS\0", written[:200 + len(tag)])
         self.assertIn(payload, written)
         self.assertEqual(written.count(payload), 1)
 

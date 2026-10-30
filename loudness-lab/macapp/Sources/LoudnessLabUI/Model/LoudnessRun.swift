@@ -51,6 +51,13 @@ extension LoudnessRun {
         return try? JSONDecoder().decode(LoudnessRun.self, from: data)
     }
 
+    /// Forgets the remembered run: a later run replaced originals itself,
+    /// and adopting the older run's files now would put them over the
+    /// newly levelled ones.
+    static func forgetLatest() {
+        try? FileManager.default.removeItem(at: persistedURL)
+    }
+
     func persist() {
         guard let data = try? JSONEncoder().encode(self) else { return }
         try? FileManager.default.createDirectory(

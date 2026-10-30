@@ -506,6 +506,7 @@ final class Engine: ObservableObject {
                         return URL(fileURLWithPath: track.source)
                     }
                     if !replaced.isEmpty {
+                        LoudnessRun.forgetLatest()
                         NotificationCenter.default.post(name: .loudnessLabOriginalsReplaced, object: replaced)
                     }
                 }

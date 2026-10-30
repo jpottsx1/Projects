@@ -139,12 +139,16 @@ def count_clipping(x: np.ndarray, threshold: float = 0.9995,
     return clipped, int((lengths >= run_length).sum())
 
 
-def measure(x: np.ndarray, rate: int = RATE) -> dict:
+def measure(x: np.ndarray, rate: int = RATE, true_peak: bool = True) -> dict:
     """Full loudness measurement of a decoded stereo track.
 
     x is (n_samples, 2) in [-1, 1]. Returns the loudness fields stored in the
     database, plus the raw gated short-term series for callers that want to
     plot the distribution.
+
+    `true_peak=False` leaves the true peak (and crest) as None: the 4x
+    oversampling is about half the cost, and a caller trying gains in a
+    loop needs the loudness each time and the peak once.
     """
     if x.ndim != 2 or x.shape[1] != 2:
         raise ValueError(f"expected (n, 2) stereo, got {x.shape}")
@@ -172,7 +176,7 @@ def measure(x: np.ndarray, rate: int = RATE) -> dict:
         "s_p90": _pct(gated_short, 90),
         "s_p50": _pct(gated_short, 50),
         "s_p10": _pct(gated_short, 10),
-        "true_peak_dbtp": _clean(true_peak_dbtp(x, rate)),
+        "true_peak_dbtp": _clean(true_peak_dbtp(x, rate)) if true_peak else None,
         "sample_peak_dbfs": _clean(_to_db(float(np.abs(x).max()))),
     }
     clipped, runs = count_clipping(x)

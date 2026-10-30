@@ -20,8 +20,8 @@ from pathlib import Path
 
 import numpy as np
 
-from . import (air, bassline, bs1770, declip, decode, expand, mud, spectrum,
-               stems, subbass, write)
+from . import (air, bassline, bs1770, declip, decode, expand, limit, mud,
+               spectrum, stems, subbass, write)
 
 
 def default_jobs() -> int:
@@ -101,17 +101,28 @@ def _variant(kind: str, path: Path, label: str, audio,
     }
 
 
-def _level_to_target(audio, job: dict, measured: dict):
+def _level_to_target(audio, job: dict, measured: dict, may_limit: bool = True):
     """Bring the finished audio to the profile's level. Returns the audio,
-    the gain applied, and the resulting true peak.
+    the gain applied, the resulting true peak, and what the limiter did
+    (None where it did nothing).
 
     Scaling a float buffer is exact, so nothing is lost doing this here
     rather than in a separate pass -- and a separate pass is not available
     anyway, since the lossless gain writer works only on MP3.
+
+    Where the ceiling would stop the gain short, up to `peak_limit` dB comes off
+    the peaks instead (limit.py), unless `may_limit` says the peaks are the
+    point: ones de-clipping has just put back.
     """
     value = measured.get(job["estimator"])
     if value is None:
-        return audio, 0.0, measured.get("true_peak_dbtp", float("nan"))
+        return audio, 0.0, measured.get("true_peak_dbtp", float("nan")), None
+    if may_limit and job.get("peak_limit", 0.0) > 0:
+        done = limit.level(audio, decode.TARGET_RATE, value, job["target"],
+                           job["estimator"], job["peak_ceiling"], job["peak_limit"])
+        if done is not None:
+            limited, gain_db, report = done
+            return limited, gain_db, report["true_peak_dbtp"], report
     wanted = job["target"] - value
     peak = measured.get("true_peak_dbtp")
     if peak is not None and peak + wanted > job["peak_ceiling"]:
@@ -121,8 +132,8 @@ def _level_to_target(audio, job: dict, measured: dict):
     # the gain. Measuring the whole track again to learn that cost ~4 s a
     # five-minute track (2026-10-29), as long as encoding it.
     if peak is not None:
-        return levelled, wanted, peak + wanted
-    return levelled, wanted, bs1770.measure(levelled)["true_peak_dbtp"]
+        return levelled, wanted, peak + wanted, None
+    return levelled, wanted, bs1770.measure(levelled)["true_peak_dbtp"], None
 
 
 def _mean_low(table: dict) -> float:
@@ -345,6 +356,7 @@ def _one(job: dict) -> dict:
         out_dir = Path(job["out_dir"])
         fmt = job["fmt"]
         variants = []
+        limited = None
 
         if job["dry_run"]:
             match_db = 0.0
@@ -355,10 +367,12 @@ def _one(job: dict) -> dict:
             # simply ends un-levelled, which is the one state worse than not
             # having started -- part of the library at the target and part
             # several dB hot.
-            after, match_db, final = _level_to_target(after, job, processed)
+            after, match_db, final, limited = _level_to_target(
+                after, job, processed,
+                may_limit=not (clip is not None and clip["restored"]))
             peak = final
             out_audio, out_audio_rate = after, decode.TARGET_RATE
-            if untouched and native_rate != decode.TARGET_RATE:
+            if untouched and limited is None and native_rate != decode.TARGET_RATE:
                 # Only a gain was asked for, so take it from the file at its
                 # own rate: the original times the gain, never resampled to
                 # 48 kHz and back. The measuring above stays at 48 kHz,
@@ -373,9 +387,12 @@ def _one(job: dict) -> dict:
             # A gain moves every figure here by the gain, so the measurement
             # made before it is the measurement after it, shifted. Measuring
             # the levelled track again cost ~3 s a five-minute track.
-            shifted = {key: (None if processed.get(key) is None
-                             else processed[key] + match_db)
-                       for key in ("lufs_i", "s_p95", "true_peak_dbtp")}
+            # Not where the limiter took peaks off: that is not a gain, and
+            # the limiter measured what it made.
+            shifted = limited["measured"] if limited is not None else {
+                key: (None if processed.get(key) is None
+                      else processed[key] + match_db)
+                for key in ("lufs_i", "s_p95", "true_peak_dbtp")}
             variants = [_variant("processed", written, job["label"], after,
                                  measured=shifted)]
         else:
@@ -450,6 +467,8 @@ def _one(job: dict) -> dict:
             "mud_note": cleared.get("note"),
             "clips_restored": (clip or {}).get("restored", 0),
             "clip_lift_db": round(float((clip or {}).get("lift_db", 0.0)), 3),
+            # dB the limiter took off the tallest peak, 0 where it did not run.
+            "limit_db": round(float((limited or {}).get("reduction_db", 0.0)), 3),
             "variants": variants,
         }
     return {
@@ -465,6 +484,7 @@ def _one(job: dict) -> dict:
         "safety_trim_db": float(info["safety_trim_db"]),
         "peak_dbtp": float(peak),
         "match_db": float(match_db),
+        "limit": limited,
         "snap_db": float(snap_after - snap_before),
     }
 

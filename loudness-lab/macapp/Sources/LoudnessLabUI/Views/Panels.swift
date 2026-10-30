@@ -370,6 +370,10 @@ struct SettingsPanel: View {
                        // -1 rather than -0.1: true-peak detection is
                        // only good to about 0.5 dB and MP3 moves peaks.
                        sweet: (-2)...(-1))
+                slider(Help.peakLimit, $profile.peakLimit, 0...12, "dB",
+                       // What three 1984 tracks needed to reach -11.5
+                       // under -1 dBTP: 2.9, 4.5 and 5.5 dB.
+                       sweet: 3...6)
 
                 Divider()
 

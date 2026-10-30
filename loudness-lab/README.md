@@ -472,8 +472,12 @@ already does the job.
 
 ## What this does not do
 
-No EQ, no limiting, no tag writing, no expansion and no transient shaping.
-The measurements argued against the last two: crest sits around 10-12 dB
+No EQ and no tag writing. Limiting only where the peak ceiling would stop
+levelling short of the target, and only so far (`peak_limit`, limit.py):
+on older masters the ceiling rather than the target used to decide the
+level, and Platinum Notes, measured on the same tracks, limits to land
+them. Expansion and transient shaping exist now as opt-in stages; the
+measurements first argued against them: crest sits around 10-12 dB
 across the clean corpora, so there is nothing flattened to restore, and
 expansion would raise loudness range -- which is precisely what makes tracks
 disagree with each other.

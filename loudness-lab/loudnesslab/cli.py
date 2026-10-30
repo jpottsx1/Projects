@@ -1097,7 +1097,7 @@ def cmd_subbass(args: argparse.Namespace) -> int:
             "air_stems": bool(args.air_stems),
             "stem_cache": str(args.stem_cache or database.parent / "stem-cache"),
             "target": args.target, "estimator": args.estimator,
-            "peak_ceiling": args.peak_ceiling,
+            "peak_ceiling": args.peak_ceiling, "peak_limit": args.peak_limit,
             "compare": not args.no_compare, "dry_run": bool(args.dry_run),
             "out_dir": str(out_dir), "fmt": args.format,
         })
@@ -1172,13 +1172,13 @@ def cmd_subbass(args: argparse.Namespace) -> int:
         out()
         out(f"  {'artist / title':<40s}{'kicks/min':>10s}{'shape was':>11s}"
             f"{'now':>8s}{'added':>8s}{'trim':>7s}{'dBTP':>7s}"
-            f"{'match':>8s}{'snap':>7s}"
+            f"{'match':>8s}{'limit':>7s}{'snap':>7s}"
             + (f"{'clips':>7s}{'lift':>7s}" if args.declip else "")
             + (f"{'LRA':>10s}" if args.target_lra > 0 else "")
             + (f"{'crest':>10s}" if args.transient > 0 else "")
             + (f"{'air':>7s}" if args.air > 0 else ""))
 
-    blank = (f"{'':>10}{'':>11}{'':>8}{'':>8}{'':>7}{'':>7}{'':>8}{'':>7}"
+    blank = (f"{'':>10}{'':>11}{'':>8}{'':>8}{'':>7}{'':>7}{'':>8}{'':>7}{'':>7}"
              + (f"{'':>7}{'':>7}" if args.declip else "")
              + (f"{'':>10}" if args.target_lra > 0 else "")
              + (f"{'':>10}" if args.transient > 0 else "")
@@ -1198,6 +1198,7 @@ def cmd_subbass(args: argparse.Namespace) -> int:
                    "crest_before": (result.get("transient") or {}).get("crest_before"),
                    "crest_after": (result.get("transient") or {}).get("crest_after"),
                    "air_db": (result.get("air") or {}).get("measured_db"),
+                   "limit_db": (result.get("limit") or {}).get("reduction_db"),
                    "mud_db": (result.get("mud") or {}).get("measured_db")})
             return
         if result["status"] == "error":
@@ -1214,6 +1215,7 @@ def cmd_subbass(args: argparse.Namespace) -> int:
                   f"{result['shape_before']:>11.1f}{result['shape_after']:>8.1f}"
                   f"{result['applied_db']:>+8.2f}{result['safety_trim_db']:>+7.2f}"
                   f"{result['peak_dbtp']:>+7.2f}{result['match_db']:>+8.2f}"
+                  f"{-(result.get('limit') or {}).get('reduction_db', 0.0):>+7.2f}"
                   f"{result['snap_db']:>+7.2f}"
                   + (f"{clip['restored']:>7d}{clip['lift_db']:>+7.2f}"
                      if args.declip else "")
@@ -1802,6 +1804,12 @@ def build_parser() -> argparse.ArgumentParser:
                           "matched to itself instead")
     sub.add_argument("--estimator", default=None, choices=report.ESTIMATORS)
     sub.add_argument("--peak-ceiling", type=float, default=None)
+    sub.add_argument("--peak-limit", type=float, default=None, metavar="DB",
+                     help="where the peak ceiling would stop levelling short "
+                          "of --target, take up to this many dB off the "
+                          "peaks instead (default "
+                          f"{profiles.FIELDS['peak_limit']:.0f} dB; 0 is off). Not "
+                          "on a track --declip changed: its peaks are the point")
     sub.add_argument("--punch", type=float, default=None,
                      help="dB of attack emphasis on each kick, in "
                           "2-6 kHz (default: 0, off). Adds no energy: the band "

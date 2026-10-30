@@ -31,6 +31,7 @@ DOCUMENTED_BY = {
     "target": "target",
     "estimator": "estimator",
     "peakCeiling": "peakCeiling",
+    "peakLimit": "peakLimit",
     "auto": "auto",
     "reference": "reference",
     "references": "references",

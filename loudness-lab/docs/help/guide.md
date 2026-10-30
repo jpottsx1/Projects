@@ -49,9 +49,10 @@ scale. Above roughly a quarter of a folder, turn de-clipping on; below it,
 the damage is not worth a lossy generation.
 
 **How many tracks would need a boost.** A negative gain is free. A
-positive one eventually needs a limiter, which is the thing this tool
-exists to avoid. Pick the loudest target where nothing needs a boost and
-nothing breaches the ceiling.
+positive one eventually meets the peak ceiling, and past it the peak
+limit takes the peaks down to make room -- a cost on the loudest hits,
+capped. Pick the loudest target where little needs a boost, or accept
+that the quiet masters will be limited to reach it.
 
 **Low end by folder.** How far each folder sits under the reference across
 31.5–63 Hz. This is where a sub cap comes from: set it just above the

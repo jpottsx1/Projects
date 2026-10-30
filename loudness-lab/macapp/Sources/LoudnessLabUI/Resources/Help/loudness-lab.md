@@ -49,9 +49,10 @@ scale. Above roughly a quarter of a folder, turn de-clipping on; below it,
 the damage is not worth a lossy generation.
 
 **How many tracks would need a boost.** A negative gain is free. A
-positive one eventually needs a limiter, which is the thing this tool
-exists to avoid. Pick the loudest target where nothing needs a boost and
-nothing breaches the ceiling.
+positive one eventually meets the peak ceiling, and past it the peak
+limit takes the peaks down to make room -- a cost on the loudest hits,
+capped. Pick the loudest target where little needs a boost, or accept
+that the quiet masters will be limited to reach it.
 
 **Low end by folder.** How far each folder sits under the reference across
 31.5–63 Hz. This is where a sub cap comes from: set it just above the
@@ -421,7 +422,7 @@ Name a reference folder to get the comparison. Changing it re-reads what is alre
 
 A profile fixes what the tool is ALLOWED to do. It does not fix what each track gets -- that still comes from measuring the track, and that distinction is the whole design.
 
-level-only: lossless levelling and nothing else. No decode, no re-encode, reversible. restore: levelling, plus sub sized per track against a reference corpus. Needs a reference. Lossy. disco-70s: the same, with the cap raised to 8 dB and the gate lowered to 18. Three independent 1970s disco corpora -- 108 tracks over two compilations and a 2003 reissue -- agree within about 3 dB from 32 to 63 Hz, sitting 6 to 9 dB under a current reference. There is nothing usable below 32 Hz: the 20 Hz band reads as empty on all three.
+level-only: levelling and nothing else, with the peaks limited where the ceiling would stop it short. restore: levelling, plus sub sized per track against a reference corpus. Needs a reference. Lossy. disco-70s: the same, with the cap raised to 8 dB and the gate lowered to 18. Three independent 1970s disco corpora -- 108 tracks over two compilations and a 2003 reissue -- agree within about 3 dB from 32 to 63 Hz, sitting 6 to 9 dB under a current reference. There is nothing usable below 32 Hz: the 20 Hz band reads as empty on all three.
 
 There are deliberately no era profiles. Era-keyed curves were the obvious idea and the measurements ruled them out twice: every clean corpus here is a compilation carrying a reissue date, so a rule reading the year treats old masters as modern; and within a single era the spread between tracks at 32 Hz is 14-24 dB against roughly 5 dB between one era's median and the next, so a curve fitted to the era moves the median and leaves most tracks further from the target than they started.
 
@@ -676,6 +677,16 @@ The choice only matters as much as the two disagree, and they disagree more as a
 *True peak no gain may exceed. -1.0 dBTP, not -0.1, on purpose.*
 
 Levelling stops here even if that means falling short of the target. The default is -1.0 rather than the -0.1 you often see because the measurement itself is not that precise: 4x oversampled true-peak detection is only good to about 0.5 dB, and an MP3 re-encode moves peaks around on top of that. A ceiling tighter than the error bar is a ceiling that gets crossed.
+
+### Peak limit
+
+*dB the peaks may be taken down so a track can reach the target. 0 is off.*
+
+On older masters the ceiling, not the target, decides the level: their peaks stand 12-15 dB over their loudness, so turning them up to -11.5 puts the peaks over -1 dBTP long before the loudness gets there. Nineteen tracks off a 1984 compilation needed 0-5.5 dB off their peaks to land, and without it nine of ten ended 1-4 dB short.
+
+Platinum Notes does this. Given three of those tracks it turned each to -11.5 and took 1.5-3.3 dB off the peaks, with no EQ and the loudness range within 0.4 LU -- and let the peaks finish over 0 dBTP. Here the ceiling still holds, so the same tracks take about 1 dB more.
+
+Only the peaks move: the gain dips for the few milliseconds around a hit too tall for the ceiling and comes back over 20 ms. The cost is the top of the loudest hits, which is why there is a cap. A track that would need more than this is turned up only as far as this allows, and ends short by the rest. Never on a track de-clipping changed: putting those peaks back was the point.
 
 ## The run
 

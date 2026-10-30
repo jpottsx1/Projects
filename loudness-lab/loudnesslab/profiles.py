@@ -32,6 +32,13 @@ FIELDS = {
     "target": -11.5,
     "estimator": "lufs_i",
     "peak_ceiling": -1.0,   # dBTP no gain may exceed
+    # dB the limiter may take off the peaks where the ceiling would stop
+    # levelling short of `target` (limit.py). Platinum Notes does the same
+    # to reach -11.5: 1.5-3.3 dB on three 1984 tracks. Under -1 dBTP rather
+    # than its 0 the most any of nineteen tracks off that album needed was
+    # 5.5 dB (Laura Branigan, "Self Control"), so 6 lets all of them land.
+    # 0 is off: the ceiling wins, as before, and the track ends short.
+    "peak_limit": 6.0,
     "auto": False,          # size the sub from each track's own shortfall
     "reference": None,      # the corpus --auto measures against
     # More reference folders, pooled with `reference` into one target: a
@@ -79,8 +86,10 @@ FIELDS = {
 
 BUILT_IN = {
     "level-only": {
-        "description": "Lossless levelling and nothing else. No decode, no "
-                       "re-encode, reversible.",
+        "description": "Levelling and nothing else. Through `gain`: "
+                       "lossless, in 1.5 dB steps, never limited. Through "
+                       "processing: re-encoded, peaks limited where the "
+                       "ceiling would stop it short.",
         "target": -11.5, "estimator": "lufs_i", "peak_ceiling": -1.0,
         "auto": False, "amount": 0.0, "punch": 0.0,
     },

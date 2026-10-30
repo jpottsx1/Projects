@@ -27,6 +27,7 @@ NAMES = {
     "air": "air", "airTune": "air_tune", "stemKicks": "stem_kicks",
     "airFixed": "air_fixed", "mud": "mud", "airStems": "air_stems", "bassSub": "bass_sub",
     "target": "target", "estimator": "estimator", "peakCeiling": "peak_ceiling",
+    "peakLimit": "peak_limit",
     "auto": "auto", "reference": "reference", "references": "references",
     "amount": "amount",
     "maxAmount": "max_amount", "minActivity": "min_activity",

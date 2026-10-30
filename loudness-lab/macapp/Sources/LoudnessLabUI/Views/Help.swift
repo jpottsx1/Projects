@@ -325,8 +325,8 @@ enum Help {
         each track gets -- that still comes from measuring the track, and \
         that distinction is the whole design.
 
-        level-only: lossless levelling and nothing else. No decode, no \
-        re-encode, reversible.
+        level-only: levelling and nothing else, with the peaks limited \
+        where the ceiling would stop it short.
         restore: levelling, plus sub sized per track against a reference \
         corpus. Needs a reference. Lossy.
         disco-70s: the same, with the cap raised to 8 dB and the gate lowered \
@@ -692,6 +692,29 @@ enum Help {
         a ceiling that gets crossed.
         """)
 
+    static let peakLimit = HelpEntry(
+        title: "Peak limit",
+        summary: "dB the peaks may be taken down so a track can reach the target. 0 is off.",
+        detail: """
+        On older masters the ceiling, not the target, decides the level: \
+        their peaks stand 12-15 dB over their loudness, so turning them up \
+        to -11.5 puts the peaks over -1 dBTP long before the loudness gets \
+        there. Nineteen tracks off a 1984 compilation needed 0-5.5 dB off \
+        their peaks to land, and without it nine of ten ended 1-4 dB short.
+
+        Platinum Notes does this. Given three of those tracks it turned each \
+        to -11.5 and took 1.5-3.3 dB off the peaks, with no EQ and the \
+        loudness range within 0.4 LU -- and let the peaks finish over 0 dBTP. \
+        Here the ceiling still holds, so the same tracks take about 1 dB more.
+
+        Only the peaks move: the gain dips for the few milliseconds around \
+        a hit too tall for the ceiling and comes back over 20 ms. The cost \
+        is the top of the loudest hits, which is why there is a cap. A track \
+        that would need more than this is turned up only as far as this \
+        allows, and ends short by the rest. Never on a track de-clipping \
+        changed: putting those peaks back was the point.
+        """)
+
     // MARK: - The run
 
     static let limit = HelpEntry(
@@ -851,7 +874,7 @@ enum Help {
         HelpSection("Dynamics", [targetLRA, maxAttenuation, transient, minCrest]),
         HelpSection("Mud", [mud]),
         HelpSection("Air", [air, airFixed, airStems, airTune]),
-        HelpSection("Level", [target, estimator, peakCeiling]),
+        HelpSection("Level", [target, estimator, peakCeiling, peakLimit]),
         HelpSection("The run", [limit, format, output, compare, dryRun,
                                 replaceOriginals]),
         HelpSection("Listening", [switching, matchLoudness, blind]),

@@ -432,6 +432,7 @@ final class Engine: ObservableObject {
                 "--target", String(profile.target),
                 "--estimator", profile.estimator,
                 "--peak-ceiling", String(profile.peakCeiling),
+                "--peak-limit", String(profile.peakLimit),
                 "--amount", String(profile.amount),
                 "--max-amount", String(profile.maxAmount),
                 "--sub-offset", String(profile.subOffset),

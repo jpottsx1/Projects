@@ -21,6 +21,9 @@ public struct Profile: Codable, Equatable, Sendable {
     public var target: Double = -11.5
     public var estimator: String = "lufs_i"
     public var peakCeiling: Double = -1.0    // dBTP no gain may exceed
+    // dB the limiter may take off the peaks where the ceiling would stop
+    // levelling short of the target. profiles.py says why 6.
+    public var peakLimit: Double = 6.0
     public var auto: Bool = false            // size the sub from each track
     public var reference: String?            // the corpus --auto measures against
     // More reference folders, pooled with `reference` into one target: a
@@ -67,6 +70,7 @@ public struct Profile: Codable, Equatable, Sendable {
         case description, target, estimator, auto, reference, references
         case amount, punch, declip
         case peakCeiling = "peak_ceiling"
+        case peakLimit = "peak_limit"
         case maxAmount = "max_amount"
         case subOffset = "sub_offset"
         case minActivity = "min_activity"
@@ -108,6 +112,7 @@ public struct Profile: Codable, Equatable, Sendable {
         estimator = try values.decodeIfPresent(String.self, forKey: .estimator)
             ?? fallback.estimator
         peakCeiling = try number(.peakCeiling, fallback.peakCeiling)
+        peakLimit = try number(.peakLimit, fallback.peakLimit)
         auto = try values.decodeIfPresent(Bool.self, forKey: .auto) ?? fallback.auto
         reference = try values.decodeIfPresent(String.self, forKey: .reference)
         references = try values.decodeIfPresent([String].self, forKey: .references)
@@ -141,8 +146,8 @@ public struct Profile: Codable, Equatable, Sendable {
 
     public static let builtIn: [String: Profile] = {
         var levelOnly = Profile()
-        levelOnly.description = "Lossless levelling and nothing else. No decode, "
-            + "no re-encode, reversible."
+        levelOnly.description = "Levelling and nothing else. Peaks limited "
+            + "where the ceiling would stop it short."
         levelOnly.amount = 0
 
         var restore = Profile()

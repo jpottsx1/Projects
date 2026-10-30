@@ -41,17 +41,19 @@ class SetLufsTests(unittest.TestCase):
     def _check(self, major: int) -> None:
         frames = [_frame(b"TIT2", b"\0Summer of Love", major),
                   _frame(b"TXXX", _txxx("LUFS", "-6.1"), major),
+                  _frame(b"TXXX", _txxx("LUFS P95", "-4.0"), major),
                   _frame(b"TXXX", _txxx("lufs", "-6.1", wide=True), major),
                   _frame(b"TXXX", _txxx("MODE", "A Aeolian"), major)]
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / "track.mp3"
             path.write_bytes(_mp3(major, frames))
-            self.assertTrue(write.set_lufs(path, -9.34))
+            self.assertTrue(write.set_lufs(path, -9.34, p95=-7.46))
             found_major, read = decode._id3_frames(path)
             self.assertEqual(found_major, major)
             names = [decode._frame_name(fid, body) for fid, body in read]
-            self.assertEqual(names, ["TIT2", "TXXX(MODE)", "TXXX(LUFS)"])
-            self.assertEqual(read[-1][1], b"\0LUFS\0-9.3")
+            self.assertEqual(names, ["TIT2", "TXXX(MODE)", "TXXX(LUFS)", "TXXX(LUFS P95)"])
+            self.assertEqual(read[-2][1], b"\0LUFS\0-9.3")
+            self.assertEqual(read[-1][1], b"\0LUFS P95\0-7.5")
             self.assertEqual(read[0][1], b"\0Summer of Love")
             self.assertTrue(path.read_bytes().endswith(AUDIO))
 

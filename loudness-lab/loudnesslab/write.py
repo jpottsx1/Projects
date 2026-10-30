@@ -74,7 +74,8 @@ def _encoder_arguments(fmt: str) -> list[str]:
 
 def write(path: Path, x: np.ndarray, rate: int, source: Path | None = None,
           fmt: str = DEFAULT_FORMAT, keep_markers: bool = True,
-          out_rate: int | None = None, lufs: float | None = None) -> Path:
+          out_rate: int | None = None, lufs: float | None = None,
+          p95: float | None = None) -> Path:
     """Write `x` beside `path`, in `fmt`, carrying what tags can travel.
 
     `x` is at `rate`; the file is written at `out_rate` where one is given.
@@ -86,6 +87,8 @@ def write(path: Path, x: np.ndarray, rate: int, source: Path | None = None,
     in place of the original's: the tags travel, and a reading carried
     across from the louder or quieter original is wrong the moment the
     file is written -- Disco Tags' playlists set their gains from it.
+    `p95`, the p95 of its short-term loudness, goes beside it in "LUFS
+    P95": what the level was set on, and what those playlists match on.
 
     `path` is named without an extension by the caller having one already;
     the one belonging to the format wins, and the path actually written is
@@ -132,6 +135,8 @@ def write(path: Path, x: np.ndarray, rate: int, source: Path | None = None,
         command += ["-map", "0:a"]
     if lufs is not None and not carry_whole_tag:
         command += ["-metadata", f"LUFS={lufs:.1f}"]
+        if p95 is not None:
+            command += ["-metadata", f"LUFS P95={p95:.1f}"]
     command += _encoder_arguments(fmt)
     if out_rate and out_rate != rate:
         command += ["-ar", str(out_rate)]
@@ -150,13 +155,13 @@ def write(path: Path, x: np.ndarray, rate: int, source: Path | None = None,
         raise RuntimeError(message)
     if carry_whole_tag and source is not None:
         if carry_id3v2(source, target) and lufs is not None:
-            set_lufs(target, lufs)
+            set_lufs(target, lufs, p95)
     return target
 
 
-def set_lufs(path: Path, lufs: float) -> bool:
+def set_lufs(path: Path, lufs: float, p95: float | None = None) -> bool:
     """Put `lufs` in the MP3's TXXX "LUFS" frame -- Disco Tags' loudness
-    tag, "-9.3" -- dropping any it had. Every other frame is copied byte
+    tag, "-9.3" -- and `p95` in "LUFS P95", dropping any it had of either. Every other frame is copied byte
     for byte, as `carry_id3v2` copies the tag. A tag that needs undoing
     first (whole-tag unsynchronisation, an extended header, a footer, a
     version before 2.3) is left alone: False, and the old reading stays
@@ -181,15 +186,17 @@ def set_lufs(path: Path, lufs: float) -> bool:
                     or not decode._frame_follows(tag, at + 10 + size):
                 size = safe
         frame = tag[at:at + 10 + size]
-        if not (frame[:4] == b"TXXX" and
-                decode._frame_name(b"TXXX", frame[10:]).upper() == "TXXX(LUFS)"):
+        if not (frame[:4] == b"TXXX" and decode._frame_name(b"TXXX", frame[10:]).upper()
+                in ("TXXX(LUFS)", "TXXX(LUFS P95)")):
             kept += frame
         at += 10 + size
     padding = len(tag) - at
-    body = b"\0LUFS\0" + f"{lufs:.1f}".encode("latin-1")
-    size = (bytes(((len(body) >> s) & 0x7F) for s in (21, 14, 7, 0)) if major == 4
-            else len(body).to_bytes(4, "big"))
-    kept += b"TXXX" + size + b"\0\0" + body
+    readings = [("LUFS", lufs)] + ([("LUFS P95", p95)] if p95 is not None else [])
+    for description, value in readings:
+        body = b"\0" + description.encode("latin-1") + b"\0" + f"{value:.1f}".encode("latin-1")
+        size = (bytes(((len(body) >> s) & 0x7F) for s in (21, 14, 7, 0)) if major == 4
+                else len(body).to_bytes(4, "big"))
+        kept += b"TXXX" + size + b"\0\0" + body
     frames = bytes(kept) + b"\0" * max(padding, 0)
     total = len(frames)
     header = data[:6] + bytes(((total >> s) & 0x7F) for s in (21, 14, 7, 0))

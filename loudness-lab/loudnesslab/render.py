@@ -393,7 +393,8 @@ def _one(job: dict) -> dict:
             # The file's LUFS tag gets its new level, not the original's.
             written = write.write(out_dir / job["stem"], out_audio,
                                   out_audio_rate, source, fmt,
-                                  out_rate=native_rate, lufs=shifted["lufs_i"])
+                                  out_rate=native_rate, lufs=shifted["lufs_i"],
+                                  p95=shifted["s_p95"])
             variants = [_variant("processed", written, job["label"], after,
                                  measured=shifted)]
         else:

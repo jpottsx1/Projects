@@ -40,8 +40,26 @@ struct Manifest: Codable {
         /// manifest written before these were added.
         let subAskedDB: Double?
         let subNote: String?
+        /// dB the limiter took off the tallest peak, 0 where it did not run.
+        let limitDB: Double?
+        /// What the levelling did: the level on `levelEstimator` ("lufs_i"
+        /// or "s_p95") going in and coming out, the target, and the gain.
+        /// Nil where nothing was levelled -- a dry run, a level-matched
+        /// pair, or a manifest from before these were written.
+        let levelEstimator: String?
+        let levelTarget: Double?
+        let levelBefore: Double?
+        let levelAfter: Double?
+        let gainDB: Double?
 
         var id: String { source }
+
+        /// How far the levelled track ended under its target, where it
+        /// ended more than a tenth of a dB under: the peaks stopped it.
+        var shortOfTarget: Double? {
+            guard let levelTarget, let levelAfter, levelTarget - levelAfter > 0.1 else { return nil }
+            return levelTarget - levelAfter
+        }
 
         enum CodingKeys: String, CodingKey {
             case source, name, folder, variants
@@ -56,6 +74,12 @@ struct Manifest: Codable {
             case clipLiftDB = "clip_lift_db"
             case subAskedDB = "sub_asked_db"
             case subNote = "sub_note"
+            case limitDB = "limit_db"
+            case levelEstimator = "level_estimator"
+            case levelTarget = "level_target"
+            case levelBefore = "level_before"
+            case levelAfter = "level_after"
+            case gainDB = "gain_db"
         }
     }
 

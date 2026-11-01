@@ -101,6 +101,18 @@ def _variant(kind: str, path: Path, label: str, audio,
     }
 
 
+def _rounded(value) -> float | None:
+    return None if value is None else round(float(value), 3)
+
+
+def _levelled_label(label: str, gain_db: float) -> str:
+    """The processed version's name with its levelling in it. The label
+    lists what was done to the sound -- sub, punch, de-clipping -- and read
+    "unchanged" on a track turned up 15 dB."""
+    levelled = f"levelled {gain_db:+.1f} dB"
+    return levelled if label == "unchanged" else f"{label}, {levelled}"
+
+
 def _level_to_target(audio, job: dict, measured: dict, may_limit: bool = True):
     """Bring the finished audio to the profile's level. Returns the audio,
     the gain applied, the resulting true peak, and what the limiter did
@@ -369,6 +381,9 @@ def _one(job: dict) -> dict:
         fmt = job["fmt"]
         variants = []
         limited = None
+        # What the levelling did, for the Results table: nothing in a
+        # dry run or a level-matched pair, which are not levelled.
+        levelled = None
 
         if job["dry_run"]:
             match_db = 0.0
@@ -407,7 +422,16 @@ def _one(job: dict) -> dict:
                                   out_audio_rate, source, fmt,
                                   out_rate=native_rate, lufs=shifted["lufs_i"],
                                   p95=shifted["s_p95"])
-            variants = [_variant("processed", written, job["label"], after,
+            estimator = job["estimator"]
+            levelled = {
+                "level_estimator": estimator,
+                "level_target": job["target"],
+                "level_before": _rounded(processed.get(estimator)),
+                "level_after": _rounded(shifted.get(estimator)),
+                "gain_db": round(float(match_db), 3),
+            }
+            variants = [_variant("processed", written,
+                                 _levelled_label(job["label"], match_db), after,
                                  measured=shifted)]
         else:
             # Level-match the pair, or the comparison just measures which is
@@ -485,6 +509,12 @@ def _one(job: dict) -> dict:
             "clip_lift_db": round(float((clip or {}).get("lift_db", 0.0)), 3),
             # dB the limiter took off the tallest peak, 0 where it did not run.
             "limit_db": round(float((limited or {}).get("reduction_db", 0.0)), 3),
+            # The level going into the levelling and coming out, on the
+            # estimator levelled on, and the gain between: a level-only
+            # run showed nothing else, and its tracks read "unchanged".
+            "level_estimator": None, "level_target": None,
+            "level_before": None, "level_after": None, "gain_db": None,
+            **(levelled or {}),
             "variants": variants,
         }
     return {

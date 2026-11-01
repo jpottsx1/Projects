@@ -139,6 +139,23 @@ class TestSelectionAndDuplicates(unittest.TestCase):
             self.assertEqual(self._run("--select", str(listing), "--no-compare"), 0)
         self.assertEqual(sorted(p.stem for p in self.out.glob("*.flac")), ["two"])
 
+    def test_the_manifest_says_what_the_levelling_did(self):
+        """A level-only track showed nothing in Results but "unchanged",
+        however far it had been turned up."""
+        _fixture(self.src, ("one",))
+        listing = self.dir / "chosen.txt"
+        listing.write_text(str(self.src / "one.flac") + "\n")
+        self.assertEqual(self._run("--select", str(listing), "--no-compare",
+                                   "--amount", "0", "--target", "-11.5",
+                                   "--estimator", "s_p95"), 0)
+        track = json.loads((self.out / "manifest.json").read_text())["tracks"][0]
+        self.assertEqual(track["level_estimator"], "s_p95")
+        self.assertEqual(track["level_target"], -11.5)
+        self.assertAlmostEqual(track["level_after"] - track["level_before"],
+                               track["gain_db"], delta=0.05)
+        self.assertNotEqual(track["variants"][0]["label"], "unchanged")
+        self.assertTrue(track["variants"][0]["label"].startswith("levelled "))
+
     def test_select_is_applied_before_the_limit(self):
         """Unticking a track has to promote the next one into range. If the
         limit ran first, unticking would leave a gap instead."""

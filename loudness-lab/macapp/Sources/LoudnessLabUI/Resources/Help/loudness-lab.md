@@ -794,7 +794,9 @@ Knowing which is the processed one biases you toward hearing what you expected. 
 
 ### Results columns
 
-*Sub, Air and Punch are what was applied. Clips and Lift are the de-clipper.*
+*Level, Gain and Limit are the levelling. Sub, Air and Punch are what was applied. Clips and Lift are the de-clipper.*
+
+Level is the track's level going into the levelling and coming out, on what it was levelled on (integrated LUFS or p95), and Gain the change between. Level reads orange where a track ended short of the target: its peaks would have needed more taken off them than the peak limit allows. Limit is how much the limiter took off the tallest peak. A level-matched pair (compare on) isn't levelled, so these read "—".
 
 Sub, Air and Punch are what was actually applied to that track, which with per-track sizing on is not the same as what was asked for. Air reads "—" for a manifest written before this column existed, rather than a false "+0.00 dB".
 

@@ -582,29 +582,9 @@ struct ResultsPanel: View {
                     get: { chosen.map { Set([$0.id]) } ?? [] },
                     set: { ids in chosen = manifest.tracks.first { ids.contains($0.id) } })) {
                     TableColumn("Track", value: \.name)
-                    TableColumn("Sub") { Text(String(format: "%+.2f dB", $0.subDB)) }
-                    TableColumn("Asked") { row in
-                        Text(row.subAskedDB.map { String(format: "%+.2f dB", $0) } ?? "—")
-                    }
-                    TableColumn("Air") { row in
-                        Text(row.airDB.map { String(format: "%+.2f dB", $0) } ?? "—")
-                    }
-                    TableColumn("Mud") { row in
-                        Text(row.mudDB.map { String(format: "%+.2f dB", $0) } ?? "—")
-                            .help(row.mudNote ?? "")
-                    }
-                    TableColumn("Body") { row in
-                        Text(row.bodyDB.map { String(format: "%+.2f dB", $0) } ?? "—")
-                            .help(row.bodyNote ?? "")
-                    }
-                    TableColumn("Punch") { Text(String(format: "%+.1f dB", $0.punchDB)) }
-                    TableColumn("Clips") { Text("\($0.clipsRestored)") }
-                    TableColumn("Lift") { Text(String(format: "%+.2f dB", $0.clipLiftDB)) }
-                    // Why the sub got what it got: "already within 0.3 dB of
-                    // the reference", a skip, or what the kicks and bass did.
-                    TableColumn("Why") { row in
-                        Text(row.subNote ?? "").help(row.subNote ?? "")
-                    }
+                    levelColumns
+                    treatmentColumns
+                    clipColumns
                 }
                 .contextMenu(forSelectionType: Manifest.Track.ID.self) { ids in
                     let files = Self.processedFiles(manifest.tracks.filter { ids.contains($0.id) })
@@ -630,6 +610,74 @@ struct ResultsPanel: View {
 }
 
 extension ResultsPanel {
+    // In parts: a table takes ten columns to a group, and the compiler
+    // gave up type-checking them all in one expression.
+
+    @TableColumnBuilder<Manifest.Track, Never>
+    var levelColumns: some TableColumnContent<Manifest.Track, Never> {
+        TableColumn("Level") { row in
+            Self.levelCell(row)
+        }
+        TableColumn("Gain") { row in
+            Text(row.gainDB.map { String(format: "%+.1f dB", $0) } ?? "—")
+        }
+        TableColumn("Limit") { row in
+            Text(row.limitDB.map { $0 > 0 ? String(format: "-%.1f dB", $0) : "—" } ?? "—")
+        }
+    }
+
+    @TableColumnBuilder<Manifest.Track, Never>
+    var treatmentColumns: some TableColumnContent<Manifest.Track, Never> {
+        TableColumn("Sub") { row in Text(String(format: "%+.2f dB", row.subDB)) }
+        TableColumn("Asked") { row in
+            Text(row.subAskedDB.map { String(format: "%+.2f dB", $0) } ?? "—")
+        }
+        TableColumn("Air") { row in
+            Text(row.airDB.map { String(format: "%+.2f dB", $0) } ?? "—")
+        }
+        TableColumn("Mud") { row in
+            Text(row.mudDB.map { String(format: "%+.2f dB", $0) } ?? "—")
+                .help(row.mudNote ?? "")
+        }
+        TableColumn("Body") { row in
+            Text(row.bodyDB.map { String(format: "%+.2f dB", $0) } ?? "—")
+                .help(row.bodyNote ?? "")
+        }
+        TableColumn("Punch") { row in Text(String(format: "%+.1f dB", row.punchDB)) }
+    }
+
+    @TableColumnBuilder<Manifest.Track, Never>
+    var clipColumns: some TableColumnContent<Manifest.Track, Never> {
+        TableColumn("Clips") { row in Text("\(row.clipsRestored)") }
+        TableColumn("Lift") { row in Text(String(format: "%+.2f dB", row.clipLiftDB)) }
+        // Why the sub got what it got: "already within 0.3 dB of
+        // the reference", a skip, or what the kicks and bass did.
+        TableColumn("Why") { row in
+            Text(row.subNote ?? "").help(row.subNote ?? "")
+        }
+    }
+
+    /// "-19.0 → -13.6", in orange where the track ended short of the
+    /// target -- the limiter could take no more off its peaks -- so a track
+    /// that only got part of the way doesn't read as one left alone.
+    @ViewBuilder
+    static func levelCell(_ row: Manifest.Track) -> some View {
+        if let before = row.levelBefore, let after = row.levelAfter {
+            let scale = row.levelEstimator == "s_p95" ? "p95" : "LUFS"
+            let text = String(format: "%.1f → %.1f %@", before, after, scale)
+            if let short = row.shortOfTarget, let target = row.levelTarget {
+                Text(text)
+                    .foregroundStyle(.orange)
+                    .help(String(format: "%.1f dB short of %.1f: the peaks would have needed more than "
+                                 + "the peak limit allows taken off them to go further.", short, target))
+            } else {
+                Text(text).help(String(format: "Levelled to %.1f %@", row.levelTarget ?? after, scale))
+            }
+        } else {
+            Text("—").help("Not levelled: a dry run, a level-matched pair, or a run from before this column.")
+        }
+    }
+
     /// The processed version of each track, the one an intro or outro is
     /// made on: the "B" of a comparison, or the only file a finished run
     /// writes. A track the run wrote nothing new for has none.

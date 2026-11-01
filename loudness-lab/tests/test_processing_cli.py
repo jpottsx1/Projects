@@ -167,6 +167,29 @@ class TestSelectionAndDuplicates(unittest.TestCase):
                                    "--no-compare"), 0)
         self.assertEqual(len(list(self.out.glob("*.flac"))), 2)
 
+    def test_a_limit_that_cuts_the_selection_measures_first(self):
+        """The ticked list comes sorted by path. Cut unmeasured, "the first
+        N" was the first N alphabetically, not the thinnest N the queue
+        shows -- so a cut selection is measured and ordered as before."""
+        _fixture(self.src, ("one", "two", "three"))
+        listing = self.dir / "chosen.txt"
+        listing.write_text("\n".join(str(self.src / f"{n}.flac")
+                                     for n in ("one", "two", "three")))
+        with unittest.mock.patch.object(cli.analyze, "run",
+                                        wraps=cli.analyze.run) as measured:
+            self.assertEqual(self._run("--select", str(listing), "--limit", "2",
+                                       "--no-compare"), 0)
+        measured.assert_called_once()
+        self.assertEqual(len(list(self.out.glob("*.flac"))), 2)
+
+        # A limit that takes the whole selection cuts nothing: no measuring.
+        shutil.rmtree(self.out)
+        with unittest.mock.patch.object(cli.analyze, "run",
+                                        side_effect=AssertionError("measured")):
+            self.assertEqual(self._run("--select", str(listing), "--limit", "3",
+                                       "--no-compare"), 0)
+        self.assertEqual(len(list(self.out.glob("*.flac"))), 3)
+
     def test_skip_duplicates_does_a_record_once(self):
         """A library of compilations is mostly the same forty songs. Two
         copies is one decode, one encode and one lossy generation wasted."""

@@ -1025,7 +1025,12 @@ def cmd_subbass(args: argparse.Namespace) -> int:
     # measure pass, which is a decode and a full loudness and spectrum
     # reading a track, the render's own over again (2026-11-01: 11-19 s of
     # a 7.7-minute track's ~60). The tracks are worked through as ticked.
-    unmeasured = selected is not None and not args.auto
+    # Not when --limit cuts the selection: which tracks make the cut is the
+    # thinnest-first order the app's queue shows, and that comes from the
+    # measurements -- the ticked list arrives sorted by path, so cutting it
+    # unmeasured took the first N alphabetically instead.
+    cut = args.limit is not None and args.limit < len(set(selected or ()))
+    unmeasured = selected is not None and not args.auto and not cut
     if unmeasured:
         counts = {"found": len(selected), "skipped": len(selected),
                   "analysed": 0, "errors": 0}

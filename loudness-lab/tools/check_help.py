@@ -50,6 +50,7 @@ DOCUMENTED_BY = {
     "air": "air",
     "airTune": "airTune",
     "mud": "mud",
+    "body": "body",
     "stemKicks": "stemKicks",
     "airFixed": "airFixed",
     "airStems": "airStems",

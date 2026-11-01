@@ -446,6 +446,7 @@ final class Engine: ObservableObject {
                 "--min-crest", String(profile.minCrest),
                 "--air", String(profile.air),
                 "--mud", String(profile.mud),
+                "--body", String(profile.body),
                 "--air-tune", String(profile.airTune),
             ]
             if profile.auto { arguments += ["--auto"] }

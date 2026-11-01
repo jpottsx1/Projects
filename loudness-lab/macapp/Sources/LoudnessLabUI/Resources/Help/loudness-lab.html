@@ -232,6 +232,12 @@ tr:last-child td { border-bottom: 0; }
 <p>Early-seventies records sit thick in the lower midrange: measured against a disco reference, 16 of 20 tracks were more than 1 dB above it in 200–400 Hz, 3 dB the median. That thickness blurs the bass line and the kick into each other.</p>
 <p>A threshold, as a dynamic EQ has: every moment where the band is built up above it is cut by how far above it is, and moments below it -- a sparse verse -- are left alone. The threshold is set so the band as a whole comes down by this many dB, measured and reported. A track thick all the way through is cut nearly evenly; one that thickens in places is cut there. It moves over 400 ms, too slowly to pump or click, and nothing outside 200–400 Hz is touched.</p>
 <p>With &quot;Size it per track against a reference&quot; on, this is a ceiling: each track gets what its 200–400 Hz sits above the reference folders, and a track already at or under them gets none.</p>
+<h2>Body</h2>
+<h3>Bass body</h3>
+<p><em>Add weight to 63–160 Hz, where the kick and bass sit. Off at zero.</em></p>
+<p>The sub works under 63 Hz and the mud cut over 200, and between them is where a record sounds thin or full: the body of the kick and the bass. Measured on an 80s batch against a modern dance reference, 80–125 Hz sat 4–8 dB under it even after the sub -- records whose deep synth bass was already well over the reference at 31 Hz.</p>
+<p>An even lift across the band, the same all the way through the track: thinness here is how the record was mastered, not something that comes and goes. The band rises by this many dB, measured and reported; 50 and 200 Hz move about half as much, and nothing from 400 Hz up is touched. Peaks rise with it, and the levelling that runs last takes that back out.</p>
+<p>With &quot;Size it per track against a reference&quot; on, this is a ceiling: each track gets what its 63–160 Hz sits under the reference folders, and a track already at or over them gets none.</p>
 <h2>Air</h2>
 <h3>Air</h3>
 <p><em>Generate a top end where a shelf has nothing to lift. Off at zero.</em></p>
@@ -320,7 +326,7 @@ tr:last-child td { border-bottom: 0; }
 <h3>Results columns</h3>
 <p><em>Sub, Air and Punch are what was applied. Clips and Lift are the de-clipper.</em></p>
 <p>Sub, Air and Punch are what was actually applied to that track, which with per-track sizing on is not the same as what was asked for. Air reads &quot;—&quot; for a manifest written before this column existed, rather than a false &quot;+0.00 dB&quot;.</p>
-<p>Mud is how far the 200-400 Hz band came down (hover for why a track got none).</p>
+<p>Mud is how far the 200-400 Hz band came down (hover for why a track got none). Body is how far 63-160 Hz went up, the same way.</p>
 <p>Up and down arrows step through the songs. While one is playing the next starts from the top, on the same version (A or B) you were hearing; stopped stays stopped.</p>
 <p>Right-click a song for Send to Intro/Outro, which opens the intro and outro editor on its processed version (the B) to finish the edit, or Show in Finder.</p>
 <p>Asked is what the sub was asked for: with per-track sizing, how far the track&#x27;s low end sat under the reference (capped). Why says why it got what it got -- &quot;already within 0.3 dB of the reference&quot; for a track whose bottom end was already there, a reason it was declined, or what the kicks and bass line did. A small Sub with a small Asked is a track that needed little; a small Sub with a large Asked is one worth a look.</p>

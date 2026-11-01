@@ -17,7 +17,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from . import (__version__, analyze, apply_gain, bs1770, db, declip, decode,
-               air, expand, intro, mp3gain, mud, outro, profiles, render, replace,
+               air, body, expand, intro, mp3gain, mud, outro, profiles, render, replace,
                report, stems, subbass, write)
 
 
@@ -249,6 +249,23 @@ def _air_for(args: argparse.Namespace, conn, path: str, top_curve: dict) -> floa
     amount, _ = _auto_amount(conn, path, top_curve, args.air,
                              bands=report.AIR_SHAPE_BANDS)
     return amount
+
+
+def _body_for(args: argparse.Namespace, conn, path: str, body_curve: dict
+              ) -> tuple[float, str | None]:
+    """The body lift one track gets, and why. With --auto, --body is a
+    ceiling and each track gets what its 63-160 Hz sits UNDER the
+    reference, a band over it not paying off one under (as the sub).
+    Without it, --body as set."""
+    if args.body <= 0:
+        return 0.0, None
+    if not (args.auto and body_curve):
+        return args.body, None
+    amount, why = _auto_amount(conn, path, body_curve, args.body,
+                               bands=report.BODY_SHAPE_BANDS, clip_excess=True)
+    if why is not None:
+        why = f"63-160 Hz {why}: no body"
+    return amount, why
 
 
 def _mud_for(args: argparse.Namespace, conn, path: str, mud_curve: dict
@@ -1075,10 +1092,16 @@ def cmd_subbass(args: argparse.Namespace) -> int:
         if args.auto and args.mud > 0:
             _, mud_curve, _ = _reference_curve_of(
                 conn, wanted_references, bands=report.MUD_SHAPE_BANDS)
+        body_curve = {}
+        if args.auto and args.body > 0:
+            _, body_curve, _ = _reference_curve_of(
+                conn, wanted_references, bands=report.BODY_SHAPE_BANDS)
         amounts = {}
         air_amounts = {}
         mud_amounts = {row["path"]: _mud_for(args, conn, row["path"], mud_curve)
                        for row in rows}
+        body_amounts = {row["path"]: _body_for(args, conn, row["path"], body_curve)
+                        for row in rows}
         if args.auto:
             for row in rows:
                 amounts[row["path"]] = _auto_amount(conn, row["path"], curve,
@@ -1116,6 +1139,7 @@ def cmd_subbass(args: argparse.Namespace) -> int:
         amount, skip = amounts.get(row["path"], (args.amount, None))
         air_amount, _ = air_amounts.get(row["path"], (args.air, None))
         mud_amount, mud_note = mud_amounts.get(row["path"], (0.0, None))
+        body_amount, body_note = body_amounts.get(row["path"], (0.0, None))
         # Why the sub got what it got, kept even when air un-skips the
         # track below: it used to be dropped there, and a track already
         # at the reference showed "+0.00 dB" with no reason (Mary Jane
@@ -1126,7 +1150,7 @@ def cmd_subbass(args: argparse.Namespace) -> int:
         # now that air is a second one. A track can easily be fine on bass
         # and still short on top end; skipping it there would silently
         # skip air too, on tracks air auto-sizing exists to help.
-        if air_amount > 0 or mud_amount > 0:
+        if air_amount > 0 or mud_amount > 0 or body_amount > 0:
             skip = None
         name = " - ".join(p for p in (row["artist"], row["title"]) if p) \
             or Path(row["path"]).stem
@@ -1146,6 +1170,7 @@ def cmd_subbass(args: argparse.Namespace) -> int:
             "transient": args.transient, "min_crest": args.min_crest,
             "air": air_amount, "air_tune": args.air_tune,
             "mud": mud_amount, "mud_note": mud_note,
+            "body": body_amount, "body_note": body_note,
             "stem_kicks": bool(args.stem_kicks), "bpm": row["bpm"],
             "bass_sub": bool(args.stem_kicks and args.bass_sub),
             "air_stems": bool(args.air_stems),
@@ -1253,7 +1278,8 @@ def cmd_subbass(args: argparse.Namespace) -> int:
                    "crest_after": (result.get("transient") or {}).get("crest_after"),
                    "air_db": (result.get("air") or {}).get("measured_db"),
                    "limit_db": (result.get("limit") or {}).get("reduction_db"),
-                   "mud_db": (result.get("mud") or {}).get("measured_db")})
+                   "mud_db": (result.get("mud") or {}).get("measured_db"),
+                   "body_db": (result.get("body") or {}).get("measured_db")})
             return
         if result["status"] == "error":
             print(f"  {result['name'][:39]:<40s}  FAILED: {result['reason']}")
@@ -1933,6 +1959,11 @@ def build_parser() -> argparse.ArgumentParser:
                           "builds up and nothing in sparse passages. 0 is off. "
                           "--auto: the per-track cap, each track getting what "
                           "its 200-400 Hz sits above --reference")
+    sub.add_argument("--body", type=float, default=None, metavar="DB",
+                     help="dB added to 63-160 Hz, evenly: the weight of the "
+                          "kick and bass, between the sub and the mud. 0 is "
+                          "off. --auto: the per-track cap, each track getting "
+                          "what its 63-160 Hz sits under --reference")
     sub.add_argument("--air-tune", type=float, default=None, metavar="HZ",
                      help="--air: the frequency the harmonics are generated "
                           "from, upward (default "

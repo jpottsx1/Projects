@@ -28,6 +28,10 @@ struct Manifest: Codable {
         /// track got none. Nil in a manifest from before the cut existed.
         let mudDB: Double?
         let mudNote: String?
+        /// The 63-160 Hz lift the body stage made, and why a track got
+        /// none. Nil in a manifest from before the stage existed.
+        let bodyDB: Double?
+        let bodyNote: String?
         let clipsRestored: Int
         let clipLiftDB: Double
         let variants: [Variant]
@@ -46,6 +50,8 @@ struct Manifest: Codable {
             case airDB = "air_db"
             case mudDB = "mud_db"
             case mudNote = "mud_note"
+            case bodyDB = "body_db"
+            case bodyNote = "body_note"
             case clipsRestored = "clips_restored"
             case clipLiftDB = "clip_lift_db"
             case subAskedDB = "sub_asked_db"

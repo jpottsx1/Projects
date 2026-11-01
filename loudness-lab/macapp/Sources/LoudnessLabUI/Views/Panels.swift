@@ -326,6 +326,16 @@ struct SettingsPanel: View {
 
                 Divider()
 
+                slider(Help.body, $profile.body, 0...10, "dB",
+                       // Jeff's 80s batch sat 4-8 dB under MODERN DANCE in
+                       // 80-125 Hz after processing (2026-10-12).
+                       sweet: 3...6)
+                Text("63–160 Hz, the kick and bass's weight. Zero turns it off.")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .help(Help.body.detail)
+
+                Divider()
+
                 slider(Help.air, $profile.air, 0...24, "dB",
                        // dB in the top octave (16-20 kHz). A missing top
                        // octave fills to 12 for nothing; a full one costs
@@ -582,6 +592,10 @@ struct ResultsPanel: View {
                     TableColumn("Mud") { row in
                         Text(row.mudDB.map { String(format: "%+.2f dB", $0) } ?? "—")
                             .help(row.mudNote ?? "")
+                    }
+                    TableColumn("Body") { row in
+                        Text(row.bodyDB.map { String(format: "%+.2f dB", $0) } ?? "—")
+                            .help(row.bodyNote ?? "")
                     }
                     TableColumn("Punch") { Text(String(format: "%+.1f dB", $0.punchDB)) }
                     TableColumn("Clips") { Text("\($0.clipsRestored)") }

@@ -51,6 +51,9 @@ public struct Profile: Codable, Equatable, Sendable {
     // dB out of 200-400 Hz, deepest where the band builds up. With `auto`,
     // a ceiling: each track gets what it sits above the reference.
     public var mud: Double = 0.0
+    // dB added to 63-160 Hz, evenly: the kick and bass's weight. With
+    // `auto`, a ceiling: each track gets what it sits under the reference.
+    public var body: Double = 0.0
     // Find kicks on a Demucs drum stem, and skip the sub where they
     // disagree with the BPM tag. Off by default: it needs Demucs.
     public var stemKicks: Bool = false
@@ -83,6 +86,7 @@ public struct Profile: Codable, Equatable, Sendable {
         case air
         case airTune = "air_tune"
         case mud
+        case body
         case stemKicks = "stem_kicks"
         case airFixed = "air_fixed"
         case airStems = "air_stems"
@@ -132,6 +136,7 @@ public struct Profile: Codable, Equatable, Sendable {
         air = try number(.air, fallback.air)
         airTune = try number(.airTune, fallback.airTune)
         mud = try number(.mud, fallback.mud)
+        body = try number(.body, fallback.body)
         stemKicks = try values.decodeIfPresent(Bool.self, forKey: .stemKicks)
             ?? fallback.stemKicks
         airFixed = try values.decodeIfPresent(Bool.self, forKey: .airFixed)

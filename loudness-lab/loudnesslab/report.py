@@ -417,6 +417,9 @@ TOP_SHAPE_BANDS = tuple(b for b in BAND_CENTRES if 8000.0 <= b <= 20000.0)
 AIR_SHAPE_BANDS = tuple(b for b in BAND_CENTRES if 16000.0 <= b <= 20000.0)
 # What the mud cut is sized from: the 200-400 Hz bands mud.py works in.
 MUD_SHAPE_BANDS = tuple(b for b in BAND_CENTRES if 200.0 <= b <= 400.0)
+# What the body lift is sized from: the 63-160 Hz bands body.py works in,
+# between the sub's octave and the mud's.
+BODY_SHAPE_BANDS = tuple(b for b in BAND_CENTRES if 63.0 <= b <= 160.0)
 
 
 # CD1, Disc 2, disc-3, DVD4, Vol. 5, Part6, or that same token as a SUFFIX

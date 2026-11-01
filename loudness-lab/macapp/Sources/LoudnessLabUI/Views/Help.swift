@@ -282,6 +282,28 @@ enum Help {
         and a track already at or under them gets none.
         """)
 
+    static let body = HelpEntry(
+        title: "Bass body",
+        summary: "Add weight to 63–160 Hz, where the kick and bass sit. Off at zero.",
+        detail: """
+        The sub works under 63 Hz and the mud cut over 200, and between them \
+        is where a record sounds thin or full: the body of the kick and the \
+        bass. Measured on an 80s batch against a modern dance reference, \
+        80–125 Hz sat 4–8 dB under it even after the sub -- records whose \
+        deep synth bass was already well over the reference at 31 Hz.
+
+        An even lift across the band, the same all the way through the \
+        track: thinness here is how the record was mastered, not something \
+        that comes and goes. The band rises by this many dB, measured and \
+        reported; 50 and 200 Hz move about half as much, and nothing from \
+        400 Hz up is touched. Peaks rise with it, and the levelling that \
+        runs last takes that back out.
+
+        With "Size it per track against a reference" on, this is a ceiling: \
+        each track gets what its 63–160 Hz sits under the reference folders, \
+        and a track already at or over them gets none.
+        """)
+
     static let airTune = HelpEntry(
         title: "Air from",
         summary: "Where the harmonics are generated from, upward.",
@@ -834,7 +856,7 @@ enum Help {
         than a false "+0.00 dB".
 
         Mud is how far the 200-400 Hz band came down (hover for why a track \
-        got none).
+        got none). Body is how far 63-160 Hz went up, the same way.
 
         Up and down arrows step through the songs. While one is playing the \
         next starts from the top, on the same version (A or B) you were \
@@ -873,6 +895,7 @@ enum Help {
         HelpSection("Attack", [punch, punchDecay]),
         HelpSection("Dynamics", [targetLRA, maxAttenuation, transient, minCrest]),
         HelpSection("Mud", [mud]),
+        HelpSection("Body", [body]),
         HelpSection("Air", [air, airFixed, airStems, airTune]),
         HelpSection("Level", [target, estimator, peakCeiling, peakLimit]),
         HelpSection("The run", [limit, format, output, compare, dryRun,

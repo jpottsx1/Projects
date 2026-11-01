@@ -20,7 +20,7 @@ from pathlib import Path
 
 import numpy as np
 
-from . import (air, bassline, bs1770, declip, decode, expand, limit, mud,
+from . import (air, bassline, body, bs1770, declip, decode, expand, limit, mud,
                spectrum, stems, subbass, write)
 
 
@@ -289,6 +289,12 @@ def _one(job: dict) -> dict:
         if job.get("mud", 0.0) > 0:
             audio, cleared = mud.clear(audio, decode.TARGET_RATE, job["mud"])
 
+        # The body lift, after the mud cut and before the sub: sized from
+        # the track as it came, like both of them.
+        bodied = body._blank(job.get("body_note") or "not asked for")
+        if job.get("body", 0.0) > 0:
+            audio, bodied = body.boost(audio, decode.TARGET_RATE, job["body"])
+
         if skip is not None:
             # A track can want de-clipping, or dynamics, and not want a sub.
             # Where any of those did something there is a new file worth
@@ -296,11 +302,12 @@ def _one(job: dict) -> dict:
             # say so and move on.
             amount = 0.0
             if not (ranged["applied"] or shaped["applied"] or cleared["applied"]
+                    or bodied["applied"]
                     or (clip is not None and clip["restored"])):
                 return {**base, "status": "skipped", "reason": skip,
                         "amount": None, "clip": clip, "range": ranged,
                         "transient": shaped, "air": air._blank("not reached"),
-                        "mud": cleared}
+                        "mud": cleared, "body": bodied}
             note_skip = skip
 
         after, info = subbass.enhance(audio, decode.TARGET_RATE,
@@ -472,6 +479,8 @@ def _one(job: dict) -> dict:
             "air_db": round(float(aired.get("measured_db", 0.0)), 3),
             "mud_db": round(float(cleared.get("measured_db", 0.0)), 3),
             "mud_note": cleared.get("note"),
+            "body_db": round(float(bodied.get("measured_db", 0.0)), 3),
+            "body_note": bodied.get("note"),
             "clips_restored": (clip or {}).get("restored", 0),
             "clip_lift_db": round(float((clip or {}).get("lift_db", 0.0)), 3),
             # dB the limiter took off the tallest peak, 0 where it did not run.
@@ -482,6 +491,7 @@ def _one(job: dict) -> dict:
         **base, "status": "ok", "amount": amount, "reason": reason,
         "clip": clip, "manifest": manifest,
         "range": ranged, "transient": shaped, "air": aired, "mud": cleared,
+        "body": bodied,
         "kicks_per_minute": float(info["kicks_per_minute"]),
         "bass_share": float(info.get("bass_share", 0.0)),
         "shape_before": float(_mean_low(before_bands)),

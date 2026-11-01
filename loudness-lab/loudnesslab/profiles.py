@@ -66,6 +66,10 @@ FIELDS = {
     # dB taken out of 200-400 Hz, deepest where it builds up (mud.py). With
     # `auto`, a ceiling: each track gets what it sits above the reference.
     "mud": 0.0,
+    # dB added to 63-160 Hz, evenly (body.py): the weight of the kick and
+    # bass, between the sub and the mud. With `auto`, a ceiling: each track
+    # gets what it sits under the reference there.
+    "body": 0.0,
     "air_tune": 3500.0,     # Hz the harmonics are generated from, upward
     # Find the kicks on a Demucs drum stem instead of the full mix, and
     # skip the sub where they disagree with the BPM tag. Off by default:

@@ -610,6 +610,18 @@ A threshold, as a dynamic EQ has: every moment where the band is built up above 
 
 With "Size it per track against a reference" on, this is a ceiling: each track gets what its 200–400 Hz sits above the reference folders, and a track already at or under them gets none.
 
+## Body
+
+### Bass body
+
+*Add weight to 63–160 Hz, where the kick and bass sit. Off at zero.*
+
+The sub works under 63 Hz and the mud cut over 200, and between them is where a record sounds thin or full: the body of the kick and the bass. Measured on an 80s batch against a modern dance reference, 80–125 Hz sat 4–8 dB under it even after the sub -- records whose deep synth bass was already well over the reference at 31 Hz.
+
+An even lift across the band, the same all the way through the track: thinness here is how the record was mastered, not something that comes and goes. The band rises by this many dB, measured and reported; 50 and 200 Hz move about half as much, and nothing from 400 Hz up is touched. Peaks rise with it, and the levelling that runs last takes that back out.
+
+With "Size it per track against a reference" on, this is a ceiling: each track gets what its 63–160 Hz sits under the reference folders, and a track already at or over them gets none.
+
 ## Air
 
 ### Air
@@ -786,7 +798,7 @@ Knowing which is the processed one biases you toward hearing what you expected. 
 
 Sub, Air and Punch are what was actually applied to that track, which with per-track sizing on is not the same as what was asked for. Air reads "—" for a manifest written before this column existed, rather than a false "+0.00 dB".
 
-Mud is how far the 200-400 Hz band came down (hover for why a track got none).
+Mud is how far the 200-400 Hz band came down (hover for why a track got none). Body is how far 63-160 Hz went up, the same way.
 
 Up and down arrows step through the songs. While one is playing the next starts from the top, on the same version (A or B) you were hearing; stopped stays stopped.
 

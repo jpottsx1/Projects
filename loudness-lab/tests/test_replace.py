@@ -93,7 +93,8 @@ class Command(unittest.TestCase):
             handle.writeframes((groove() * 32767).astype("<i2").tobytes())
         self.song = self.library / "groove.mp3"
         subprocess.run(["ffmpeg", "-v", "error", "-i", str(wav), "-b:a",
-                        "320k", str(self.song)], check=True)
+                        "320k", "-metadata", "title=Groove", str(self.song)],
+                       check=True)
         self.before = self.song.read_bytes()
         self.kept = self.root / "kept"
         patcher = mock.patch.object(replace, "backup_root",
@@ -139,6 +140,45 @@ class Command(unittest.TestCase):
         self.assertEqual(code, 0, text)
         self.assertEqual(self.song.read_bytes(), self.before)
         self.assertIn("not replaced", text)
+
+    # A track picked up from the folder the run writes to. Its output used
+    # to land on it: the file being read, overwritten with no copy kept,
+    # and its tags lost with it (2026-11-01, 37 files).
+
+    def title(self, path: Path) -> str:
+        return subprocess.run(
+            ["ffprobe", "-v", "quiet", "-show_entries", "format_tags=title",
+             "-of", "default=nw=1:nk=1", str(path)],
+            capture_output=True, text=True).stdout.strip()
+
+    def test_its_output_is_written_beside_it(self):
+        code, text = self.run_subbass("--format", "mp3", "--no-compare",
+                                      "--out", str(self.library))
+        self.assertEqual(code, 0, text)
+        self.assertEqual(self.song.read_bytes(), self.before)
+        levelled = self.library / "groove (levelled).mp3"
+        self.assertTrue(levelled.is_file())
+        self.assertEqual(self.title(levelled), "Groove")
+
+    def test_replacing_it_still_keeps_the_original(self):
+        code, text = self.run_subbass("--format", "mp3", "--no-compare",
+                                      "--out", str(self.library),
+                                      "--replace-originals", "--yes")
+        self.assertEqual(code, 0, text)
+        self.assertNotEqual(self.song.read_bytes(), self.before)
+        self.assertEqual(self.title(self.song), "Groove")
+        self.assertFalse((self.library / "groove (levelled).mp3").exists())
+        batch, = self.kept.iterdir()
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(cli.main(["restore", str(batch)]), 0)
+        self.assertEqual(self.song.read_bytes(), self.before)
+
+    def test_the_writer_refuses_to_write_over_its_source(self):
+        from loudnesslab import write
+        with self.assertRaises(RuntimeError):
+            write.write(self.library / "groove", groove(), RATE,
+                        source=self.song, fmt="mp3")
+        self.assertEqual(self.song.read_bytes(), self.before)
 
 
 if __name__ == "__main__":

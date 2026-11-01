@@ -12,6 +12,7 @@ listening to the codec and calling it the processing.
 
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 
@@ -115,6 +116,14 @@ def write(path: Path, x: np.ndarray, rate: int, source: Path | None = None,
     # and overwrote A, and "-- B sub+10.8dB" came out as "-- B sub+10".
     target = path.with_name(path.name + "." + extension(fmt))
     target.parent.mkdir(parents=True, exist_ok=True)
+    # Never over the file being read: it would be lost with no copy kept,
+    # and the tags are copied off it after the encode, by when it is the
+    # new file. The run names its outputs clear of its sources; this is
+    # the last line if anything else ever doesn't.
+    if source is not None and target.exists() and source.exists() \
+            and os.path.samefile(target, source):
+        raise RuntimeError(f"{target.name} would be written over the file it "
+                           f"is made from; nothing was written")
 
     # MP3 out of MP3 takes the original tag wholesale rather than letting
     # ffmpeg write a new one, so ffmpeg is told to write none.

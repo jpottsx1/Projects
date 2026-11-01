@@ -861,6 +861,25 @@ def _pair(before: float | None, after: float | None) -> str:
     return f"{before:.1f}>{after:.1f}"
 
 
+def _resident_stems(paths: list[str], out_dir: Path, fmt: str) -> set[str]:
+    """The names (lowercased, no extension) of the files in `paths` that
+    live in `out_dir` with the extension `fmt` writes -- the ones an output
+    of the same name would be written over."""
+    try:
+        folder = out_dir.resolve()
+    except OSError:
+        return set()
+    ext = "." + write.extension(fmt)
+    return {Path(p).stem.lower() for p in paths
+            if Path(p).suffix.lower() == ext and Path(p).resolve().parent == folder}
+
+
+def _clear_of(stem: str, resident: set[str]) -> str:
+    """`stem`, or "<stem> (levelled)" where an output under `stem` would
+    be written over a track this run is reading."""
+    return f"{stem} (levelled)" if stem.lower() in resident else stem
+
+
 def _unique_stem(stem: str, folder: str, taken: set[str]) -> str:
     """A name no other track in this batch will write to.
 
@@ -1124,6 +1143,14 @@ def cmd_subbass(args: argparse.Namespace) -> int:
     jobs, duplicates = [], 0
     seen: set[str] = set()
     taken: set[str] = set()
+    # Names of the tracks that already sit in the output folder, in the
+    # output's format. Their output would be written over them: the file
+    # being read, gone with no copy kept, and its tags with it -- they are
+    # read off the source after the encode, by when it is the new file
+    # (2026-11-01: 37 files in ~/Music/LoudnessLab, picked up again from
+    # there, came out with no tags at all). Any track whose output would
+    # take one of these names writes beside it instead.
+    resident = _resident_stems([r["path"] for r in rows], out_dir, args.format)
     for row in rows:
         # The same record twice in one batch is one decode, one encode and
         # one lossy generation wasted -- and two files in the output that
@@ -1156,7 +1183,7 @@ def cmd_subbass(args: argparse.Namespace) -> int:
             or Path(row["path"]).stem
         jobs.append({
             "path": row["path"], "name": name,
-            "stem": _unique_stem(Path(row["path"]).stem,
+            "stem": _unique_stem(_clear_of(Path(row["path"]).stem, resident),
                                  labels.get(row["path"], ""), taken),
             "folder": labels.get(row["path"], "(root)"),
             "amount": amount, "skip": skip, "sub_note": sub_note,

@@ -16,10 +16,11 @@ import Foundation
 /// started.
 public struct Profile: Codable, Equatable, Sendable {
     public var description: String = ""
-    // Level to aim at, on `estimator`: Platinum Notes' level, measured at
-    // -11.52 LUFS-I on its "Break My Heart" (profiles.py says more).
+    // Level to aim at, on `estimator`: -11.5 on p95, the loud part, which
+    // is what Disco Tags' playlists match on. Integrated read dynamic
+    // records low and drove them into the peak limit (profiles.py says more).
     public var target: Double = -11.5
-    public var estimator: String = "lufs_i"
+    public var estimator: String = "s_p95"
     public var peakCeiling: Double = -1.0    // dBTP no gain may exceed
     // dB the limiter may take off the peaks where the ceiling would stop
     // levelling short of the target. profiles.py says why 6.

@@ -48,7 +48,7 @@ class TestLoading(unittest.TestCase):
         self.assertEqual(profiles.resolve(loaded, "level-only")["target"], -18.0)
         # Overriding one key must not discard the rest of the built-in.
         self.assertEqual(profiles.resolve(loaded, "level-only")["estimator"],
-                         "lufs_i")
+                         "s_p95")
 
     def test_an_unknown_key_is_rejected(self):
         """A silently ignored typo is a policy that differs from the written

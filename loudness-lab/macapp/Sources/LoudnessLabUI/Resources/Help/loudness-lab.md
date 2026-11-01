@@ -678,11 +678,13 @@ Levelling happens last, because everything before it moves loudness: restoring a
 
 ### On
 
-*Which loudness statistic to level on. s_p95 describes the loud part.*
+*Which loudness statistic to level on. s_p95, the default, describes the loud part.*
 
 lufs_i is integrated loudness: one number for the whole track, quiet intro and all. s_p95 is the 95th percentile of the rolling 3-second loudness -- it describes the loud part of the track rather than its average, which is what actually matters when tracks are mixed one into another. s_p50 is the median, s_max the loudest moment.
 
 The choice only matters as much as the two disagree, and they disagree more as a track's loudness range grows. Measured on this library, the median gap between s_p95 and lufs_i by loudness-range band was 1.16, 1.70, 2.16, 2.47 and 2.76 dB. On a track with a quiet intro and a loud body, levelling on integrated loudness makes the body too loud.
+
+s_p95 is the default, and what Disco Tags' playlists match on. On integrated loudness a dynamic 70s record reads several dB low, so it was turned up further than its loud part needed, and most ran into the peak limit and ended short of the target.
 
 ### Peak ceiling
 

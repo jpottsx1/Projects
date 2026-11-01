@@ -266,9 +266,10 @@ tr:last-child td { border-bottom: 0; }
 <p><em>The level each written file is brought to, measured on the estimator.</em></p>
 <p>Levelling happens last, because everything before it moves loudness: restoring a peak, laying in sub and reshaping attacks all change what the track measures. Whatever happens last has to be the levelling, or the number on screen is not the number in the file.</p>
 <h3>On</h3>
-<p><em>Which loudness statistic to level on. s_p95 describes the loud part.</em></p>
+<p><em>Which loudness statistic to level on. s_p95, the default, describes the loud part.</em></p>
 <p>lufs_i is integrated loudness: one number for the whole track, quiet intro and all. s_p95 is the 95th percentile of the rolling 3-second loudness -- it describes the loud part of the track rather than its average, which is what actually matters when tracks are mixed one into another. s_p50 is the median, s_max the loudest moment.</p>
 <p>The choice only matters as much as the two disagree, and they disagree more as a track&#x27;s loudness range grows. Measured on this library, the median gap between s_p95 and lufs_i by loudness-range band was 1.16, 1.70, 2.16, 2.47 and 2.76 dB. On a track with a quiet intro and a loud body, levelling on integrated loudness makes the body too loud.</p>
+<p>s_p95 is the default, and what Disco Tags&#x27; playlists match on. On integrated loudness a dynamic 70s record reads several dB low, so it was turned up further than its loud part needed, and most ran into the peak limit and ended short of the target.</p>
 <h3>Peak ceiling</h3>
 <p><em>True peak no gain may exceed. -1.0 dBTP, not -0.1, on purpose.</em></p>
 <p>Levelling stops here even if that means falling short of the target. The default is -1.0 rather than the -0.1 you often see because the measurement itself is not that precise: 4x oversampled true-peak detection is only good to about 0.5 dB, and an MP3 re-encode moves peaks around on top of that. A ceiling tighter than the error bar is a ceiling that gets crossed.</p>

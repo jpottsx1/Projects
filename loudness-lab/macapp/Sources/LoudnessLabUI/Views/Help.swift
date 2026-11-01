@@ -685,7 +685,7 @@ enum Help {
 
     static let estimator = HelpEntry(
         title: "On",
-        summary: "Which loudness statistic to level on. s_p95 describes the loud part.",
+        summary: "Which loudness statistic to level on. s_p95, the default, describes the loud part.",
         detail: """
         lufs_i is integrated loudness: one number for the whole track, \
         quiet intro and all. s_p95 is the 95th percentile of the rolling \
@@ -700,6 +700,11 @@ enum Help {
         band was 1.16, 1.70, 2.16, 2.47 and 2.76 dB. On a track with a quiet \
         intro and a loud body, levelling on integrated loudness makes the \
         body too loud.
+
+        s_p95 is the default, and what Disco Tags' playlists match on. On \
+        integrated loudness a dynamic 70s record reads several dB low, so it \
+        was turned up further than its loud part needed, and most ran into \
+        the peak limit and ended short of the target.
         """)
 
     static let peakCeiling = HelpEntry(

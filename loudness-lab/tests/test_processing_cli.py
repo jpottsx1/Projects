@@ -16,6 +16,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 
 from loudnesslab import cli, decode, subbass, write
@@ -125,6 +126,17 @@ class TestSelectionAndDuplicates(unittest.TestCase):
         listing = self.dir / "chosen.txt"
         listing.write_text(str(self.src / "two.flac") + "\n")
         self.assertEqual(self._run("--select", str(listing), "--no-compare"), 0)
+        self.assertEqual(sorted(p.stem for p in self.out.glob("*.flac")), ["two"])
+
+    def test_a_selection_without_auto_measures_nothing_first(self):
+        """Levelling reads the level from the render's own decode, so the
+        measure pass ahead of it is the same work twice."""
+        _fixture(self.src, ("one", "two"))
+        listing = self.dir / "chosen.txt"
+        listing.write_text(str(self.src / "two.flac") + "\n")
+        with unittest.mock.patch.object(cli.analyze, "run",
+                                        side_effect=AssertionError("measured")):
+            self.assertEqual(self._run("--select", str(listing), "--no-compare"), 0)
         self.assertEqual(sorted(p.stem for p in self.out.glob("*.flac")), ["two"])
 
     def test_select_is_applied_before_the_limit(self):

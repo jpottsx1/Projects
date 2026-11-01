@@ -118,8 +118,13 @@ def _level_to_target(audio, job: dict, measured: dict, may_limit: bool = True):
     if value is None:
         return audio, 0.0, measured.get("true_peak_dbtp", float("nan")), None
     if may_limit and job.get("peak_limit", 0.0) > 0:
+        # The peak already measured, so a track the gain fits is let
+        # through without the limiter working out its peaks again.
+        known = [p for p in (measured.get("true_peak_dbtp"),
+                             measured.get("sample_peak_dbfs")) if p is not None]
         done = limit.level(audio, decode.TARGET_RATE, value, job["target"],
-                           job["estimator"], job["peak_ceiling"], job["peak_limit"])
+                           job["estimator"], job["peak_ceiling"], job["peak_limit"],
+                           peak_dbtp=max(known) if len(known) == 2 else None)
         if done is not None:
             limited, gain_db, report = done
             return limited, gain_db, report["true_peak_dbtp"], report

@@ -140,7 +140,8 @@ def _loudness(weighted: np.ndarray, gain: np.ndarray, rate: int) -> dict:
 
 
 def level(x: np.ndarray, rate: int, value: float, target: float,
-          estimator: str, ceiling_dbtp: float, max_db: float):
+          estimator: str, ceiling_dbtp: float, max_db: float,
+          peak_dbtp: float | None = None):
     """Turn `x` (measuring `value` on `estimator`) to `target`, limiting
     its peaks to `ceiling_dbtp` by at most `max_db`.
 
@@ -151,7 +152,18 @@ def level(x: np.ndarray, rate: int, value: float, target: float,
     target, as it would have without the limiter -- by less. The report
     carries the result's loudness and true peak, so it need not be
     measured again.
+
+    `peak_dbtp`, where the caller has already measured it, is `x`'s peak
+    (true or sample, whichever is taller): where the gain fits under the
+    ceiling on that, the per-sample peaks are never worked out. They are
+    the 4x oversampling of the whole track, ~7 s of a 7.7-minute one --
+    spent on every track only to find most needed no limiting
+    (2026-11-01: four of six).
     """
+    if max_db <= 0:
+        return None
+    if peak_dbtp is not None and peak_dbtp + (target - value) <= ceiling_dbtp:
+        return None
     peaks = peaks_per_sample(x)
     top = float(peaks.max())
     if top <= 0:

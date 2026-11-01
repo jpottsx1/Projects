@@ -13,6 +13,7 @@ import shutil
 import subprocess
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from . import (__version__, analyze, apply_gain, bs1770, db, declip, decode,
@@ -668,6 +669,45 @@ def cmd_restore(args: argparse.Namespace) -> int:
     return 1 if problems else 0
 
 
+def _selected_rows(conn, selected: list[str], roots: list[Path],
+                   match: list[str] | None) -> list[dict]:
+    """The ticked tracks, for a run that measures nothing first, as the
+    selection query gives them: those under `roots`, matching `match`,
+    with artist, title and BPM from the database where the track was
+    measured before and from its tags where not. In the order ticked: with
+    nothing sized from the spectrum, the order changes nothing a track
+    gets. `conn` holds the `chosen` table of the selection."""
+    bases = [str(root).rstrip(os.sep) for root in roots]
+    paths = [p for p in dict.fromkeys(selected)
+             if any(p == b or p.startswith(b + os.sep) for b in bases)
+             and Path(p).is_file()]
+    known = {row["path"]: dict(row) for row in conn.execute(
+        "SELECT path, artist, title, bpm FROM tracks "
+        "WHERE status = 'ok' AND path IN (SELECT path FROM chosen)")}
+
+    def tags(path: str) -> dict:
+        # A file ffprobe cannot read is the render's to report, as it
+        # would any other failure.
+        try:
+            meta = decode.probe(Path(path))
+        except Exception:
+            meta = {}
+        return {"path": path, "artist": meta.get("artist"),
+                "title": meta.get("title"), "bpm": meta.get("bpm")}
+
+    missing = [p for p in paths if p not in known]
+    # ffprobe is a process a file: several at once.
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        known.update(zip(missing, pool.map(tags, missing)))
+    rows = [known[p] for p in paths]
+    if match:
+        wanted = [m.lower() for m in match]
+        rows = [r for r in rows if any(
+            w in (r["artist"] or "").lower() or w in (r["title"] or "").lower()
+            or w in r["path"].lower() for w in wanted)]
+    return rows
+
+
 def _write_manifest(path: Path, args: argparse.Namespace,
                     tracks: list) -> None:
     """A record of the run that a player can read.
@@ -943,8 +983,19 @@ def cmd_subbass(args: argparse.Namespace) -> int:
         if not any(chosen == Path(r).resolve() or Path(r).resolve() in chosen.parents
                    for r in roots):
             roots.append(chosen)
-    counts = analyze.run(roots=roots, db_path=database, jobs=args.jobs,
-                         progress=reporter)
+    # Nothing sized from a reference -- no --auto -- means nothing is read
+    # from the measurements but each track's tags: the levelling takes the
+    # track's level from the render's own decode. So a selection skips the
+    # measure pass, which is a decode and a full loudness and spectrum
+    # reading a track, the render's own over again (2026-11-01: 11-19 s of
+    # a 7.7-minute track's ~60). The tracks are worked through as ticked.
+    unmeasured = selected is not None and not args.auto
+    if unmeasured:
+        counts = {"found": len(selected), "skipped": len(selected),
+                  "analysed": 0, "errors": 0}
+    else:
+        counts = analyze.run(roots=roots, db_path=database, jobs=args.jobs,
+                             progress=reporter)
     if porcelain:
         _emit({"event": "measured",
                "seconds": round(time.monotonic() - start, 3), **counts})
@@ -995,6 +1046,9 @@ def cmd_subbass(args: argparse.Namespace) -> int:
              for v in (str(root).rstrip(os.sep),
                        str(root).rstrip(os.sep) + os.sep + "%")]).fetchone()[0]
         analysed = in_scope
+        if unmeasured:
+            rows = _selected_rows(conn, selected, args.path, args.match)[:args.limit]
+            analysed = len(rows)
         reference_name, curve = (None, {})
         top_curve = {}
         if args.auto:

@@ -9,6 +9,7 @@ import shutil
 import sys
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 
 import numpy as np
@@ -102,6 +103,22 @@ class TestLevelling(unittest.TestCase):
         quiet_target = self.value + (-1.0 - self.peak) - 1.0
         self.assertIsNone(limit.level(self.x, RATE, self.value, quiet_target,
                                       "lufs_i", -1.0, 6.0))
+
+    def test_a_known_peak_that_fits_skips_the_peak_pass(self):
+        quiet_target = self.value + (-1.0 - self.peak) - 1.0
+        with unittest.mock.patch.object(limit, "peaks_per_sample",
+                                        side_effect=AssertionError("worked out")):
+            self.assertIsNone(limit.level(self.x, RATE, self.value, quiet_target,
+                                          "lufs_i", -1.0, 6.0, peak_dbtp=self.peak))
+
+    def test_a_known_peak_that_does_not_fit_still_limits(self):
+        with_peak = limit.level(self.x, RATE, self.value, self.target,
+                                "lufs_i", -1.0, 6.0, peak_dbtp=self.peak)
+        without = limit.level(self.x, RATE, self.value, self.target,
+                              "lufs_i", -1.0, 6.0)
+        self.assertIsNotNone(with_peak)
+        np.testing.assert_array_equal(with_peak[0], without[0])
+        self.assertEqual(with_peak[1], without[1])
 
     def test_off_is_off(self):
         self.assertIsNone(limit.level(self.x, RATE, self.value, self.target,

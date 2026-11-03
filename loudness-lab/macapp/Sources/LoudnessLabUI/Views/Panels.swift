@@ -401,7 +401,7 @@ struct SettingsPanel: View {
                 Toggle("Dry run (measure, write nothing)", isOn: $dryRun)
                     .help(Help.dryRun.summary)
                     .disabled(replaceOriginals)
-                // A pair's B is level-matched for listening and a dry run
+                // A pair's B is a listening copy and a dry run
                 // writes nothing to swap in, so replacing turns both off.
                 Toggle("Replace originals when done", isOn: $replaceOriginals)
                     .help(Help.replaceOriginals.summary)
@@ -674,7 +674,7 @@ extension ResultsPanel {
                 Text(text).help(String(format: "Levelled to %.1f %@", row.levelTarget ?? after, scale))
             }
         } else {
-            Text("—").help("Not levelled: a dry run, a level-matched pair, or a run from before this column.")
+            Text("—").help("Not levelled: a dry run, or a run from before this column.")
         }
     }
 

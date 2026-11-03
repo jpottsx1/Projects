@@ -934,7 +934,7 @@ def cmd_subbass(args: argparse.Namespace) -> int:
             and getattr(args, "mud", 0) <= 0 and getattr(args, "body", 0) <= 0
             and not args.no_compare):
         # Nothing but levelling. A comparison would be a pair of identical
-        # files, since B is level-matched to A, so write the levelled track
+        # files, since A is level-matched to B, so write the levelled track
         # alone. This used to refuse and point at the gain command, but
         # that works only on MP3: a FLAC, WAV or AAC library had no way to
         # be brought to the target at all.
@@ -944,7 +944,7 @@ def cmd_subbass(args: argparse.Namespace) -> int:
     if getattr(args, "replace_originals", False):
         # The one place processing touches originals, so it has to be
         # asked for twice and cannot be asked for by accident: a finished
-        # track at its level (not a comparison's level-matched B) and no
+        # track at its level (not a comparison's B) and no
         # dry run, which would swap nothing and look as if it had.
         if not args.yes:
             return fail("error: --replace-originals moves every original it "
@@ -952,8 +952,8 @@ def cmd_subbass(args: argparse.Namespace) -> int:
                         "originals; add --yes to go ahead.")
         if not args.no_compare:
             return fail("error: --replace-originals needs --no-compare: a "
-                        "comparison's B is level-matched for listening, not "
-                        "levelled for a set.")
+                        "comparison's B is a listening copy, named as one "
+                        "and without a level tag.")
         if args.dry_run:
             return fail("error: --replace-originals and --dry-run together "
                         "would replace nothing.")
@@ -1183,6 +1183,14 @@ def cmd_subbass(args: argparse.Namespace) -> int:
         # and still short on top end; skipping it there would silently
         # skip air too, on tracks air auto-sizing exists to help.
         if air_amount > 0 or mud_amount > 0 or body_amount > 0:
+            skip = None
+        # Nor is the sub the only thing a track is processed for. A run
+        # that writes finished tracks levels every one of them last
+        # (render.py), and de-clipping, range and transients are sized per
+        # track as they run: skipping here left a track the sub had no use
+        # for at its old level, beside the rest at the target (2026-11-02).
+        if ((args.no_compare and not args.dry_run) or args.declip
+                or args.target_lra > 0 or args.transient > 0):
             skip = None
         name = " - ".join(p for p in (row["artist"], row["title"]) if p) \
             or Path(row["path"]).stem
@@ -1421,9 +1429,11 @@ def cmd_subbass(args: argparse.Namespace) -> int:
         out("  global_gain exists only in an MP3 bitstream.")
     else:
         out(f"  {written} pair(s) written to {out_dir}/ as {kind}: 'A original'")
-        out("  and 'B sub', LEVEL-MATCHED so the comparison is about the bass")
-        out("  and not about which is louder. 'match' is the dB both were")
-        out("  brought down by to meet; neither was boosted, so neither clips.")
+        out(f"  and 'B sub'. B is the finished track, levelled to "
+            f"{args.target:+.1f} on {args.estimator};")
+        out("  A is the original LEVEL-MATCHED to it, so the comparison is")
+        out("  about the sound and not about which is louder. 'match' is")
+        out("  B's levelling gain.")
         out()
         out("  Knowing which is which biases you. Have someone else shuffle")
         out("  the names, or at least listen to B first on half of them.")

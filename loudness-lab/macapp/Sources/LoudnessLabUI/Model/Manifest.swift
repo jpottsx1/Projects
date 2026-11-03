@@ -44,8 +44,8 @@ struct Manifest: Codable {
         let limitDB: Double?
         /// What the levelling did: the level on `levelEstimator` ("lufs_i"
         /// or "s_p95") going in and coming out, the target, and the gain.
-        /// Nil where nothing was levelled -- a dry run, a level-matched
-        /// pair, or a manifest from before these were written.
+        /// For an A/B pair, the B's. Nil where nothing was levelled -- a dry
+        /// run, or a manifest from before these were written.
         let levelEstimator: String?
         let levelTarget: Double?
         let levelBefore: Double?

@@ -10,7 +10,8 @@ logged beside it, and `restore` puts a whole batch back.
         Users/jeff/Music/.../Song.mp3  the original, where it was
 
 Only a finished track replaces its original: one written at its level
-(a comparison's B is level-matched for listening, not for a set), and in
+(a comparison's B is named as one, carries no level tag, and may sit
+under the target to meet its A), and in
 the original's own format, so Serato's library path still points at a
 file of the kind it expects. MP3 to MP3 carries the whole tag across,
 cue points and beatgrid included (`write.carry_id3v2`).

@@ -311,10 +311,13 @@ def _one(job: dict) -> dict:
             # A track can want de-clipping, or dynamics, and not want a sub.
             # Where any of those did something there is a new file worth
             # writing, so only the sub is dropped; where nothing was done,
-            # say so and move on.
+            # say so and move on -- unless the run writes finished tracks,
+            # which are all levelled: a track with no bassline to put a sub
+            # under still has to come out at the target (2026-11-02).
             amount = 0.0
-            if not (ranged["applied"] or shaped["applied"] or cleared["applied"]
-                    or bodied["applied"]
+            levels = not job["compare"] and not job["dry_run"]
+            if not (levels or ranged["applied"] or shaped["applied"]
+                    or cleared["applied"] or bodied["applied"]
                     or (clip is not None and clip["restored"])):
                 return {**base, "status": "skipped", "reason": skip,
                         "amount": None, "clip": clip, "range": ranged,
@@ -382,7 +385,7 @@ def _one(job: dict) -> dict:
         variants = []
         limited = None
         # What the levelling did, for the Results table: nothing in a
-        # dry run or a level-matched pair, which are not levelled.
+        # dry run, which writes nothing.
         levelled = None
 
         if job["dry_run"]:
@@ -434,23 +437,51 @@ def _one(job: dict) -> dict:
                                  _levelled_label(job["label"], match_db), after,
                                  measured=shifted)]
         else:
-            # Level-match the pair, or the comparison just measures which is
-            # louder: adding sub raises loudness, and louder wins every
-            # blind test regardless of whether it is better. Both are
-            # brought DOWN to whichever is quieter, so neither can clip.
-            original_lufs = bs1770.measure(original)["lufs_i"]
-            target = min(original_lufs, processed["lufs_i"])
-            a = original * (10 ** ((target - original_lufs) / 20))
-            b = after * (10 ** ((target - processed["lufs_i"]) / 20))
-            match_db = target - original_lufs
+            # B is the finished track: levelled to the target exactly as a
+            # run without pairs levels it, so what is auditioned is what
+            # would be played out. A pair whose B was only matched to A
+            # showed the sub, air and body with the levelling blank, and
+            # never let the level be heard (2026-11-02).
+            may_limit = not (clip is not None and clip["restored"])
+            b, match_db, peak, limited = _level_to_target(
+                after, job, processed, may_limit=may_limit)
+            b_measured = limited["measured"] if limited is not None else {
+                key: (None if processed.get(key) is None
+                      else processed[key] + match_db)
+                for key in ("lufs_i", "s_p95", "true_peak_dbtp")}
+            # A is the original matched to B on integrated loudness, or the
+            # comparison just measures which is louder: louder wins every
+            # blind test regardless of whether it is better. A is limited
+            # only as B was allowed to be; where its peaks stop it short, B
+            # comes down to meet it, so the pair stays matched and the Level
+            # column says how far short of the target B ended.
+            lower_b = 0.0
+            a = original
+            if b_measured.get("lufs_i") is not None:
+                a, _, _, a_limited = _level_to_target(
+                    original, {**job, "estimator": "lufs_i",
+                               "target": b_measured["lufs_i"]},
+                    measure_once(original), may_limit=may_limit)
+                a_lufs = (a_limited["measured"]["lufs_i"] if a_limited is not None
+                          else bs1770.measure(a)["lufs_i"])
+                if a_lufs is not None and b_measured["lufs_i"] - a_lufs > 0.05:
+                    lower_b = b_measured["lufs_i"] - a_lufs
             # A restored peak stands above full scale by design, and the
             # writer clips what it is given -- which would put back exactly
             # the flat tops this pass just took out. Trim BOTH by the same
             # amount so the level match survives the headroom.
-            room = max(float(np.abs(a).max()), float(np.abs(b).max()))
-            if room > 0.99:
-                a, b = a * (0.99 / room), b * (0.99 / room)
-                match_db += 20 * np.log10(0.99 / room)
+            room = max(float(np.abs(a).max()),
+                       float(np.abs(b).max()) * 10 ** (-lower_b / 20))
+            trim = -20 * float(np.log10(0.99 / room)) if room > 0.99 else 0.0
+            if trim > 0:
+                a = (a * 10 ** (-trim / 20)).astype(a.dtype)
+            if lower_b + trim > 0:
+                b = (b * 10 ** (-(lower_b + trim) / 20)).astype(b.dtype)
+                match_db -= lower_b + trim
+                peak -= lower_b + trim
+                b_measured = {key: (None if value is None
+                                    else value - lower_b - trim)
+                              for key, value in b_measured.items()}
             # Both written in the SAME format from the same decode, so no
             # codec difference can creep into the comparison.
             a_path = write.write(out_dir / f"{job['stem']} -- A original", a,
@@ -459,9 +490,18 @@ def _one(job: dict) -> dict:
             b_path = write.write(out_dir / f"{job['stem']} -- B {job['label']}", b,
                                  decode.TARGET_RATE, source, fmt,
                                  out_rate=native_rate)
-            peak = bs1770.measure(b)["true_peak_dbtp"]
+            estimator = job["estimator"]
+            levelled = {
+                "level_estimator": estimator,
+                "level_target": job["target"],
+                "level_before": _rounded(processed.get(estimator)),
+                "level_after": _rounded(b_measured.get(estimator)),
+                "gain_db": round(float(match_db), 3),
+            }
             variants = [_variant("original", a_path, "original", a),
-                        _variant("processed", b_path, job["label"], b)]
+                        _variant("processed", b_path,
+                                 _levelled_label(job["label"], match_db), b,
+                                 measured=b_measured)]
     except Exception as exc:  # decode/DSP/encode failures are per-file
         return {**base, "status": "error",
                 "reason": f"{type(exc).__name__}: {exc}"[:500], "amount": None,

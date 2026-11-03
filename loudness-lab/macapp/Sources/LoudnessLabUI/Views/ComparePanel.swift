@@ -184,8 +184,8 @@ struct ComparePanel: View {
                     .disabled(saving)
                     .help("Runs this track once more, on its own, at the profile's target "
                           + "level, writes one finished file, then deletes the A and B "
-                          + "comparison files. The comparison is level-matched down, so "
-                          + "B itself is not the version to keep.")
+                          + "comparison files. B is named as a comparison file and may "
+                          + "have come down to meet A, so it is not the file to keep.")
                 if saving { ProgressView().controlSize(.small) }
                 Spacer()
             }

@@ -106,11 +106,11 @@ final class Engine: ObservableObject {
 
     /// Keeps one track's finished version and throws its comparison files away.
     ///
-    /// The A/B pair is level-matched DOWN to the quieter of the two so the
-    /// comparison is fair, which makes B the thing that was listened to, not
-    /// the thing to keep: it is not at the profile's target. So the track is
-    /// run again on its own, without comparing, which writes one file at the
-    /// proper level under the song's own name. Only once that has worked are
+    /// The pair's B is levelled as the finished track would be, but it is
+    /// named as a comparison file, carries no level tag, and comes down to
+    /// meet an A whose peaks held it short. So the track is run again on
+    /// its own, without comparing, which writes one file at the proper
+    /// level under the song's own name. Only once that has worked are
     /// the old A and B files deleted, and the manifest, which a one-track run
     /// would otherwise have replaced whole, keeps every other track.
     func saveFinished(_ track: Manifest.Track, folders: [URL], profile: Profile,

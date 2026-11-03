@@ -771,10 +771,14 @@ enum Help {
         Both versions are written from the same decode, so they are the same \
         length to the sample and can be switched between mid-bar.
 
-        They are also level matched, both brought DOWN to whichever is \
-        quieter so neither clips. This is not politeness: louder wins every \
-        blind comparison regardless of merit, so without matching you would \
-        be testing which is louder rather than which is better.
+        The processed version is the finished track, levelled to the \
+        target exactly as a run without pairs would level it, so you hear \
+        what you would play out. The original is then level matched to it. \
+        This is not politeness: louder wins every blind comparison \
+        regardless of merit, so without matching you would be testing which \
+        is louder rather than which is better. Where the original's peaks \
+        stop it short, the processed one comes down to meet it, and the \
+        Level column says where it ended.
         """)
 
     static let dryRun = HelpEntry(
@@ -794,8 +798,8 @@ enum Help {
         original's place, same name, same folder -- so Serato, and anything \
         else that knows the track by where it is, now plays the processed \
         one. Only in a run that writes finished tracks rather than A/B \
-        pairs (a pair's B is level-matched for listening, not levelled for \
-        a set), and only when the format matches: a FLAC written for an \
+        pairs (a pair's B is a listening copy, named as one and without a \
+        level tag), and only when the format matches: a FLAC written for an \
         MP3 original is left in the output folder, since a different file \
         type would break its library path. Set the format to MP3 for an \
         MP3 library.
@@ -860,8 +864,8 @@ enum Help {
         change between. Level reads orange where a track ended short of the \
         target: its peaks would have needed more taken off them than the \
         peak limit allows. Limit is how much the limiter took off the \
-        tallest peak. A level-matched pair (compare on) isn't levelled, so \
-        these read "—".
+        tallest peak. In an A/B pair these describe the B. A dry run isn't \
+        levelled, so they read "—".
 
         Sub, Air and Punch are what was actually applied to that track, which \
         with per-track sizing on is not the same as what was asked for. Air \

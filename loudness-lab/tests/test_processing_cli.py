@@ -841,3 +841,54 @@ class TestTheMudCutIsSizedFromTheReference(unittest.TestCase):
         manifest = json.loads(Path(events[-1]["manifest"]).read_text())["tracks"]
         muddy = next(t for t in manifest if t["name"] == "Muddy")
         self.assertAlmostEqual(muddy["mud_db"], done["Muddy"]["mud_db"], places=3)
+
+
+@unittest.skipUnless(HAVE_FFMPEG, "ffmpeg/ffprobe not installed")
+class TestATrackTheSubPassesOverIsStillLevelled(unittest.TestCase):
+    """A processing run ends levelled, for every track. A track the sub has
+    no use for -- already at the reference, or no bassline to put it under --
+    used to come back "skipped" and keep its old level, so a run that added
+    sub left part of the library at the target and part where it was
+    (2026-11-02)."""
+
+    def run_levelled(self, directory: Path, *extra: str) -> dict:
+        from loudnesslab import bs1770
+        out = subprocess.run(
+            [sys.executable, str(TOOL), "subbass", str(directory / "src"),
+             "--db", str(directory / "l.db"), "--out", str(directory / "out"),
+             "--no-compare", "--target", "-16", "--format", "flac",
+             "--jobs", "1", "--porcelain", *extra],
+            capture_output=True, text=True)
+        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+        written = sorted((directory / "out").rglob("*.flac"))
+        self.assertEqual(len(written), 1, out.stdout)
+        return bs1770.measure(decode.decode(written[0]))
+
+    def test_a_track_already_at_the_reference_is_levelled(self):
+        import numpy as np
+        directory = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, directory, ignore_errors=True)
+        (directory / "ref").mkdir()
+        (directory / "src").mkdir()
+        x, _ = programme(seconds=8.0)
+        # The same record as the reference: no shortfall, so no sub.
+        subbass.write_flac(directory / "ref" / "Reference.flac", x, RATE)
+        subbass.write_flac(directory / "src" / "Track.flac",
+                           (x * 0.25).astype(np.float32), RATE)
+        measured = self.run_levelled(directory, "--auto", "--amount", "4",
+                                     "--reference-folder", str(directory / "ref"))
+        self.assertAlmostEqual(measured["s_p95"], -16.0, delta=0.2)
+
+    def test_a_track_with_no_bassline_is_levelled(self):
+        import numpy as np
+        from scipy.signal import butter, sosfiltfilt
+        directory = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, directory, ignore_errors=True)
+        (directory / "src").mkdir()
+        rng = np.random.default_rng(3)
+        mids = sosfiltfilt(butter(4, [400, 4000], btype="band", fs=RATE,
+                                  output="sos"), rng.standard_normal(8 * RATE))
+        track = (0.05 * np.stack([mids, mids], 1)).astype(np.float32)
+        subbass.write_flac(directory / "src" / "Track.flac", track, RATE)
+        measured = self.run_levelled(directory, "--amount", "4")
+        self.assertAlmostEqual(measured["s_p95"], -16.0, delta=0.2)

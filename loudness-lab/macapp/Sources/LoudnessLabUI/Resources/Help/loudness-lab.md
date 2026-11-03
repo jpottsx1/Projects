@@ -168,8 +168,8 @@ choose that run to put the whole batch back.
 Two conditions, both deliberate:
 
 - It only applies to a run that writes **finished tracks**, not A/B pairs.
-  A pair's second file is level-matched for listening, not levelled for a
-  set.
+  A pair's second file is a listening copy: named as one, without a level
+  tag, and brought down to meet the original where its peaks held it short.
 - The format must match the original's. A FLAC written for an MP3 original
   is left in the output folder, because a different file type would break
   its path in your library. Set the format to MP3 for an MP3 library.
@@ -333,10 +333,12 @@ loop.
 
 ## Listening to the result
 
-Knowing which version is which biases you, so the pair is written
-level-matched: both brought **down** to whichever is quieter, so neither
-clips and neither wins on loudness alone. Louder reliably wins a blind
-test whatever else is true of it.
+The pair's B is the finished track, levelled to the target, so you hear
+what you would play out. Knowing which version is which biases you, so
+the original is written level-matched to it, and neither wins on loudness
+alone. Louder reliably wins a blind test whatever else is true of it.
+Where the original's peaks stop it short of B, B comes down to meet it,
+and the Level column says where it ended.
 
 Shift-Space switches mid-track. Both versions are scheduled together on
 one clock, so the switch lands on the same sample with no tick.
@@ -750,7 +752,7 @@ The measurements do not follow it. They stay in one database, because pointing t
 
 Both versions are written from the same decode, so they are the same length to the sample and can be switched between mid-bar.
 
-They are also level matched, both brought DOWN to whichever is quieter so neither clips. This is not politeness: louder wins every blind comparison regardless of merit, so without matching you would be testing which is louder rather than which is better.
+The processed version is the finished track, levelled to the target exactly as a run without pairs would level it, so you hear what you would play out. The original is then level matched to it. This is not politeness: louder wins every blind comparison regardless of merit, so without matching you would be testing which is louder rather than which is better. Where the original's peaks stop it short, the processed one comes down to meet it, and the Level column says where it ended.
 
 ### Dry run
 
@@ -762,7 +764,7 @@ Every measurement, every decision and every per-track figure, with no files prod
 
 *Puts each finished track where its original was. The originals are kept, so this can be undone.*
 
-After a track is processed and written, it is moved into its original's place, same name, same folder -- so Serato, and anything else that knows the track by where it is, now plays the processed one. Only in a run that writes finished tracks rather than A/B pairs (a pair's B is level-matched for listening, not levelled for a set), and only when the format matches: a FLAC written for an MP3 original is left in the output folder, since a different file type would break its library path. Set the format to MP3 for an MP3 library.
+After a track is processed and written, it is moved into its original's place, same name, same folder -- so Serato, and anything else that knows the track by where it is, now plays the processed one. Only in a run that writes finished tracks rather than A/B pairs (a pair's B is a listening copy, named as one and without a level tag), and only when the format matches: a FLAC written for an MP3 original is left in the output folder, since a different file type would break its library path. Set the format to MP3 for an MP3 library.
 
 Nothing is deleted. Each original is moved into Music › LoudnessLab › Replaced originals › <date and time>, under its full folder path, with a log of every swap. Double-click Restore Originals and choose that folder to put the whole batch back.
 
@@ -798,7 +800,7 @@ Knowing which is the processed one biases you toward hearing what you expected. 
 
 *Level, Gain and Limit are the levelling. Sub, Air and Punch are what was applied. Clips and Lift are the de-clipper.*
 
-Level is the track's level going into the levelling and coming out, on what it was levelled on (integrated LUFS or p95), and Gain the change between. Level reads orange where a track ended short of the target: its peaks would have needed more taken off them than the peak limit allows. Limit is how much the limiter took off the tallest peak. A level-matched pair (compare on) isn't levelled, so these read "—".
+Level is the track's level going into the levelling and coming out, on what it was levelled on (integrated LUFS or p95), and Gain the change between. Level reads orange where a track ended short of the target: its peaks would have needed more taken off them than the peak limit allows. Limit is how much the limiter took off the tallest peak. In an A/B pair these describe the B. A dry run isn't levelled, so they read "—".
 
 Sub, Air and Punch are what was actually applied to that track, which with per-track sizing on is not the same as what was asked for. Air reads "—" for a manifest written before this column existed, rather than a false "+0.00 dB".
 

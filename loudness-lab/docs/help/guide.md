@@ -168,8 +168,8 @@ choose that run to put the whole batch back.
 Two conditions, both deliberate:
 
 - It only applies to a run that writes **finished tracks**, not A/B pairs.
-  A pair's second file is level-matched for listening, not levelled for a
-  set.
+  A pair's second file is a listening copy: named as one, without a level
+  tag, and brought down to meet the original where its peaks held it short.
 - The format must match the original's. A FLAC written for an MP3 original
   is left in the output folder, because a different file type would break
   its path in your library. Set the format to MP3 for an MP3 library.
@@ -333,10 +333,12 @@ loop.
 
 ## Listening to the result
 
-Knowing which version is which biases you, so the pair is written
-level-matched: both brought **down** to whichever is quieter, so neither
-clips and neither wins on loudness alone. Louder reliably wins a blind
-test whatever else is true of it.
+The pair's B is the finished track, levelled to the target, so you hear
+what you would play out. Knowing which version is which biases you, so
+the original is written level-matched to it, and neither wins on loudness
+alone. Louder reliably wins a blind test whatever else is true of it.
+Where the original's peaks stop it short of B, B comes down to meet it,
+and the Level column says where it ended.
 
 Shift-Space switches mid-track. Both versions are scheduled together on
 one clock, so the switch lands on the same sample with no tick.

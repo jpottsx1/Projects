@@ -100,8 +100,8 @@ def main(argv: list[str] | None = None) -> int:
             print(f"    {level - args.target:+.1f} dB  {name}")
         print()
     if counts.get(PAIR):
-        print("  A/B pairs are matched to each other for listening, not "
-              "levelled.\n  Turn 'Write A/B pairs' off for files to play "
+        print("  A/B pairs: B is levelled and A matched to it, for "
+              "listening.\n  Turn 'Write A/B pairs' off for files to play "
               "out.")
     if counts.get(NOT) or counts.get(LOUD):
         print("  'Not levelled' and 'louder than target' files did not come "

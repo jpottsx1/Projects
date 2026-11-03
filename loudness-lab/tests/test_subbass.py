@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import json
 import shutil
 import subprocess
 import sys
@@ -320,11 +321,8 @@ class TestComparisonPairs(unittest.TestCase):
             measured = bs1770.measure(decode.decode(written))
         self.assertLessEqual(measured["true_peak_dbtp"], -1.0 + 0.2)
 
-    def test_a_comparison_pair_is_matched_to_itself_not_to_the_target(self):
-        """The pair exists to be listened to, so it must be matched to each
-        other; levelling both to a target would defeat that."""
+    def run_pair(self, x, *extra):
         from loudnesslab import bs1770, cli, decode
-        x, _ = programme(seconds=8.0)
         with tempfile.TemporaryDirectory() as tmp:
             root, out = Path(tmp) / "src", Path(tmp) / "out"
             root.mkdir()
@@ -332,11 +330,37 @@ class TestComparisonPairs(unittest.TestCase):
             with contextlib.redirect_stdout(io.StringIO()):
                 cli.main(["subbass", str(root), "--db", str(Path(tmp) / "m.db"),
                           "--out", str(out), "--amount", "4", "--target", "-16",
-                          "--jobs", "1", "--quiet"])
+                          "--jobs", "1", "--quiet", *extra])
             a = bs1770.measure(decode.decode(next(out.glob("*A original*"))))
             b = bs1770.measure(decode.decode(next(out.glob("*B *"))))
+            track, = json.loads((out / "manifest.json").read_text())["tracks"]
+        return a, b, track
+
+    def test_a_comparison_pair_is_levelled_and_matched(self):
+        """B is the finished track, at the target, so the pair plays what a
+        run without pairs would write; A is matched to it, or the louder
+        side wins the comparison. A pair used to be matched only to itself,
+        and the Results table showed its levelling blank (2026-11-02)."""
+        x, _ = programme(seconds=8.0)
+        a, b, track = self.run_pair((x * 0.25).astype(np.float32))
+        self.assertAlmostEqual(b["s_p95"], -16.0, delta=0.2)
         self.assertAlmostEqual(a["lufs_i"], b["lufs_i"], delta=0.15)
-        self.assertGreater(a["s_p95"], -15.0)   # not dragged to the target
+        self.assertEqual(track["level_estimator"], "s_p95")
+        self.assertAlmostEqual(track["level_after"], -16.0, delta=0.05)
+        self.assertGreater(track["gain_db"], 5.0)
+        self.assertIn("levelled", track["variants"][1]["label"])
+
+    def test_an_original_its_peaks_hold_back_brings_b_down_to_it(self):
+        """With no limiting allowed, an original peaking near full scale
+        cannot be turned up to a levelled B. The pair stays matched -- B
+        comes down to A -- and the Level column says where B ended."""
+        x, _ = programme(seconds=8.0)
+        loud = (x * (0.98 / float(np.abs(x).max()))).astype(np.float32)
+        a, b, track = self.run_pair(loud, "--target", "-6", "--peak-limit", "0")
+        self.assertAlmostEqual(a["lufs_i"], b["lufs_i"], delta=0.15)
+        self.assertLessEqual(a["true_peak_dbtp"], 0.0)
+        self.assertLess(track["level_after"], -6.5)
+        self.assertAlmostEqual(track["level_after"], b["s_p95"], delta=0.2)
 
     def test_the_policy_preview_counts_each_outcome(self):
         """Per-track rows say what happens to a track; this says what happens

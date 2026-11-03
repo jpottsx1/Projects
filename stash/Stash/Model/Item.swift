@@ -156,6 +156,13 @@ final class Item {
     /// Other names for it, as typed (see `Aliases`): `[[links]]` to them
     /// reach it, and search finds it by them.
     var aliases: String = ""
+    /// What's known for citing it (`Reference`, as JSON): from the page's
+    /// metadata, a PDF's properties, or typed in.
+    var referenceJSON: String = ""
+    /// The iCloud zone it's shared through on its own (see Sharing); empty when it isn't.
+    var sharedZoneName: String = ""
+    /// Who last changed it, when someone else did, through sharing.
+    var lastEditedBy: String = ""
     @Relationship(inverse: \Tag.items) var tags: [Tag]? = []
     /// The lists it's been put in, besides its category.
     @Relationship(inverse: \ItemList.items) var lists: [ItemList]? = []

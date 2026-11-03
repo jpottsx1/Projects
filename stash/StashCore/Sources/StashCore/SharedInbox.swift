@@ -5,6 +5,8 @@ import Foundation
 public struct SharedEntry: Codable, Equatable {
     public enum Kind: String, Codable {
         case link, note, file
+        /// A picture on a web page (`url`), to save at its biggest; `pageURL` the page.
+        case image
     }
 
     public var id: UUID
@@ -24,6 +26,8 @@ public struct SharedEntry: Codable, Equatable {
     /// A link to keep as something else besides (a `PageFormat`'s raw
     /// value); nil to keep just the link.
     public var saveAs: String?
+    /// For a picture: the page it was on.
+    public var pageURL: String?
     public var createdAt: Date
 
     public init(id: UUID = UUID(), kind: Kind, title: String, url: String? = nil, text: String = "",

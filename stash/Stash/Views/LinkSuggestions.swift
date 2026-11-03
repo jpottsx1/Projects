@@ -68,11 +68,14 @@ private struct SelectionReportingEditor: View {
 enum LinkChoice: Hashable {
     case existing(Item)
     case new(String)
+    /// A `/` command: a block to put on the line.
+    case command(SlashCommands.Command)
 
     var title: String {
         switch self {
         case .existing(let item): item.title
         case .new(let title): title
+        case .command(let command): command.name
         }
     }
 
@@ -80,6 +83,7 @@ enum LinkChoice: Hashable {
         switch self {
         case .existing(let item): item.displayTitle
         case .new(let title): "New note “\(title)”"
+        case .command(let command): command.name
         }
     }
 
@@ -87,6 +91,7 @@ enum LinkChoice: Hashable {
         switch self {
         case .existing(let item): item.systemImage
         case .new: "plus.circle"
+        case .command(let command): command.symbol
         }
     }
 }

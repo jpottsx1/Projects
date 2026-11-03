@@ -112,6 +112,18 @@ enum TextExtractor {
 
     /// Downloads a web page and pulls out its title, summary and words.
     /// Nil if it can't be fetched or isn't HTML.
+    /// The page's text, and its HTML (for its metadata).
+    static func pageAndHTML(at url: URL) async -> (PageText, String)? {
+        var request = URLRequest(url: url, timeoutInterval: 20)
+        request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
+        guard let download = try? await URLSession.shared.data(for: request),
+              download.1.mimeType?.contains("html") == true else { return nil }
+        let html = String(data: download.0, encoding: .utf8) ?? String(decoding: download.0, as: UTF8.self)
+        return (HTMLText.extract(from: html), html)
+    }
+
+    static let userAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
+
     static func page(at url: URL) async -> PageText? {
         var request = URLRequest(url: url, timeoutInterval: 20)
         // Some sites send a stripped-down page, or nothing, to unknown clients.

@@ -3,6 +3,50 @@ import Foundation
 import SwiftData
 import StashCore
 import UniformTypeIdentifiers
+import UserNotifications
+
+/// What's shared: a category with everything in it, or one item on its own.
+enum ShareTarget: Identifiable {
+    case category(ItemCategory)
+    case item(Item)
+
+    var id: String {
+        switch self {
+        case .category(let category): "category-" + category.uuid.uuidString
+        case .item(let item): "item-" + item.uuid.uuidString
+        }
+    }
+
+    var name: String {
+        switch self {
+        case .category(let category): category.name
+        case .item(let item): item.displayTitle
+        }
+    }
+
+    /// Its zone, once shared; empty before.
+    var zoneName: String {
+        get {
+            switch self {
+            case .category(let category): category.sharedZoneName
+            case .item(let item): item.sharedZoneName
+            }
+        }
+        nonmutating set {
+            switch self {
+            case .category(let category): category.sharedZoneName = newValue
+            case .item(let item): item.sharedZoneName = newValue
+            }
+        }
+    }
+
+    var newZoneName: String {
+        switch self {
+        case .category(let category): SharedZones.zoneName(forCategory: category.uuid)
+        case .item(let item): SharedZones.zoneName(forItem: item.uuid)
+        }
+    }
+}
 
 /// Sharing categories with other people through iCloud, as Keep It does.
 ///
@@ -47,6 +91,13 @@ final class Sharing {
     private var sentMine: [String: [UUID: String]]
     private var sentTheirs: [String: [UUID: String]]
     private var pendingPublish: Task<Void, Never>?
+    /// Your name, as people you share with see it, for "last changed by".
+    private var myName = ""
+    /// Single items shared with you: zone → what's kept about it, until the item arrives.
+    private var theirItemZones: [String: String]
+    /// Changes others made, gathered for one notification.
+    private var changedByOthers: [(title: String, by: String)] = []
+    private var pendingNotice: Task<Void, Never>?
 
     private init() {
         folder = Library.mainSupportFolder.appendingPathComponent("Sharing", isDirectory: true)
@@ -54,6 +105,7 @@ final class Sharing {
         systemFields = Self.read([String: Data].self, from: folder.appendingPathComponent("SystemFields.plist")) ?? [:]
         sentMine = Self.read([String: [UUID: String]].self, from: folder.appendingPathComponent("SentMine.plist")) ?? [:]
         sentTheirs = Self.read([String: [UUID: String]].self, from: folder.appendingPathComponent("SentTheirs.plist")) ?? [:]
+        theirItemZones = Self.read([String: String].self, from: folder.appendingPathComponent("TheirItems.plist")) ?? [:]
     }
 
     /// Starts both engines; at launch.
@@ -70,6 +122,15 @@ final class Sharing {
             stateSerialization: Self.read(CKSyncEngine.State.Serialization.self, from: stateURL(mine: false)),
             delegate: delegate))
         schedulePublish()
+        Task { myName = await Self.currentUserName() }
+    }
+
+    /// Your name as iCloud gives it to people you share with.
+    private static func currentUserName() async -> String {
+        guard let container, let id = try? await container.userRecordID(),
+              let participant = try? await container.shareParticipant(forUserRecordID: id),
+              let parts = participant.userIdentity.nameComponents else { return "" }
+        return PersonNameComponentsFormatter.localizedString(from: parts, style: .default)
     }
 
     private func stateURL(mine isMine: Bool) -> URL {
@@ -137,25 +198,22 @@ final class Sharing {
 
     // MARK: - Sharing a category (yours)
 
-    /// The category's share, made (with its zone) the first time.
-    func prepareShare(for category: ItemCategory) async throws -> CKShare {
+    /// The share, made (with its zone) the first time.
+    func prepareShare(for target: ShareTarget) async throws -> CKShare {
         guard let container = Self.container else { throw CKError(.notAuthenticated) }
         let database = container.privateCloudDatabase
-        let zoneName = SharedZones.zoneName(forCategory: category.uuid)
+        if let existing = await share(of: target) { return existing }
+        let zoneName = target.newZoneName
         let zoneID = CKRecordZone.ID(zoneName: zoneName)
-        if !category.sharedZoneName.isEmpty,
-           let existing = try? await database.record(for: CKRecord.ID(recordName: CKRecordNameZoneWideShare, zoneID: zoneID)) as? CKShare {
-            return existing
-        }
         _ = try await database.modifyRecordZones(saving: [CKRecordZone(zoneID: zoneID)], deleting: [])
         let share = CKShare(recordZoneID: zoneID)
-        share[CKShare.SystemFieldKey.title] = category.name as CKRecordValue
+        share[CKShare.SystemFieldKey.title] = target.name as CKRecordValue
         share.publicPermission = .none
         let (saved, _) = try await database.modifyRecords(saving: [share], deleting: [])
         guard case .success(let record)? = saved[share.recordID], let made = record as? CKShare else {
             throw CKError(.internalError)
         }
-        category.sharedZoneName = zoneName
+        target.zoneName = zoneName
         mainStore()?.save()
         sentMine[zoneName] = [:]
         writeState()
@@ -164,19 +222,28 @@ final class Sharing {
     }
 
     /// Who it's shared with, for the sharing sheet.
-    func share(of category: ItemCategory) async -> CKShare? {
-        guard let container = Self.container, !category.sharedZoneName.isEmpty else { return nil }
-        let zoneID = CKRecordZone.ID(zoneName: category.sharedZoneName)
+    func share(of target: ShareTarget) async -> CKShare? {
+        guard let container = Self.container, !target.zoneName.isEmpty else { return nil }
+        let zoneID = CKRecordZone.ID(zoneName: target.zoneName)
         return try? await container.privateCloudDatabase.record(for: CKRecord.ID(recordName: CKRecordNameZoneWideShare, zoneID: zoneID)) as? CKShare
     }
 
+    /// Anyone with the link may view it (in Stash, with iCloud), or only those invited.
+    func setOpenToAnyoneWithLink(_ open: Bool, _ target: ShareTarget) async throws -> CKShare? {
+        guard let container = Self.container, let share = await share(of: target) else { return nil }
+        share.publicPermission = open ? .readOnly : .none
+        let (saved, _) = try await container.privateCloudDatabase.modifyRecords(saving: [share], deleting: [])
+        if case .success(let record)? = saved[share.recordID] { return record as? CKShare }
+        return share
+    }
+
     /// Stops sharing: the zone goes, and with it everyone else's copy.
-    func stopSharing(_ category: ItemCategory) async throws {
-        guard let container = Self.container, !category.sharedZoneName.isEmpty else { return }
-        let zoneID = CKRecordZone.ID(zoneName: category.sharedZoneName)
+    func stopSharing(_ target: ShareTarget) async throws {
+        guard let container = Self.container, !target.zoneName.isEmpty else { return }
+        let zoneID = CKRecordZone.ID(zoneName: target.zoneName)
         _ = try await container.privateCloudDatabase.modifyRecordZones(saving: [], deleting: [zoneID])
-        sentMine[category.sharedZoneName] = nil
-        category.sharedZoneName = ""
+        sentMine[target.zoneName] = nil
+        target.zoneName = ""
         mainStore()?.save()
         writeState()
     }
@@ -195,11 +262,11 @@ final class Sharing {
         }
     }
 
-    /// Leaves a category someone shared with you.
-    func leave(_ category: ItemCategory) async throws {
-        guard let container = Self.container, let zone = TheirZone(category.sharedZoneName) else { return }
+    /// Leaves a category or item someone shared with you (`stored` is its sharedZoneName).
+    func leave(_ stored: String) async throws {
+        guard let container = Self.container, let zone = TheirZone(stored) else { return }
         _ = try await container.sharedCloudDatabase.modifyRecordZones(saving: [], deleting: [zone.id])
-        removeTheirCategory(zone.name)
+        removeTheirZone(zone.name)
     }
 
     /// What a Shared with Me category keeps about its zone: "name|owner|rw" (or ro).
@@ -232,6 +299,17 @@ final class Sharing {
         let title = (share[CKShare.SystemFieldKey.title] as? String) ?? "Shared"
         let owner = share.owner.userIdentity.nameComponents.map { PersonNameComponentsFormatter.localizedString(from: $0, style: .short) }
         let canEdit = share.currentUserParticipant?.permission == .readWrite
+        let zone = TheirZone(name: zoneID.zoneName, owner: zoneID.ownerName, canEdit: canEdit)
+        // A single item: kept until it arrives, and put on it if it has.
+        if let itemID = SharedZones.itemID(fromZone: zoneID.zoneName) {
+            theirItemZones[zone.key] = zone.stored
+            if let store = sharedStore(), let item = Self.item(itemID, in: store.context) {
+                item.sharedZoneName = zone.stored
+                store.save()
+            }
+            writeState()
+            return
+        }
         guard let store = sharedStore(), let id = SharedZones.categoryID(fromZone: zoneID.zoneName) else { return }
         let category = Self.category(id, in: store.context) ?? {
             let made = ItemCategory(name: title)
@@ -240,12 +318,32 @@ final class Sharing {
             return made
         }()
         category.name = owner.map { "\(title) (from \($0))" } ?? title
-        category.sharedZoneName = TheirZone(name: zoneID.zoneName, owner: zoneID.ownerName, canEdit: canEdit).stored
+        category.sharedZoneName = zone.stored
         store.save()
     }
 
-    /// The owner stopped sharing, or you left: the category and its items go.
-    private func removeTheirCategory(_ zoneName: String) {
+    /// Where single items shared with you go, in Shared with Me.
+    private static let sharedItemsID = UUID(uuidString: "00000000-0000-0000-0000-000000000003")!
+
+    private static func sharedItemsCategory(in context: ModelContext) -> ItemCategory {
+        if let found = category(sharedItemsID, in: context) { return found }
+        let made = ItemCategory(name: "Shared Items")
+        made.uuid = sharedItemsID
+        context.insert(made)
+        return made
+    }
+
+    /// The owner stopped sharing, or you left: the category and its items, or the item, go.
+    private func removeTheirZone(_ zoneName: String) {
+        if let itemID = SharedZones.itemID(fromZone: zoneName) {
+            guard let store = sharedStore(), let item = Self.item(itemID, in: store.context) else { return }
+            if let zone = TheirZone(item.sharedZoneName) { sentTheirs[zone.key] = nil; theirItemZones[zone.key] = nil }
+            store.context.delete(item)
+            store.save()
+            store.library?.refreshAfterStoreChange()
+            writeState()
+            return
+        }
         guard let store = sharedStore(), let id = SharedZones.categoryID(fromZone: zoneName),
               let top = Self.category(id, in: store.context) else { return }
         if let zone = TheirZone(top.sharedZoneName) { sentTheirs[zone.key] = nil }
@@ -282,8 +380,16 @@ final class Sharing {
                 sentMine[category.sharedZoneName] = enqueue(Self.items(in: category, context: store.context), top: category, store: store,
                                                             zoneID: zoneID, sent: sentMine[category.sharedZoneName] ?? [:], engine: mine)
             }
-            // Categories deleted here: their zones go.
-            let live = Set(categories.map(\.sharedZoneName))
+            // Single items shared on their own.
+            let sharedItems = ((try? store.context.fetch(FetchDescriptor<Item>(predicate: #Predicate { $0.sharedZoneName != "" }))) ?? [])
+                .filter { TheirZone($0.sharedZoneName) == nil && !$0.isTrashed && !$0.isLocked }
+            for item in sharedItems {
+                let zoneID = CKRecordZone.ID(zoneName: item.sharedZoneName)
+                sentMine[item.sharedZoneName] = enqueue([item], top: nil, store: store, zoneID: zoneID,
+                                                        sent: sentMine[item.sharedZoneName] ?? [:], engine: mine)
+            }
+            // Categories and items deleted (or trashed) here: their zones go.
+            let live = Set(categories.map(\.sharedZoneName) + sharedItems.map(\.sharedZoneName))
             for zone in sentMine.keys where !live.contains(zone) {
                 mine.state.add(pendingDatabaseChanges: [.deleteZone(CKRecordZone.ID(zoneName: zone))])
                 sentMine[zone] = nil
@@ -297,16 +403,25 @@ final class Sharing {
                 sentTheirs[zone.key] = enqueue(Self.items(in: category, context: store.context), top: category, store: store,
                                                zoneID: zone.id, sent: sentTheirs[zone.key] ?? [:], engine: theirs)
             }
+            let items = ((try? store.context.fetch(FetchDescriptor<Item>(predicate: #Predicate { $0.sharedZoneName != "" }))) ?? [])
+            for item in items where !item.isTrashed {
+                guard let zone = TheirZone(item.sharedZoneName), zone.canEdit else { continue }
+                sentTheirs[zone.key] = enqueue([item], top: nil, store: store, zoneID: zone.id, sent: sentTheirs[zone.key] ?? [:], engine: theirs)
+            }
         }
         writeState()
     }
 
     /// Asks the engine to send what's changed; gives the signatures now, to remember.
-    private func enqueue(_ items: [Item], top: ItemCategory, store: Store, zoneID: CKRecordZone.ID,
+    private func enqueue(_ items: [Item], top: ItemCategory?, store: Store, zoneID: CKRecordZone.ID,
                          sent: [UUID: String], engine: CKSyncEngine) -> [UUID: String] {
         let now = Dictionary(items.map { ($0.uuid, Self.payload(for: $0, under: top, store: store).0.signature) },
                              uniquingKeysWith: { first, _ in first })
         let (save, delete) = SharedZones.changes(now: now, sent: sent)
+        // Changed here: no longer last changed by someone else.
+        let changedHere = items.filter { save.contains($0.uuid) && !$0.lastEditedBy.isEmpty && sent[$0.uuid] != nil }
+        for item in changedHere { item.lastEditedBy = "" }
+        if !changedHere.isEmpty { store.save() }
         var changes: [CKSyncEngine.PendingRecordZoneChange] = save.map { .saveRecord(CKRecord.ID(recordName: $0.uuidString, zoneID: zoneID)) }
         changes += delete.map { .deleteRecord(CKRecord.ID(recordName: $0.uuidString, zoneID: zoneID)) }
         if !changes.isEmpty { engine.state.add(pendingRecordZoneChanges: changes) }
@@ -314,14 +429,14 @@ final class Sharing {
     }
 
     /// The item as it's shared, and its file if it goes with it.
-    private static func payload(for item: Item, under top: ItemCategory, store: Store) -> (SharedItemPayload, URL?) {
+    private static func payload(for item: Item, under top: ItemCategory?, store: Store) -> (SharedItemPayload, URL?) {
         let file = item.kind == .document ? store.localFile(for: item) : nil
         let size = (try? file?.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
         let sendsFile = file != nil && size <= Library.largestSyncedFile
         let payload = SharedItemPayload(
             kind: item.kindRaw, title: item.title, body: item.body, url: item.urlString, summary: item.summary,
             extractedText: item.extractedText, createdAt: item.createdAt, modifiedAt: item.modifiedAt,
-            tags: item.sortedTags.map(\.name), folders: folders(of: item, under: top),
+            tags: item.sortedTags.map(\.name), folders: top.map { folders(of: item, under: $0) } ?? [],
             contentType: item.contentTypeIdentifier, fileName: sendsFile ? file?.lastPathComponent : nil,
             highlights: item.sortedHighlights.map {
                 .init(id: $0.uuid, text: $0.text, note: $0.note, color: $0.colorRaw, customColor: $0.customColor,
@@ -344,10 +459,17 @@ final class Sharing {
     /// The record for an item, when an engine's ready to send it; nil if
     /// it can't be made now (yours, with the main library not open).
     fileprivate func record(for id: CKRecord.ID, mine isMine: Bool) -> CKRecord? {
-        guard let uuid = UUID(uuidString: id.recordName), let categoryID = SharedZones.categoryID(fromZone: id.zoneID.zoneName),
-              let store = isMine ? mainStore() : sharedStore(),
-              let item = Self.item(uuid, in: store.context), let top = Self.category(categoryID, in: store.context) else { return nil }
-        let (payload, file) = Self.payload(for: item, under: top, store: store)
+        guard let uuid = UUID(uuidString: id.recordName), let store = isMine ? mainStore() : sharedStore(),
+              let item = Self.item(uuid, in: store.context) else { return nil }
+        var top: ItemCategory?
+        if let categoryID = SharedZones.categoryID(fromZone: id.zoneID.zoneName) {
+            guard let found = Self.category(categoryID, in: store.context) else { return nil }
+            top = found
+        } else if SharedZones.itemID(fromZone: id.zoneID.zoneName) != uuid {
+            return nil
+        }
+        var (payload, file) = Self.payload(for: item, under: top, store: store)
+        payload.editedBy = myName.isEmpty ? nil : myName
         guard let data = try? payload.encoded() else { return nil }
         let key = Self.fieldsKey(id)
         let record = systemFields[key].flatMap(Self.record(fromSystemFields:)) ?? CKRecord(recordType: Self.recordType, recordID: id)
@@ -390,10 +512,19 @@ final class Sharing {
     }
 
     private func take(_ record: CKRecord, into store: Store, zoneKey: String, mine isMine: Bool) {
-        guard let uuid = UUID(uuidString: record.recordID.recordName),
-              let categoryID = SharedZones.categoryID(fromZone: record.recordID.zoneID.zoneName),
-              let top = Self.category(categoryID, in: store.context),
-              let incoming = Self.payload(of: record) else { return }
+        guard let uuid = UUID(uuidString: record.recordID.recordName), let incoming = Self.payload(of: record) else { return }
+        let zoneName = record.recordID.zoneID.zoneName
+        // A category's items go under it; a single item stays where it is (yours) or in Shared Items (theirs).
+        var top: ItemCategory?
+        var place: ItemCategory?
+        if let categoryID = SharedZones.categoryID(fromZone: zoneName) {
+            guard let found = Self.category(categoryID, in: store.context) else { return }
+            top = found
+        } else if SharedZones.itemID(fromZone: zoneName) == uuid {
+            if !isMine { place = Self.sharedItemsCategory(in: store.context) }
+        } else {
+            return
+        }
         let existing = Self.item(uuid, in: store.context)
         let local = existing.map { Self.payload(for: $0, under: top, store: store).0 }
         let decision = SharedMerge.decide(incoming: incoming.signature, incomingModified: incoming.modifiedAt,
@@ -421,7 +552,12 @@ final class Sharing {
         if let local, local.signature != sentSignature(zoneKey, uuid, mine: isMine), local.body != incoming.body {
             Self.keepVersion(of: item, title: local.title, body: local.body, in: store)
         }
-        let fileChanged = Self.write(incoming, file: (record["file"] as? CKAsset)?.fileURL, into: item, under: top, store: store)
+        let fileChanged = Self.write(incoming, file: (record["file"] as? CKAsset)?.fileURL, into: item, under: top, placeIn: place, store: store)
+        item.lastEditedBy = incoming.editedBy ?? ""
+        if !isMine, existing == nil || item.sharedZoneName.isEmpty, SharedZones.itemID(fromZone: zoneName) != nil {
+            item.sharedZoneName = theirItemZones[zoneKey] ?? TheirZone(name: zoneName, owner: record.recordID.zoneID.ownerName, canEdit: false).stored
+        }
+        if let by = incoming.editedBy, !by.isEmpty { noteChange(incoming.title, by: by) }
         setSent(Self.payload(for: item, under: top, store: store).0.signature, zoneKey, uuid, mine: isMine)
         if let library = store.library {
             library.reindex(item)
@@ -443,7 +579,8 @@ final class Sharing {
     }
 
     /// Puts what was shared onto the item. Gives whether its file changed.
-    private static func write(_ payload: SharedItemPayload, file: URL?, into item: Item, under top: ItemCategory, store: Store) -> Bool {
+    private static func write(_ payload: SharedItemPayload, file: URL?, into item: Item, under top: ItemCategory?,
+                              placeIn place: ItemCategory?, store: Store) -> Bool {
         let context = store.context
         item.kindRaw = payload.kind
         item.title = payload.title
@@ -453,7 +590,11 @@ final class Sharing {
         if !payload.extractedText.isEmpty { item.extractedText = payload.extractedText }
         item.createdAt = payload.createdAt
         item.contentTypeIdentifier = payload.contentType
-        item.category = payload.folders.reduce(top) { parent, name in child(named: name, of: parent, in: context) }
+        if let top {
+            item.category = payload.folders.reduce(top) { parent, name in child(named: name, of: parent, in: context) }
+        } else if let place {
+            item.category = place
+        }
         item.tags = payload.tags.map { tag(named: $0, in: context) }
         var fileChanged = false
         if let file, let name = payload.fileName {
@@ -532,6 +673,29 @@ final class Sharing {
         return made
     }
 
+    // MARK: - Telling you about others' changes
+
+    /// A notification, a moment after a batch of changes from others: "Ann changed “Soup”".
+    private func noteChange(_ title: String, by name: String) {
+        changedByOthers.append((title.isEmpty ? "an item" : "“\(title)”", name))
+        pendingNotice?.cancel()
+        pendingNotice = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(3))
+            guard !Task.isCancelled, let self else { return }
+            let changes = self.changedByOthers
+            self.changedByOthers = []
+            guard let first = changes.first else { return }
+            let center = UNUserNotificationCenter.current()
+            _ = try? await center.requestAuthorization(options: [.alert, .sound])
+            let content = UNMutableNotificationContent()
+            content.title = "Shared Items Changed"
+            content.body = changes.count == 1 ? "\(first.by) changed \(first.title)."
+                : "\(first.by) and others changed \(changes.count) shared items, including \(first.title)."
+            content.threadIdentifier = "shared-changes"
+            try? await center.add(UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil))
+        }
+    }
+
     // MARK: - Changes waiting for the main library
 
     private var waitingFolder: URL { folder.appendingPathComponent("Waiting", isDirectory: true) }
@@ -580,7 +744,7 @@ final class Sharing {
                 sentTheirs = [:]
             }
         case .fetchedDatabaseChanges(let changes) where !isMine:
-            for deletion in changes.deletions { removeTheirCategory(deletion.zoneID.zoneName) }
+            for deletion in changes.deletions { removeTheirZone(deletion.zoneID.zoneName) }
         case .fetchedRecordZoneChanges(let changes):
             for modification in changes.modifications {
                 let record = modification.record
@@ -656,6 +820,7 @@ final class Sharing {
         Self.write(systemFields, to: folder.appendingPathComponent("SystemFields.plist"))
         Self.write(sentMine, to: folder.appendingPathComponent("SentMine.plist"))
         Self.write(sentTheirs, to: folder.appendingPathComponent("SentTheirs.plist"))
+        Self.write(theirItemZones, to: folder.appendingPathComponent("TheirItems.plist"))
     }
 
     private static func systemFields(of record: CKRecord) -> Data {

@@ -549,8 +549,10 @@ final class Library {
     var imprintingItems: [Item]?
     var isManagingBackups = false
     var isImportingFeeds = false
-    /// The category whose sharing sheet is showing.
-    var sharingCategory: ItemCategory?
+    /// Items whose highlights are being gathered into one document.
+    var highlightsDocumentItems: [Item]?
+    /// What the sharing sheet is showing: a category, or an item.
+    var sharingTarget: ShareTarget?
     var isManagingMirror = false
     var isShowingPalette = false
     /// Option-Cmd-F: the search (and tags chosen) to save as a smart filter.
@@ -1010,12 +1012,14 @@ final class Library {
     /// can often still be copied, and the other way round.
     func refreshPage(of item: Item) async {
         guard !item.isSealed else { return }
-        if let url = item.url, let page = await TextExtractor.page(at: url), isAlive(item) {
+        if let url = item.url, let (page, html) = await TextExtractor.pageAndHTML(at: url), isAlive(item) {
             if let title = page.title, !Self.hasOwnTitle(item, url: url) {
                 item.title = title
             }
             item.summary = page.summary ?? ""
             item.extractedText = page.text
+            // The page's metadata, for citing it; anything typed in already stays.
+            fillReference(of: item, from: Reference.fromHTML(html, url: url.absoluteString))
             reindex(item)
             save()
         }
@@ -1088,6 +1092,7 @@ final class Library {
         }
         let text = await TextExtractor.text(fromFileAt: url, type: item.contentType)
         guard isAlive(item) else { return }
+        if item.isPDF { fillReference(of: item, from: Self.pdfReference(at: url)) }
         if !text.isEmpty {
             item.extractedText = text
             reindex(item)
@@ -1475,8 +1480,21 @@ final class Library {
 
         for pending in waiting {
             let entry = pending.entry
+            // A picture from a page: saved at its biggest, which takes a moment.
+            if entry.kind == .image {
+                inbox.remove(pending)
+                guard let address = entry.url.flatMap(URL.init(string:)) else { continue }
+                let category = entry.categoryID.flatMap { id in categories.first { $0.uuid == id } }
+                Task {
+                    await saveFullSizeImage(from: address, page: entry.pageURL.flatMap(URL.init(string:)), title: entry.title,
+                                            category: category, tags: entry.tags)
+                }
+                continue
+            }
             let item: Item
             switch entry.kind {
+            case .image:
+                continue
             case .link:
                 guard let url = entry.url.flatMap(URL.init(string:)) else {
                     inbox.remove(pending)
@@ -2009,7 +2027,7 @@ final class Library {
             title: Self.indexedTitle(item),
             body: body,
             tags: item.sortedTags.map(\.name).joined(separator: " "),
-            extra: ([item.urlString ?? "", fileName, item.extractedText]
+            extra: ([item.urlString ?? "", fileName, item.extractedText, Self.referenceText(item)]
                     // Your own fields' values, and the words in sketches and pictures.
                     + CustomField.decode(item.customFields).values
                     + (item.attachments ?? []).map(\.recognizedText)).joined(separator: "\n"))
@@ -2087,7 +2105,7 @@ final class Library {
          String(item.body.utf16.count), String(item.summary.utf16.count), String(item.extractedText.utf16.count),
          item.urlString ?? "", item.sortedTags.map(\.name).joined(separator: ","),
          String((item.highlights ?? []).reduce(0) { $0 + $1.text.utf16.count + $1.note.utf16.count }),
-         String(item.customFields.utf16.count),
+         String(item.customFields.utf16.count), String(item.referenceJSON.utf16.count),
          String((item.attachments ?? []).reduce(0) { $0 + $1.recognizedText.utf16.count })]
             .joined(separator: "|")
     }

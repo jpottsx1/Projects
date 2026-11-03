@@ -175,6 +175,7 @@ struct StudyPanel: View {
                 Menu {
                     Button("Copy Outline") { copyToClipboard(library.outline(of: notebook)) }
                     Button("Save as Mind Map Note") { library.selection = library.saveAsMindMap(notebook) }
+                    Button("Highlights Document…") { library.highlightsDocumentItems = notebook.orderedItems }
                 } label: { Label("Export", systemImage: "square.and.arrow.up") }
             }
             .buttonStyle(.borderless)

@@ -131,6 +131,10 @@ struct BatchMenus: View {
                 }
             }
         }
+        if live.contains(where: { !($0.highlights ?? []).isEmpty }) || (live.count == 1 && live[0].kind == .note) {
+            Button("Make Highlights Document…") { library.highlightsDocumentItems = live }
+                .help("Their highlights in one Markdown document, with references")
+        }
         NotebookMenu(items: live)
         PDFToolMenu(items: live)
         PictureToolMenu(items: live)

@@ -275,6 +275,9 @@ loudnesslab/     the Python: bs1770, spectrum, subbass, declip, expand,
                  bassline (a sub tone under the bass notes),
                  intro (intro edits: a cold-start track given an intro
                  made from its own instrumental; Session = `intro --serve`)
+                 stemmix (the Stem Mix sheet's layers: four stems, the sub
+                 and the air, prepared by `subbass --stem-preview`, played
+                 live by the app, written by `subbass --stem-mix`)
 tests/           its tests
 tools/           make_golden.py, build_help.py, the five checkers, measure_stem_kicks.py,
                  measure_drift.py
@@ -348,6 +351,28 @@ measured on four cores over four two-and-a-half minute tracks, 62.5 s at
 one worker against 36.1 s at four. On six ten-second fixtures it goes the
 other way (6.1 s against 7.7 s): spawning a worker re-imports numpy and
 scipy, and on a short enough track that is the whole job.
+
+## The stem mix
+
+The one place stems are HEARD rather than used to find things. `subbass
+--stem-preview DIR` (one `--select` track) separates, runs the chain up to
+the sub (`render._front`), and writes float32 WAV layers plus `mix.json`:
+the four stems, a residual (the pre-sub track minus the stems, so 0 dB on
+every fader is that track exactly), the sub as `sub_tone`/`sub_kick`
+(`subbass.sub_layers`, built from the same `_sub_plan` as `enhance`), and
+air's harmonics (`air._air_plan`, shared with `excite`). Every control in
+the app is a gain on one layer (`ABPlayer.setMix`); Bass and Air gains are
+the stages' own quadratic from sums in mix.json (`gain_from_stats`, mirrored
+by `StemMix.quadraticGain`). Commit runs `subbass --stem-mix choice.json`,
+which builds the track from the same layers at the same gains and then
+levels and writes as usual. `tests/test_stemmix.py` holds commit == preview
+(to the FLAC's quantisation) and fails on a neighbouring setting;
+`StemMixTests.swift` holds the app's gains to the Python's. Punch and the
+sub's safety trim are not part of it. The `_sub_plan`/`_air_plan` split was
+checked bit-identical against the previous `enhance`/`excite` -- keep it
+so: `subbass.gain_from_stats` must return numpy's float64, not a Python
+float -- under NumPy 2 a Python float leaves `sub * gain` in float32 where
+it has always been float64, and the output moves in the last bits.
 
 ## Putting dynamics back
 

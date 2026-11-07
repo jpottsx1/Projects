@@ -162,37 +162,30 @@ def _harmonics(source: np.ndarray, rate: int, drive: float, bias: float
     return out
 
 
-def excite(x: np.ndarray, rate: int, amount_db: float = DEFAULT_AIR_DB,
-           tune_hz: float = DEFAULT_TUNE_HZ,
-           drive: float = DRIVE, bias: float = BIAS,
-           guide: np.ndarray | None = None,
-           measure=None) -> tuple[np.ndarray, dict]:
-    """Add `amount_db` of generated harmonics to the top octave (16-20 kHz).
+def gain_from_stats(before: float, cross: float, added: float,
+                    amount_db: float) -> float:
+    """The mix gain that lifts the band by `amount_db`, from the three sums
+    `_air_plan` keeps: what the stem mix sizes its air slider with, and
+    what `excite` uses. The app's `StemMix.quadraticGain` is this."""
+    if added <= 0:
+        return 0.0
+    wanted = before * (10 ** (amount_db / 10) - 1.0)
+    return float((-cross + np.sqrt(cross * cross + added * wanted)) / added)
 
-    The amount is measured, not mixed: the harmonic signal is scaled so the
-    band actually rises by the figure asked for, and the report says what
-    it rose by. A mix control that means "some" is how an exciter ends up
-    used at three times the intended depth.
 
-    `guide`, per sample 0 to 1 (see `stems.load_air_guide`), is where the
-    air goes. The gain is set exactly as without it, and the harmonics are
-    then scaled by it: where the guide is open the track gets precisely the
-    air `amount_db` would give it unguided, and less where the drums carry
-    the top end. Subtler overall by design; `measured_db` is what the band
-    rose by across the whole track.
-    """
-    if amount_db <= 0:
-        return x, _blank("no air asked for")
-    report = _blank()
-    report["tune_hz"] = float(tune_hz)
-
+def _air_plan(x: np.ndarray, rate: int, tune_hz: float, drive: float,
+              bias: float, guide: np.ndarray | None) -> dict:
+    """Everything `excite` works out before the amount: the harmonics
+    (guided, where there is a guide) and the band sums the gain is solved
+    from -- `before`, `cross`, `added` unguided, as the gain is set, and
+    `guided_cross`, `guided_added` for what the band then actually does.
+    `{"note": why}` where there is nothing to make air from."""
     source = sosfiltfilt(butter(4, tune_hz, btype="high", fs=rate,
                                 output="sos"), x, axis=0)
     level = float(np.sqrt(np.mean(source * source))) if source.size else 0.0
     if level <= 10 ** (MIN_SOURCE_DBFS / 20):
-        report["note"] = (f"nothing above {tune_hz / 1000:.1f} kHz to make "
-                          f"harmonics from")
-        return x, report
+        return {"note": f"nothing above {tune_hz / 1000:.1f} kHz to make "
+                        f"harmonics from"}
 
     # Up, distort, down. The resampler filters on the way back, which is
     # what keeps the folded harmonics out; see the module docstring for
@@ -220,8 +213,7 @@ def excite(x: np.ndarray, rate: int, amount_db: float = DEFAULT_AIR_DB,
     wet = _band(harmonics, rate, BAND_LOW_HZ, BAND_HIGH_HZ)
     before, added = _mean_product(dry, dry), _mean_product(wet, wet)
     if added <= 0 or before <= 0:
-        report["note"] = "no usable band energy to work with"
-        return x, report
+        return {"note": "no usable band energy to work with"}
     # Solve for the gain exactly rather than assuming the two are
     # uncorrelated. They are not: the second harmonic of 4-8 kHz material
     # lands at 8-16 kHz, where the source already lives, so there is a
@@ -233,21 +225,55 @@ def excite(x: np.ndarray, rate: int, amount_db: float = DEFAULT_AIR_DB,
     #
     # which is a quadratic in g with one positive root.
     cross = _mean_product(dry, wet)
-    wanted = before * (10 ** (amount_db / 10) - 1.0)
-    gain = float((-cross + np.sqrt(cross * cross + added * wanted)) / added)
+    plan = {"before": before, "cross": cross, "added": added}
 
     if guide is not None:
         harmonics *= np.asarray(guide, dtype=np.float64)[:, None]
-        report["guided"] = True
-        report["guide_mean"] = float(np.mean(guide))
         # The band filter is linear, so the band of the result is the dry
         # band plus the band of what was added: filter only the guided
         # harmonics, not the whole result again.
         wet = _band(harmonics, rate, BAND_LOW_HZ, BAND_HIGH_HZ)
         cross, added = _mean_product(dry, wet), _mean_product(wet, wet)
+    del dry, wet
+    plan.update(harmonics=harmonics, guided_cross=cross, guided_added=added)
+    return plan
+
+
+def excite(x: np.ndarray, rate: int, amount_db: float = DEFAULT_AIR_DB,
+           tune_hz: float = DEFAULT_TUNE_HZ,
+           drive: float = DRIVE, bias: float = BIAS,
+           guide: np.ndarray | None = None,
+           measure=None) -> tuple[np.ndarray, dict]:
+    """Add `amount_db` of generated harmonics to the top octave (16-20 kHz).
+
+    The amount is measured, not mixed: the harmonic signal is scaled so the
+    band actually rises by the figure asked for, and the report says what
+    it rose by. A mix control that means "some" is how an exciter ends up
+    used at three times the intended depth.
+
+    `guide`, per sample 0 to 1 (see `stems.load_air_guide`), is where the
+    air goes. The gain is set exactly as without it, and the harmonics are
+    then scaled by it: where the guide is open the track gets precisely the
+    air `amount_db` would give it unguided, and less where the drums carry
+    the top end. Subtler overall by design; `measured_db` is what the band
+    rose by across the whole track.
+    """
+    if amount_db <= 0:
+        return x, _blank("no air asked for")
+    report = _blank()
+    report["tune_hz"] = float(tune_hz)
+    plan = _air_plan(x, rate, tune_hz, drive, bias, guide)
+    if "note" in plan:
+        report["note"] = plan["note"]
+        return x, report
+    harmonics, before = plan.pop("harmonics"), plan["before"]
+    gain = gain_from_stats(before, plan["cross"], plan["added"], amount_db)
+    if guide is not None:
+        report["guided"] = True
+        report["guide_mean"] = float(np.mean(guide))
+    cross, added = plan["guided_cross"], plan["guided_added"]
     # (dry + g*wet)^2 again, from the three sums already in hand.
     after = before + 2 * gain * cross + gain * gain * added
-    del dry, wet
     harmonics *= gain
     harmonics += x
     y = harmonics.astype(x.dtype)

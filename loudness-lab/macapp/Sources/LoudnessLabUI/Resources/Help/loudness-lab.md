@@ -794,6 +794,20 @@ Turn it off only to hear what the processed file will actually sound like at its
 
 Knowing which is the processed one biases you toward hearing what you expected. Better still, have someone else shuffle them, or at least listen to each version first on half the tracks.
 
+## Stem mix
+
+### Stem Mix
+
+*Split one track into drums, bass, melody and vocals, set their levels and the Bass and Air by ear, then Commit.*
+
+Highlight a track in the list and press Stem Mix… (or right-click it). The track is split into four stems -- drums, bass guitar, melody (everything else that is not a voice) and vocals -- which takes about a minute. Then it plays, and every control is heard the moment it moves: the four faders, Bass (the sub under the kicks and the bass notes) and Air (the harmonics in the top octave).
+
+Nothing is re-rendered while you listen. The stems, the sub and the air are separate layers held in memory, and each control is only a gain on one of them. Commit then writes the track from those same layers at those same gains, so what is written is what you heard -- then levelled to the target, as every finished track is. Cancel throws the layers away; nothing reaches the output folder until Commit.
+
+The stages before the sub (de-clipping, range, attack, mud, body) run as the settings ask when the mix opens. Bass and Air start at what the settings would give this track and are sized the same way: Bass +5 is the 31.5-63 Hz octave five dB above where the track had it. A fader at the bottom is off, not merely quiet. Punch is not part of the stem mix.
+
+The layers wait in ~/Music/LoudnessLab/stem-mix while the mix is open -- about 115 MB each for five minutes of music -- and are removed on Cancel and after Commit.
+
 ## Results
 
 ### Results columns

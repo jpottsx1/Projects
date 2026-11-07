@@ -899,6 +899,37 @@ enum Help {
         change while 402 runs had been lifted by a median of 0.29 dB.
         """)
 
+    static let stemMix = HelpEntry(
+        title: "Stem Mix",
+        summary: "Split one track into drums, bass, melody and vocals, set their levels and the Bass and Air by ear, then Commit.",
+        detail: """
+        Highlight a track in the list and press Stem Mix… (or right-click \
+        it). The track is split into four stems -- drums, bass guitar, \
+        melody (everything else that is not a voice) and vocals -- which \
+        takes about a minute. Then it plays, and every control is heard \
+        the moment it moves: the four faders, Bass (the sub under the kicks \
+        and the bass notes) and Air (the harmonics in the top octave).
+
+        Nothing is re-rendered while you listen. The stems, the sub and the \
+        air are separate layers held in memory, and each control is only a \
+        gain on one of them. Commit then writes the track from those same \
+        layers at those same gains, so what is written is what you heard \
+        -- then levelled to the target, as every finished track is. Cancel \
+        throws the layers away; nothing reaches the output folder until \
+        Commit.
+
+        The stages before the sub (de-clipping, range, attack, mud, body) \
+        run as the settings ask when the mix opens. Bass and Air start at \
+        what the settings would give this track and are sized the same way: \
+        Bass +5 is the 31.5-63 Hz octave five dB above where the track had \
+        it. A fader at the bottom is off, not merely quiet. Punch is not \
+        part of the stem mix.
+
+        The layers wait in ~/Music/LoudnessLab/stem-mix while the mix is \
+        open -- about 115 MB each for five minutes of music -- and are \
+        removed on Cancel and after Commit.
+        """)
+
     /// A named struct rather than a tuple, because `ForEach` over an array
     /// of tuples needs the element destructured in the closure, which is
     /// the sort of thing that compiles in one position and not the next.
@@ -918,6 +949,7 @@ enum Help {
         HelpSection("The run", [limit, format, output, compare, dryRun,
                                 replaceOriginals]),
         HelpSection("Listening", [switching, matchLoudness, blind]),
+        HelpSection("Stem mix", [stemMix]),
         HelpSection("Results", [results]),
     ]
 }

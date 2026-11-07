@@ -384,7 +384,8 @@ final class Engine: ObservableObject {
              format: AudioWriter.Format = .flac,
              only: Set<String>? = nil,
              replaceOriginals: Bool = false,
-             report: Bool = true) async {
+             report: Bool = true,
+             stemMix: URL? = nil) async {
         guard !isRunning, !folders.isEmpty else { return }
         isRunning = true; flag.reset(); failure = nil; manifest = nil
         log = ""; progress = nil
@@ -419,56 +420,15 @@ final class Engine: ObservableObject {
             say(BuildInfo.summary)
             progressNote = "Starting…"
 
-            var arguments = ["subbass"] + folders.map(\.path) + [
-                "--db", databaseURL.path,
-                "--out", outputDirectory.path,
-                "--format", format.cliName,
-                "--porcelain",
-                // The app's list is already deduplicated by the eye; the
-                // batch is not. A library of compilations is mostly the
-                // same forty songs.
-                "--skip-duplicates",
-                "--limit", String(limit == Int.max ? Int(Int32.max) : limit),
-                "--target", String(profile.target),
-                "--estimator", profile.estimator,
-                "--peak-ceiling", String(profile.peakCeiling),
-                "--peak-limit", String(profile.peakLimit),
-                "--amount", String(profile.amount),
-                "--max-amount", String(profile.maxAmount),
-                "--sub-offset", String(profile.subOffset),
-                "--min-activity", String(profile.minActivity),
-                "--punch", String(profile.punch),
-                "--punch-decay", String(profile.punchDecay),
-                "--declip-max", String(profile.declipMax),
-                "--target-lra", String(profile.targetLRA),
-                "--max-attenuation", String(profile.maxAttenuation),
-                "--transient", String(profile.transient),
-                "--min-crest", String(profile.minCrest),
-                "--air", String(profile.air),
-                "--mud", String(profile.mud),
-                "--body", String(profile.body),
-                "--air-tune", String(profile.airTune),
-            ]
-            if profile.auto { arguments += ["--auto"] }
-            if let reference = profile.reference, !reference.isEmpty {
-                arguments += ["--reference", reference]
-            }
-            // Each further reference folder: pooled with the one above
-            // into a single target, and measured first if it never was.
-            for folder in profile.references where !folder.isEmpty {
-                arguments += ["--reference-folder", folder]
-            }
-            if profile.declip { arguments += ["--declip"] }
-            if profile.stemKicks { arguments += ["--stem-kicks"] }
-            if profile.stemKicks && profile.bassSub { arguments += ["--bass-sub"] }
-            if profile.airFixed { arguments += ["--air-fixed"] }
-            if profile.airStems { arguments += ["--air-stems"] }
-            if !compare || replaceOriginals { arguments += ["--no-compare"] }
-            if dryRun && !replaceOriginals { arguments += ["--dry-run"] }
-            // Confirmed in the app before the run starts; the tool asks for
-            // --yes so that nothing replaces originals without being asked.
-            if replaceOriginals { arguments += ["--replace-originals", "--yes"] }
+            var arguments = Self.processArguments(
+                folders: folders, profile: profile, limit: limit,
+                outputDirectory: outputDirectory, databaseURL: databaseURL,
+                format: format, compare: compare, dryRun: dryRun,
+                replaceOriginals: replaceOriginals)
             if let selection { arguments += ["--select", selection.path] }
+            // A stem mix chosen by ear: the one ticked track, built from
+            // the layers that were heard (StemMixSession).
+            if let stemMix { arguments += ["--stem-mix", stemMix.path] }
 
             try await CLI.run(tool, arguments,
                               isCancelled: { [flag] in flag.isCancelled }) { [weak self] line in
@@ -538,4 +498,64 @@ final class Engine: ObservableObject {
         }
     }
 
+
+    /// The processing command for these settings, without the selection:
+    /// what Process runs, and what the stem mix prepares its preview with,
+    /// so the preview starts where a run would.
+    nonisolated static func processArguments(
+        folders: [URL], profile: Profile, limit: Int,
+        outputDirectory: URL, databaseURL: URL,
+        format: AudioWriter.Format, compare: Bool, dryRun: Bool,
+        replaceOriginals: Bool = false) -> [String] {
+        var arguments = ["subbass"] + folders.map(\.path) + [
+            "--db", databaseURL.path,
+            "--out", outputDirectory.path,
+            "--format", format.cliName,
+            "--porcelain",
+            // The app's list is already deduplicated by the eye; the
+            // batch is not. A library of compilations is mostly the
+            // same forty songs.
+            "--skip-duplicates",
+            "--limit", String(limit == Int.max ? Int(Int32.max) : limit),
+            "--target", String(profile.target),
+            "--estimator", profile.estimator,
+            "--peak-ceiling", String(profile.peakCeiling),
+            "--peak-limit", String(profile.peakLimit),
+            "--amount", String(profile.amount),
+            "--max-amount", String(profile.maxAmount),
+            "--sub-offset", String(profile.subOffset),
+            "--min-activity", String(profile.minActivity),
+            "--punch", String(profile.punch),
+            "--punch-decay", String(profile.punchDecay),
+            "--declip-max", String(profile.declipMax),
+            "--target-lra", String(profile.targetLRA),
+            "--max-attenuation", String(profile.maxAttenuation),
+            "--transient", String(profile.transient),
+            "--min-crest", String(profile.minCrest),
+            "--air", String(profile.air),
+            "--mud", String(profile.mud),
+            "--body", String(profile.body),
+            "--air-tune", String(profile.airTune),
+        ]
+        if profile.auto { arguments += ["--auto"] }
+        if let reference = profile.reference, !reference.isEmpty {
+            arguments += ["--reference", reference]
+        }
+        // Each further reference folder: pooled with the one above
+        // into a single target, and measured first if it never was.
+        for folder in profile.references where !folder.isEmpty {
+            arguments += ["--reference-folder", folder]
+        }
+        if profile.declip { arguments += ["--declip"] }
+        if profile.stemKicks { arguments += ["--stem-kicks"] }
+        if profile.stemKicks && profile.bassSub { arguments += ["--bass-sub"] }
+        if profile.airFixed { arguments += ["--air-fixed"] }
+        if profile.airStems { arguments += ["--air-stems"] }
+        if !compare || replaceOriginals { arguments += ["--no-compare"] }
+        if dryRun && !replaceOriginals { arguments += ["--dry-run"] }
+        // Confirmed in the app before the run starts; the tool asks for
+        // --yes so that nothing replaces originals without being asked.
+        if replaceOriginals { arguments += ["--replace-originals", "--yes"] }
+        return arguments
+    }
 }

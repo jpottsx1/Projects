@@ -37,6 +37,10 @@ final class ABPlayer: ObservableObject {
     @Published private(set) var loaded: [Source] = []
     @Published var matchLoudness = true { didSet { applyGains(ramp: 0.05) } }
     @Published private(set) var problem: String?
+    /// Set, every source plays at once at its own gain: a mix, not a
+    /// choice -- the stem mix's layers (StemMixSession). Nil is the A/B
+    /// player, one source heard at a time.
+    @Published private(set) var mixGains: [String: Float]?
 
     /// Long enough that a step is inaudible, short enough that you are never
     /// listening to a blend of the two while judging one.
@@ -127,6 +131,14 @@ final class ABPlayer: ObservableObject {
         engine.prepare()
     }
 
+    /// Stops and lets go of every buffer -- the stem mix holds several
+    /// hundred megabytes and should not keep them once its sheet closes.
+    func unload() {
+        stop()
+        teardown()
+        problem = nil
+    }
+
     // MARK: - Transport
 
     func play(from offset: TimeInterval = 0) {
@@ -196,6 +208,19 @@ final class ABPlayer: ObservableObject {
         if wasPlaying { play(from: position) } else { stopTicking() }
     }
 
+    // MARK: - Mixing
+
+    /// Plays every source together, each at its linear gain (absent is
+    /// silent). Called on every fader move: a gain on a buffer already
+    /// playing, with a ramp short enough to follow a drag and long enough
+    /// not to step.
+    func setMix(_ gains: [String: Float]) {
+        mixGains = gains
+        applyGains(ramp: mixRamp)
+    }
+
+    private let mixRamp: TimeInterval = 0.03
+
     // MARK: - Switching
 
     /// The switch. No seek, no restart: the other versions have been playing
@@ -216,9 +241,14 @@ final class ABPlayer: ObservableObject {
     private func applyGains(ramp: TimeInterval) {
         for source in loaded {
             guard let gain = gains[source.id] else { continue }
-            let wanted: Float = source.id == selected
-                ? (matchLoudness ? pow(10, source.matchGainDB / 20) : 1)
-                : 0
+            let wanted: Float
+            if let mixGains {
+                wanted = mixGains[source.id] ?? 0
+            } else {
+                wanted = source.id == selected
+                    ? (matchLoudness ? pow(10, source.matchGainDB / 20) : 1)
+                    : 0
+            }
             if ramp <= 0 {
                 gain.outputVolume = wanted
             } else {
@@ -291,6 +321,7 @@ final class ABPlayer: ObservableObject {
         players.removeAll(); gains.removeAll()
         buffers.removeAll(); sources.removeAll()
         loaded = []; selected = nil; duration = 0; position = 0
+        mixGains = nil
     }
 
     /// Everything after `from`, as a new buffer.

@@ -18,7 +18,7 @@ from pathlib import Path
 
 from . import (__version__, analyze, apply_gain, bs1770, db, declip, decode,
                air, body, expand, intro, mp3gain, mud, outro, profiles, render, replace,
-               report, stems, subbass, write)
+               report, stemmix, stems, subbass, write)
 
 
 def _progress_printer(start: float):
@@ -932,7 +932,8 @@ def cmd_subbass(args: argparse.Namespace) -> int:
             and not args.declip and args.target_lra <= 0
             and args.transient <= 0 and args.air <= 0
             and getattr(args, "mud", 0) <= 0 and getattr(args, "body", 0) <= 0
-            and not args.no_compare):
+            and not args.no_compare and not getattr(args, "stem_mix", None)
+            and not getattr(args, "stem_preview", None)):
         # Nothing but levelling. A comparison would be a pair of identical
         # files, since A is level-matched to B, so write the levelled track
         # alone. This used to refuse and point at the gain command, but
@@ -962,6 +963,7 @@ def cmd_subbass(args: argparse.Namespace) -> int:
         return fail("error: --auto needs a reference corpus. Give --reference, "
                     "or set it in the profile.")
     if (args.stem_kicks or (args.air_stems and args.air > 0)) \
+            and not getattr(args, "stem_mix", None) \
             and "demucs" not in stems.available():
         return fail("error: the drum stem and the air guide need Demucs, which "
                     "is not installed here.\nDouble-click "
@@ -990,6 +992,26 @@ def cmd_subbass(args: argparse.Namespace) -> int:
             return fail(f"error: could not read --select {args.select}: {exc}")
         if not selected:
             return fail(f"error: --select {args.select} lists no tracks.")
+
+    stem_preview = getattr(args, "stem_preview", None)
+    stem_choice = None
+    if stem_preview or getattr(args, "stem_mix", None):
+        # One track, by ear: the app's Stem Mix (stemmix.py).
+        if selected is None or len(set(selected)) != 1:
+            return fail("error: --stem-preview and --stem-mix work on one "
+                        "track; give it with --select.")
+        if stem_preview and "demucs" not in stems.available():
+            return fail("error: the stem mix needs Demucs, which is not "
+                        "installed here.\nDouble-click 'Measure Kick "
+                        "Detection.command' once to install it, or run: "
+                        ".venv/bin/pip install demucs")
+        if getattr(args, "stem_mix", None):
+            try:
+                stem_choice = json.loads(args.stem_mix.read_text())
+                stemmix.read_info(Path(stem_choice["bundle"]))
+            except (OSError, ValueError, KeyError, TypeError) as exc:
+                return fail(f"error: could not read the stem mix "
+                            f"{args.stem_mix}: {exc}")
 
     start = time.monotonic()
     if porcelain:
@@ -1224,6 +1246,39 @@ def cmd_subbass(args: argparse.Namespace) -> int:
         return fail("every selected track was a duplicate of another in the "
                     "same batch", 1)
 
+    if stem_preview:
+        # Prepared, not processed: the layers the app plays, and nothing in
+        # the output folder.
+        job = {**jobs[0], "bass_sub": bool(args.bass_sub)}
+        if porcelain:
+            _emit({"event": "progress", "phase": "separate", "done": 0,
+                   "total": 1, "name": job["name"], "path": job["path"]})
+        try:
+            info = stemmix.prepare(job, stem_preview)
+        except Exception as exc:
+            return fail(f"error: could not prepare the stem mix: "
+                        f"{type(exc).__name__}: {exc}"[:500], 1)
+        if porcelain:
+            _emit({"event": "stem_preview", "out": str(stem_preview),
+                   "name": job["name"], "path": job["path"],
+                   "seconds": round(time.monotonic() - start, 3)})
+        else:
+            out(f"stem mix prepared in {stem_preview} "
+                f"({len(info['files'])} layers, {info['seconds']:.0f} s)")
+        return 0
+    if stem_choice is not None:
+        for job in jobs:
+            # What was chosen by ear, in place of what the settings would
+            # size: the sub and air are the bundle's layers at the chosen
+            # amounts, and nothing is separated again.
+            job.update(stem_mix=stem_choice, skip=None, stem_kicks=False,
+                       bass_sub=False, air_stems=False,
+                       amount=float(stem_choice.get("sub_db", 0.0)),
+                       air=float(stem_choice.get("air_db", 0.0)),
+                       label=_label(args, float(stem_choice.get("sub_db", 0.0)))
+                       .replace("unchanged", "").strip() + " stem mix")
+            job["label"] = job["label"].strip()
+
     if porcelain:
         # `selected` is what the app reads; `total` is kept for anything
         # already reading that. The app showed "0 track(s) to process" on
@@ -1348,7 +1403,7 @@ def cmd_subbass(args: argparse.Namespace) -> int:
                   + note)
 
     prepare = None
-    if args.stem_kicks or (args.air_stems and args.air > 0):
+    if stem_choice is None and (args.stem_kicks or (args.air_stems and args.air > 0)):
         prepare = _separator(jobs, Path(jobs[0]["stem_cache"]), porcelain,
                              args.quiet)
 
@@ -2075,6 +2130,17 @@ def build_parser() -> argparse.ArgumentParser:
                           "line -- what the Mac app's ticked list sends. "
                           "Applied BEFORE --limit, so unticking a track "
                           "promotes the next one into range")
+    sub.add_argument("--stem-preview", type=Path, default=None, metavar="DIR",
+                     help="the one --select track: split it into stems and "
+                          "write, into DIR, the layers the Mac app's Stem "
+                          "Mix plays live -- the stems, the sub and the air "
+                          "as the chain would add them. Writes no track")
+    sub.add_argument("--stem-mix", type=Path, default=None, metavar="FILE",
+                     help="the one --select track, processed from a stem "
+                          "mix chosen in the app: FILE names the prepared "
+                          "layers and the stem levels, sub and air chosen. "
+                          "The stages before the sub ran when it was "
+                          "prepared; levelling and writing are as usual")
     sub.add_argument("--skip-duplicates", action="store_true",
                      help="do a record only once per batch, matching on "
                           "artist and title with case and punctuation "

@@ -21,7 +21,7 @@ from pathlib import Path
 import numpy as np
 
 from . import (air, bassline, body, bs1770, declip, decode, expand, limit, mud,
-               spectrum, stems, subbass, write)
+               spectrum, stemmix, stems, subbass, write)
 
 
 def default_jobs() -> int:
@@ -172,6 +172,177 @@ def one(job: dict) -> dict:
     return result
 
 
+def _front(job: dict, original: np.ndarray, amount: float) -> dict:
+    """Every stage before the sub, on the track as it arrived: de-clipping,
+    finding the kicks, range, transients, mud and body. What the sub and
+    air then work from, and what they were told. `{"result": ...}` where
+    the track is skipped here. Shared by a processing run and the stem
+    mix's preview (stemmix.py), so the preview starts where a run would."""
+    audio = original
+    note_skip, skip = None, job.get("skip")
+    # First, on the file as it arrived. De-clipping puts peaks BACK, so
+    # it needs the audio before anything has attenuated it, and
+    # everything after it has to fit under the peak it restores.
+    clip = None
+    if job["declip"]:
+        audio, clip = declip.restore(audio, decode.TARGET_RATE,
+                                     max_restore_db=job["declip_max"])
+    # Where the kicks are found. On the mix unless asked otherwise; on a
+    # drum stem the parent separated before the pool started, keyed by
+    # the audio as it ARRIVED -- before de-clipping, which is what the
+    # parent had in hand when it separated.
+    drums, found, selection = None, None, None
+    freq, decay, voice = job["freq"], job["decay"], None
+    following, bass_note = None, None
+    if job.get("stem_kicks"):
+        drums = stems.load_kick_source(Path(job["stem_cache"]), original,
+                                       decode.TARGET_RATE)
+        if drums is None and amount > 0:
+            skip = ("no drum stem to find kicks on"
+                    + (f" ({job['stem_error']})" if job.get("stem_error") else ""))
+        elif amount > 0:
+            # Every drum hit with an attack in the kick band, then only
+            # the ones heavy enough to be a kick and on the beat -- and,
+            # where no beat grid fits that way, the ones that sound like
+            # the kick (subbass.choose_kicks).
+            kicks, strengths = subbass.detect_kicks(
+                audio, decode.TARGET_RATE, drums)
+            kicks, strengths, selection = subbass.choose_kicks(
+                drums, decode.TARGET_RATE, kicks, strengths, job.get("bpm"))
+            found = (kicks, strengths)
+            # Tune the burst to this track's kick, measured where the
+            # kick is on its own. The fixed 45 Hz, 0.12 s burst sat a
+            # second note under 60-84 Hz kicks and outlasted them.
+            voice = subbass.kick_voice(drums, decode.TARGET_RATE, kicks)
+            if voice is not None:
+                freq, decay = subbass.tuned_burst(*voice)
+            # Part of the sub under the bass notes, where the bass
+            # carries the low end (bassline.py).
+            if job.get("bass_sub"):
+                parts = stems.load_report_parts(
+                    Path(job["stem_cache"]), original, decode.TARGET_RATE)
+                if parts is None:
+                    bass_note = ("no bass part kept for this track, so the "
+                                 "sub is under the kicks only")
+                else:
+                    # The deep notes' tone takes its phase from the
+                    # track itself, so it lands in step with the note.
+                    free, locked, heard = bassline.tones(
+                        parts["bass"], decode.TARGET_RATE,
+                        audio.shape[0], mix=audio)
+                    share = bassline.share(drums, parts["bass"],
+                                           decode.TARGET_RATE)
+                    following = (free, share, locked)
+                    bass_note = bassline.what_it_did(heard, share)
+            # No whole-track verdict: the filters have already dropped
+            # every hit that does not belong. Too few left is the one
+            # reason to go without, and enhance() says that itself.
+    # The content check needs the audio, not the per-frame band
+    # statistics, so it happens here rather than in the query.
+    if amount > 0 and skip is None:
+        activity = subbass.low_band_activity(audio, decode.TARGET_RATE)
+        if np.isfinite(activity) and activity < job["min_activity"]:
+            skip = (f"sub octave barely moves ({activity:.0f} dB) -- "
+                    f"a static floor rather than a bassline")
+    # Dynamics before the sub, and in this order, because each stage
+    # wants the signal the one before it produced. De-clipping goes
+    # first and on the file as it arrived; the range stage only
+    # attenuates, so doing it early gives everything after it headroom;
+    # the transient stage then shapes attacks that are no longer being
+    # held down by a loud chorus; and the sub is added last because it
+    # is the only one putting in something that was never there.
+    ranged = expand._blank_range("not asked for")
+    if job.get("target_lra", 0.0) > 0:
+        audio, ranged = expand.restore_range(
+            audio, decode.TARGET_RATE,
+            target_lra=job["target_lra"],
+            max_attenuation_db=job.get("max_attenuation",
+                                       expand.MAX_ATTENUATION_DB))
+    shaped = expand._blank_transient("not asked for")
+    if job.get("transient", 0.0) > 0:
+        audio, shaped = expand.restore_transients(
+            audio, decode.TARGET_RATE,
+            amount_db=job["transient"],
+            min_crest_db=job.get("min_crest", expand.MIN_CREST_DB))
+
+    # The mud cut, before the sub: the sub adds under a low end that is
+    # already cleared, and the cut is sized from the track as it came.
+    cleared = mud._blank(job.get("mud_note") or "not asked for")
+    if job.get("mud", 0.0) > 0:
+        audio, cleared = mud.clear(audio, decode.TARGET_RATE, job["mud"])
+
+    # The body lift, after the mud cut and before the sub: sized from
+    # the track as it came, like both of them.
+    bodied = body._blank(job.get("body_note") or "not asked for")
+    if job.get("body", 0.0) > 0:
+        audio, bodied = body.boost(audio, decode.TARGET_RATE, job["body"])
+
+    if skip is not None:
+        # A track can want de-clipping, or dynamics, and not want a sub.
+        # Where any of those did something there is a new file worth
+        # writing, so only the sub is dropped; where nothing was done,
+        # say so and move on -- unless the run writes finished tracks,
+        # which are all levelled: a track with no bassline to put a sub
+        # under still has to come out at the target (2026-11-02).
+        amount = 0.0
+        levels = not job["compare"] and not job["dry_run"]
+        if not (levels or ranged["applied"] or shaped["applied"]
+                or cleared["applied"] or bodied["applied"]
+                or (clip is not None and clip["restored"])):
+            return {"result": {
+                "status": "skipped", "reason": skip, "amount": None,
+                "clip": clip, "range": ranged, "transient": shaped,
+                "air": air._blank("not reached"), "mud": cleared,
+                "body": bodied}}
+        note_skip = skip
+
+    return {"audio": audio, "amount": amount, "skip": skip,
+            "note_skip": note_skip, "clip": clip, "drums": drums,
+            "found": found, "selection": selection, "freq": freq,
+            "decay": decay, "voice": voice, "following": following,
+            "bass_note": bass_note, "ranged": ranged, "shaped": shaped,
+            "cleared": cleared, "bodied": bodied}
+
+
+def _sub_and_air(job: dict, audio: np.ndarray, original: np.ndarray,
+                 amount: float, staged: dict, measure_once):
+    """The sub, then air: (after, sub report, air report)."""
+    freq, decay, drums = staged["freq"], staged["decay"], staged["drums"]
+    found, following = staged["found"], staged["following"]
+    after, info = subbass.enhance(audio, decode.TARGET_RATE,
+                                  amount_db=amount,
+                                  freq=freq, decay_s=decay,
+                                  punch_db=job["punch"],
+                                  punch_decay_ms=job["punch_decay"],
+                                  drums=drums, kicks=found,
+                                  bassline=following)
+    # Air last of the spectral stages, because it generates from what
+    # is there and by this point what is there is finished. It is also
+    # the only one that can push the file above full scale on its own,
+    # so the levelling that follows is what takes that back out.
+    aired = air._blank("not asked for")
+    if job.get("air", 0.0) > 0:
+        guide = None
+        if job.get("air_stems"):
+            guide = stems.load_air_guide(Path(job["stem_cache"]), original,
+                                         decode.TARGET_RATE)
+        if job.get("air_stems") and guide is None:
+            # Asked to follow the vocals and instruments, and there is
+            # nothing to follow: no air, rather than air everywhere,
+            # which is the thing that was asked NOT to happen.
+            aired = air._blank(
+                "no air guide for this track"
+                + (f" ({job['stem_error']})" if job.get("stem_error") else ""))
+        else:
+            after, aired = air.excite(after, decode.TARGET_RATE,
+                                      amount_db=job["air"],
+                                      tune_hz=job.get("air_tune",
+                                                      air.DEFAULT_TUNE_HZ),
+                                      guide=guide, measure=measure_once)
+
+    return after, info, aired
+
+
 def _one(job: dict) -> dict:
     source = Path(job["path"])
     base = {"path": job["path"], "name": job["name"], "folder": job["folder"]}
@@ -187,7 +358,6 @@ def _one(job: dict) -> dict:
                 "air": air._blank("not reached")}
 
     amount = float(job["amount"])
-    note_skip = None
     # The same finished audio was measured twice, by air for its report and
     # here for the levelling: measure each array once. The array is kept
     # with its measurement, so a new one can never reuse a stale entry.
@@ -210,152 +380,28 @@ def _one(job: dict) -> dict:
         channels = probed.get("source_channels")
         native_rate = probed.get("source_rate") or decode.TARGET_RATE
         audio = original = decode.decode(source, source_channels=channels)
-        # First, on the file as it arrived. De-clipping puts peaks BACK, so
-        # it needs the audio before anything has attenuated it, and
-        # everything after it has to fit under the peak it restores.
-        clip = None
-        if job["declip"]:
-            audio, clip = declip.restore(audio, decode.TARGET_RATE,
-                                         max_restore_db=job["declip_max"])
-        # Where the kicks are found. On the mix unless asked otherwise; on a
-        # drum stem the parent separated before the pool started, keyed by
-        # the audio as it ARRIVED -- before de-clipping, which is what the
-        # parent had in hand when it separated.
-        drums, found, selection = None, None, None
-        freq, decay, voice = job["freq"], job["decay"], None
-        following, bass_note = None, None
-        if job.get("stem_kicks"):
-            drums = stems.load_kick_source(Path(job["stem_cache"]), original,
-                                           decode.TARGET_RATE)
-            if drums is None and amount > 0:
-                skip = ("no drum stem to find kicks on"
-                        + (f" ({job['stem_error']})" if job.get("stem_error") else ""))
-            elif amount > 0:
-                # Every drum hit with an attack in the kick band, then only
-                # the ones heavy enough to be a kick and on the beat -- and,
-                # where no beat grid fits that way, the ones that sound like
-                # the kick (subbass.choose_kicks).
-                kicks, strengths = subbass.detect_kicks(
-                    audio, decode.TARGET_RATE, drums)
-                kicks, strengths, selection = subbass.choose_kicks(
-                    drums, decode.TARGET_RATE, kicks, strengths, job.get("bpm"))
-                found = (kicks, strengths)
-                # Tune the burst to this track's kick, measured where the
-                # kick is on its own. The fixed 45 Hz, 0.12 s burst sat a
-                # second note under 60-84 Hz kicks and outlasted them.
-                voice = subbass.kick_voice(drums, decode.TARGET_RATE, kicks)
-                if voice is not None:
-                    freq, decay = subbass.tuned_burst(*voice)
-                # Part of the sub under the bass notes, where the bass
-                # carries the low end (bassline.py).
-                if job.get("bass_sub"):
-                    parts = stems.load_report_parts(
-                        Path(job["stem_cache"]), original, decode.TARGET_RATE)
-                    if parts is None:
-                        bass_note = ("no bass part kept for this track, so the "
-                                     "sub is under the kicks only")
-                    else:
-                        # The deep notes' tone takes its phase from the
-                        # track itself, so it lands in step with the note.
-                        free, locked, heard = bassline.tones(
-                            parts["bass"], decode.TARGET_RATE,
-                            audio.shape[0], mix=audio)
-                        share = bassline.share(drums, parts["bass"],
-                                               decode.TARGET_RATE)
-                        following = (free, share, locked)
-                        bass_note = bassline.what_it_did(heard, share)
-                # No whole-track verdict: the filters have already dropped
-                # every hit that does not belong. Too few left is the one
-                # reason to go without, and enhance() says that itself.
-        # The content check needs the audio, not the per-frame band
-        # statistics, so it happens here rather than in the query.
-        if amount > 0 and skip is None:
-            activity = subbass.low_band_activity(audio, decode.TARGET_RATE)
-            if np.isfinite(activity) and activity < job["min_activity"]:
-                skip = (f"sub octave barely moves ({activity:.0f} dB) -- "
-                        f"a static floor rather than a bassline")
-        # Dynamics before the sub, and in this order, because each stage
-        # wants the signal the one before it produced. De-clipping goes
-        # first and on the file as it arrived; the range stage only
-        # attenuates, so doing it early gives everything after it headroom;
-        # the transient stage then shapes attacks that are no longer being
-        # held down by a loud chorus; and the sub is added last because it
-        # is the only one putting in something that was never there.
-        ranged = expand._blank_range("not asked for")
-        if job.get("target_lra", 0.0) > 0:
-            audio, ranged = expand.restore_range(
-                audio, decode.TARGET_RATE,
-                target_lra=job["target_lra"],
-                max_attenuation_db=job.get("max_attenuation",
-                                           expand.MAX_ATTENUATION_DB))
-        shaped = expand._blank_transient("not asked for")
-        if job.get("transient", 0.0) > 0:
-            audio, shaped = expand.restore_transients(
-                audio, decode.TARGET_RATE,
-                amount_db=job["transient"],
-                min_crest_db=job.get("min_crest", expand.MIN_CREST_DB))
-
-        # The mud cut, before the sub: the sub adds under a low end that is
-        # already cleared, and the cut is sized from the track as it came.
-        cleared = mud._blank(job.get("mud_note") or "not asked for")
-        if job.get("mud", 0.0) > 0:
-            audio, cleared = mud.clear(audio, decode.TARGET_RATE, job["mud"])
-
-        # The body lift, after the mud cut and before the sub: sized from
-        # the track as it came, like both of them.
-        bodied = body._blank(job.get("body_note") or "not asked for")
-        if job.get("body", 0.0) > 0:
-            audio, bodied = body.boost(audio, decode.TARGET_RATE, job["body"])
-
-        if skip is not None:
-            # A track can want de-clipping, or dynamics, and not want a sub.
-            # Where any of those did something there is a new file worth
-            # writing, so only the sub is dropped; where nothing was done,
-            # say so and move on -- unless the run writes finished tracks,
-            # which are all levelled: a track with no bassline to put a sub
-            # under still has to come out at the target (2026-11-02).
-            amount = 0.0
-            levels = not job["compare"] and not job["dry_run"]
-            if not (levels or ranged["applied"] or shaped["applied"]
-                    or cleared["applied"] or bodied["applied"]
-                    or (clip is not None and clip["restored"])):
-                return {**base, "status": "skipped", "reason": skip,
-                        "amount": None, "clip": clip, "range": ranged,
-                        "transient": shaped, "air": air._blank("not reached"),
-                        "mud": cleared, "body": bodied}
-            note_skip = skip
-
-        after, info = subbass.enhance(audio, decode.TARGET_RATE,
-                                      amount_db=amount,
-                                      freq=freq, decay_s=decay,
-                                      punch_db=job["punch"],
-                                      punch_decay_ms=job["punch_decay"],
-                                      drums=drums, kicks=found,
-                                      bassline=following)
-        # Air last of the spectral stages, because it generates from what
-        # is there and by this point what is there is finished. It is also
-        # the only one that can push the file above full scale on its own,
-        # so the levelling that follows is what takes that back out.
-        aired = air._blank("not asked for")
-        if job.get("air", 0.0) > 0:
-            guide = None
-            if job.get("air_stems"):
-                guide = stems.load_air_guide(Path(job["stem_cache"]), original,
-                                             decode.TARGET_RATE)
-            if job.get("air_stems") and guide is None:
-                # Asked to follow the vocals and instruments, and there is
-                # nothing to follow: no air, rather than air everywhere,
-                # which is the thing that was asked NOT to happen.
-                aired = air._blank(
-                    "no air guide for this track"
-                    + (f" ({job['stem_error']})" if job.get("stem_error") else ""))
-            else:
-                after, aired = air.excite(after, decode.TARGET_RATE,
-                                          amount_db=job["air"],
-                                          tune_hz=job.get("air_tune",
-                                                          air.DEFAULT_TUNE_HZ),
-                                          guide=guide, measure=measure_once)
-
+        stem_mix = job.get("stem_mix")
+        if stem_mix is not None:
+            # A stem mix chosen by ear (stemmix.py): the stages before the
+            # sub ran when it was prepared, and the sub and air are its
+            # layers at the levels chosen. What was heard is what is written.
+            staged = stemmix.commit(job, original, measure_once)
+        else:
+            staged = _front(job, original, amount)
+            if "result" in staged:
+                return {**base, **staged["result"]}
+        audio, amount, skip = staged["audio"], staged["amount"], staged["skip"]
+        note_skip, clip, drums = staged["note_skip"], staged["clip"], staged["drums"]
+        found, selection = staged["found"], staged["selection"]
+        freq, decay, voice = staged["freq"], staged["decay"], staged["voice"]
+        following, bass_note = staged["following"], staged["bass_note"]
+        ranged, shaped = staged["ranged"], staged["shaped"]
+        cleared, bodied = staged["cleared"], staged["bodied"]
+        if stem_mix is not None:
+            after, info, aired = staged["after"], staged["info"], staged["aired"]
+        else:
+            after, info, aired = _sub_and_air(job, audio, original, amount,
+                                              staged, measure_once)
         before_bands = {b["band_hz"]: b["shape_db"]
                         for b in spectrum.analyse(original, decode.TARGET_RATE)}
         untouched = after is original

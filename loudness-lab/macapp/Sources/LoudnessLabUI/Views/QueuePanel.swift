@@ -15,6 +15,8 @@ struct QueuePanel: View {
     @ObservedObject var previewPlayer: ABPlayer
     var previewing: String?
     var onPreview: (String) -> Void = { _ in }
+    /// Opens the stem mix for a track. Nil hides the way in.
+    var onStemMix: ((String) -> Void)?
 
     /// How the list is shown. "Processing order" is the order the run works
     /// through and the "will process" limit counts from; artist and song only
@@ -125,6 +127,12 @@ struct QueuePanel: View {
                         row(item, inRange: willProcess.contains(item.path))
                             .contentShape(Rectangle())
                             .onTapGesture { highlighted = item.path; listFocused = true }
+                            .contextMenu {
+                                if let onStemMix {
+                                    Button("Stem Mix…") { onStemMix(item.path) }
+                                        .help(Help.stemMix.summary)
+                                }
+                            }
                         Divider()
                     }
                 }
@@ -220,8 +228,19 @@ struct QueuePanel: View {
 
     private var footer: some View {
         VStack(alignment: .leading, spacing: 3) {
-            Text(summary)
-                .font(.caption)
+            HStack(alignment: .firstTextBaseline) {
+                Text(summary)
+                    .font(.caption)
+                Spacer(minLength: 6)
+                if let onStemMix {
+                    Button("Stem Mix…") {
+                        if let path = highlighted ?? shown.first?.path { onStemMix(path) }
+                    }
+                    .controlSize(.small)
+                    .disabled(queue.items.isEmpty)
+                    .help(Help.stemMix.summary)
+                }
+            }
             if let note = queue.note {
                 Text(note).font(.caption2).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

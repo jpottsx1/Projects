@@ -62,6 +62,8 @@ struct ContentView: View {
     /// tab works on these rather than the ticked tracks.
     @State private var sentToIntro: [URL]?
     @State private var wideWaveform = false
+    /// The track whose stem mix is open, if any.
+    @State private var stemMixing: StemMixTarget?
     @State private var confirmingClearOutput = false
     /// Set only when the search fails and the file is pointed at by hand.
     /// `@AppStorage` so the view redraws the moment it is chosen, and so
@@ -153,8 +155,16 @@ struct ContentView: View {
                                onPreview: { path in
                                    player.stop()
                                    intro.togglePreview(path)
+                               },
+                               onStemMix: { path in
+                                   player.stop()
+                                   intro.stopPlaying()
+                                   stemMixing = StemMixTarget(path: path)
                                })
                         .frame(minWidth: 260, idealWidth: 320, maxWidth: 480)
+                        .sheet(item: $stemMixing) { target in
+                            stemMixPanel(target.path)
+                        }
 
                     // What the folders are, and what came out of them.
                     VStack(spacing: 0) {
@@ -524,6 +534,40 @@ struct ContentView: View {
         }
     }
 
+    /// The stem mix for one track. Prepared and committed with the window's
+    /// settings, scoped to the track's own folder so a track outside the
+    /// folders listed (or unticked) is still the one worked on.
+    private func stemMixPanel(_ path: String) -> some View {
+        let scope = [URL(fileURLWithPath: path).deletingLastPathComponent()]
+        return StemMixPanel(
+            path: path,
+            arguments: {
+                Engine.processArguments(folders: scope, profile: profile, limit: Int.max,
+                                        outputDirectory: outputDirectory,
+                                        databaseURL: databaseURL, format: format,
+                                        compare: compare, dryRun: false)
+            },
+            bassSub: profile.bassSub,
+            busy: engine.isRunning,
+            commit: { choice in
+                player.stop()
+                chosen = nil
+                await engine.run(folders: scope, profile: profile, limit: Int.max,
+                                 compare: compare, dryRun: false,
+                                 outputDirectory: outputDirectory,
+                                 databaseURL: databaseURL, format: format,
+                                 only: [path], stemMix: choice)
+                if let failure = engine.failure { return failure }
+                guard let track = engine.manifest?.tracks.first else {
+                    return "Nothing was written. The log in the main window says why."
+                }
+                chosen = track
+                rightTab = .results
+                return nil
+            },
+            close: { stemMixing = nil })
+    }
+
     /// Keeps the chosen track's finished version and deletes its A/B files.
     private func saveFinished(_ track: Manifest.Track) {
         player.stop()
@@ -561,4 +605,10 @@ struct ContentView: View {
     private var estimatorPath: KeyPath<Manifest.Variant, Double?> {
         profile.estimator == "lufs_i" ? \.lufsI : \.sP95
     }
+}
+
+/// The track a stem mix is open for, as a sheet's item.
+struct StemMixTarget: Identifiable {
+    let path: String
+    var id: String { path }
 }

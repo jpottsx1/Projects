@@ -11,7 +11,11 @@ track with the choice attached, and this module builds the audio from the
 same layers with the same gains. What was heard is what is written.
 
     out = residual + sum(level(stem) * stem)        the four stem faders
-        + tone_gain(sub) * sub_tone + kick_gain(sub) * sub_kick
+        + tone_gain(sub) * sub_tone                 the bass line's tone
+        + kick_gain(sub) * sub_kick                 or: mix_gain * sub_mix_kick
+        + level(drums) * (band_gain(punch) * punch_band
+                          + attack_gain(punch) * punch_drum_kicks)
+                                                    or: punch_mix_kicks
         + air_gain(air) * air
 
 - `residual` is the track as the chain had it just before the sub (de-
@@ -19,8 +23,17 @@ same layers with the same gains. What was heard is what is written.
   stems. A separation never sums back exactly; the residual carries the
   difference, so with every fader at 0 dB the mix IS that track, bit for
   bit, not the separator's idea of it.
-- `sub_tone`, `sub_kick` are `subbass.sub_layers`: what `enhance` adds,
-  split so each part's gain is a function of the amount alone.
+- `sub_tone`, `sub_kick` are `subbass.sub_layers` with the kicks found on
+  the drum track and the bass line followed: what `enhance` adds, split so
+  each part's gain is a function of the amount alone. `sub_kick` alone is
+  the sub of a run that does not follow the bass line (the kicks get the
+  whole amount either way), so "Sub follows the bass line" is the tone's
+  gain going to zero. `sub_mix_kick` is the sub a run makes with the kicks
+  found in the full mix instead -- its own kicks, at the settings' Freq and
+  Decay, and no bass line, which needs the drum track as a run does.
+- `punch_*` is `subbass.punch_layers` on the DRUM STEM, for each set of
+  kicks: the 2-6 kHz band and its attack emphasis, whose gains
+  (`punch_gains`) are what `shape_attacks` does, renormalisation included.
 - `air` is the exciter's harmonics (`air._air_plan`), guided where the
   settings ask for the guide.
 
@@ -31,13 +44,15 @@ came into the sub, as a processing run sizes them: Bass +5 means the 31.5-63
 Hz octave five dB above where the track had it. The stem faders then sit on
 top.
 
-Two things a run does that the stem mix does not, because neither is a gain
-on a layer: punch (`shape_attacks`) and the sub's safety trim. The trim is
-a level change the levelling that follows makes anyway; punch is left to a
-processing run. Levelling to the target still happens at the end, on Commit,
-as it does for every finished track.
+Punch differs from a run's in one way, on purpose: a run shapes 2-6 kHz of
+the whole mix at each kick, hi-hats, vocals and guitars with it; here it
+shapes the drum stem's, scaled with the drum fader, and leaves the rest of
+the band alone. Punch Decay is the settings' and is not live. The sub's
+safety trim is not done either: it is a level change, and the levelling
+that follows makes it anyway. Levelling to the target still happens at the
+end, on Commit, as it does for every finished track.
 
-A bundle is scratch: four stereo stems and up to four layers more, float32
+A bundle is scratch: four stereo stems and up to eight layers more, float32
 at 48 kHz -- about 115 MB a layer for five minutes. The app removes it on
 Cancel and after Commit.
 """
@@ -53,15 +68,20 @@ from scipy.io import wavfile
 
 from . import air, decode, stems, subbass
 
-VERSION = 1
+VERSION = 2
 STEMS = stems.STEMS                     # drums, bass, other, vocals
+SUB_LAYERS = ("sub_tone", "sub_kick", "sub_mix_kick")
+PUNCH_LAYERS = ("punch_band", "punch_drum_kicks", "punch_mix_kicks")
 # In the order they are summed, here and in the app.
-LAYERS = ("residual",) + STEMS + ("sub_tone", "sub_kick", "air")
+LAYERS = ("residual",) + STEMS + SUB_LAYERS + PUNCH_LAYERS + ("air",)
+# Where the kicks are found: on the drum track, or in the full mix.
+KICKS = ("drums", "mix")
 # A stem fader at or under this is off: silence, not -30 dB.
 FLOOR_DB = -30.0
 LEVEL_MAX_DB = 12.0
 SUB_MAX_DB = 16.0                       # the Cap slider's top
 AIR_MAX_DB = 12.0
+PUNCH_MAX_DB = 10.0                     # the Punch slider's top
 BUNDLE_FILE = "mix.json"
 SHARED_DIR = Path.home() / "Music" / "LoudnessLab" / "stem-mix"
 
@@ -74,26 +94,52 @@ def level_gain(db: float) -> float:
     return 10.0 ** (min(db, LEVEL_MAX_DB) / 20.0)
 
 
+def _clamp(value, top: float) -> float:
+    value = float(value)
+    return min(max(value, 0.0), top) if math.isfinite(value) else 0.0
+
+
+def kicks_of(choice: dict) -> str:
+    return "mix" if choice.get("kicks") == "mix" else "drums"
+
+
 def layer_gains(info: dict, choice: dict) -> dict[str, float]:
     """Every layer's gain for a choice -- {"levels_db": {stem: dB},
-    "sub_db": dB, "air_db": dB} -- over a bundle's mix.json. The app
-    computes the same numbers (`StemMix.gains`) to play them."""
+    "sub_db": dB, "air_db": dB, "punch_db": dB, "kicks": "drums" | "mix",
+    "bassline": bool} -- over a bundle's mix.json. The app computes the
+    same numbers (`StemMix.gains`) to play them."""
     levels = choice.get("levels_db") or {}
     gains = {"residual": 1.0}
     for name in STEMS:
         gains[name] = level_gain(levels.get(name, 0.0))
+    for name in SUB_LAYERS + PUNCH_LAYERS + ("air",):
+        gains[name] = 0.0
+    kicks = kicks_of(choice)
     sub = info["sub"]
-    amount = min(max(float(choice.get("sub_db", 0.0)), 0.0), SUB_MAX_DB)
-    gains["sub_tone"] = gains["sub_kick"] = 0.0
+    amount = _clamp(choice.get("sub_db", 0.0), SUB_MAX_DB)
     if sub["available"] and amount > 0:
-        gains["sub_tone"] = subbass.gain_from_stats(
-            sub["energy"], sub["tone_cross"], sub["tone_energy"], amount)
-        if sub["kick"]:
-            gains["sub_kick"] = subbass.gain_from_stats(
-                sub["energy"], sub["kick_cross"], sub["kick_energy"], amount)
+        def lift(part):
+            return (subbass.gain_from_stats(sub["energy"], part["cross"],
+                                            part["energy"], amount)
+                    if part["available"] else 0.0)
+        if kicks == "mix":
+            gains["sub_mix_kick"] = lift(sub["mix_kicks"])
+        else:
+            gains["sub_kick"] = lift(sub["kicks"])
+            if choice.get("bassline", True):
+                gains["sub_tone"] = lift(sub["tone"])
+    punch = info["punch"]
+    boost = _clamp(choice.get("punch_db", 0.0), PUNCH_MAX_DB)
+    part = punch["mix_kicks" if kicks == "mix" else "kicks"]
+    if part["available"] and boost > 0:
+        band, attack = subbass.punch_gains(punch["energy"], part["cross"],
+                                           part["attack_energy"], boost)
+        # On the drum stem, so it moves with the drum fader.
+        gains["punch_band"] = gains["drums"] * band
+        gains["punch_" + ("mix" if kicks == "mix" else "drum") + "_kicks"] = (
+            gains["drums"] * attack)
     lift = info["air"]
-    amount = min(max(float(choice.get("air_db", 0.0)), 0.0), AIR_MAX_DB)
-    gains["air"] = 0.0
+    amount = _clamp(choice.get("air_db", 0.0), AIR_MAX_DB)
     if lift["available"] and amount > 0:
         gains["air"] = air.gain_from_stats(lift["before"], lift["cross"],
                                            lift["added"], amount)
@@ -184,9 +230,11 @@ def prepare(job: dict, bundle: Path, separate=None) -> dict:
     asked_sub = float(job.get("amount", 0.0))
     asked_air = float(job.get("air", 0.0))
     # The kicks are chosen only for a sub that is asked for; a sub slider
-    # starting at 0 can still be moved, so it is planned as if asked.
-    run = {**job, "stem_kicks": True, "skip": None, "compare": False,
-           "dry_run": False}
+    # starting at 0 can still be moved, so it is planned as if asked. Both
+    # ways of finding kicks, and the bass line, are laid out whatever the
+    # settings say, so the sheet can switch between them live.
+    run = {**job, "stem_kicks": True, "bass_sub": True, "skip": None,
+           "compare": False, "dry_run": False}
     staged = render._front(run, original, asked_sub if asked_sub > 0 else 1.0)
     base = staged["audio"]
 
@@ -195,26 +243,75 @@ def prepare(job: dict, bundle: Path, separate=None) -> dict:
         layers[name] = parts[name]
     del parts
 
-    sub_info = {"available": False, "note": staged["skip"], "kick": False,
-                "energy": 0.0, "tone_cross": 0.0, "tone_energy": 0.0,
-                "kick_cross": 0.0, "kick_energy": 0.0}
+    def part(available=False, cross=0.0, energy=0.0, note=None):
+        return {"available": bool(available), "cross": cross,
+                "energy": energy, "note": note}
+
+    sub_info = {"available": False, "note": staged["skip"], "energy": 0.0,
+                "tone": part(), "kicks": part(), "mix_kicks": part(),
+                "kicks_per_minute": 0.0, "mix_kicks_per_minute": 0.0,
+                "bass_share": 0.0, "bass_note": staged["bass_note"]}
+    drum_found = staged["found"]
+    mix_found = subbass.detect_kicks(base, rate, None)
     if staged["skip"] is None:
         sub = subbass.sub_layers(base, rate, staged["freq"], staged["decay"],
-                                 drums=staged["drums"], kicks=staged["found"],
+                                 drums=staged["drums"], kicks=drum_found,
                                  bassline=staged["following"])
-        sub_info.update(available=sub["available"], note=sub["note"],
-                        kicks_per_minute=sub["report"].get("kicks_per_minute"),
-                        bass_share=sub["report"].get("bass_share"),
-                        polarity_flipped=sub["report"].get("polarity_flipped"))
+        mixed = subbass.sub_layers(base, rate, job["freq"], job["decay"],
+                                   kicks=mix_found)
+        # The sub of a run with kicks from the drum track. The kicks are
+        # the bursts; the tone is the bass line's, where there is one.
         if sub["available"]:
-            layers["sub_tone"] = sub["tone"]
+            sub_info["energy"] = sub["energy"]
+            stats = part(True, sub["tone_cross"], sub["tone_energy"])
             if sub["kick"] is not None:
+                layers["sub_tone"], sub_info["tone"] = sub["tone"], stats
                 layers["sub_kick"] = sub["kick"]
-            sub_info.update(kick=sub["kick"] is not None, energy=sub["energy"],
-                            tone_cross=sub["tone_cross"],
-                            tone_energy=sub["tone_energy"],
-                            kick_cross=sub["kick_cross"],
-                            kick_energy=sub["kick_energy"])
+                sub_info["kicks"] = part(True, sub["kick_cross"], sub["kick_energy"])
+            elif sub["tone_kind"] == "bass":
+                layers["sub_tone"], sub_info["tone"] = sub["tone"], stats
+                sub_info["kicks"]["note"] = "too few kicks on the drum track"
+            else:
+                layers["sub_kick"], sub_info["kicks"] = sub["tone"], stats
+                sub_info["tone"]["note"] = (staged["bass_note"]
+                                            or "no bass line to follow")
+            sub_info["bass_share"] = sub["report"].get("bass_share", 0.0)
+        else:
+            sub_info["kicks"]["note"] = sub["note"]
+        sub_info["kicks_per_minute"] = sub["report"].get("kicks_per_minute", 0.0)
+        if mixed["available"]:
+            sub_info["energy"] = sub_info["energy"] or mixed["energy"]
+            layers["sub_mix_kick"] = mixed["tone"]
+            sub_info["mix_kicks"] = part(True, mixed["tone_cross"],
+                                         mixed["tone_energy"])
+        else:
+            sub_info["mix_kicks"]["note"] = mixed["note"]
+        sub_info["mix_kicks_per_minute"] = mixed["report"].get("kicks_per_minute", 0.0)
+        sub_info["available"] = (sub["available"] or mixed["available"])
+        if not sub_info["available"]:
+            sub_info["note"] = sub["note"]
+
+    # Punch, on the drum stem, at each set of kicks.
+    decay_ms = float(job.get("punch_decay", subbass.DEFAULT_PUNCH_DECAY_MS))
+    punch_info = {"decay_ms": decay_ms, "energy": 0.0,
+                  "kicks": {"available": False, "cross": 0.0, "attack_energy": 0.0},
+                  "mix_kicks": {"available": False, "cross": 0.0, "attack_energy": 0.0}}
+    for key, found, name in (("kicks", drum_found, "punch_drum_kicks"),
+                             ("mix_kicks", mix_found, "punch_mix_kicks")):
+        if found is None or np.asarray(found[0]).size < 8:
+            punch_info[key]["note"] = "too few kicks"
+            continue
+        shaped = subbass.punch_layers(layers["drums"], rate, found[0], found[1],
+                                      decay_ms)
+        if shaped["energy"] <= 0:
+            punch_info[key]["note"] = "nothing in 2-6 kHz on the drum track"
+            continue
+        layers["punch_band"] = shaped["band"]
+        layers[name] = shaped["attack"]
+        punch_info["energy"] = shaped["energy"]
+        punch_info[key] = {"available": True, "cross": shaped["cross"],
+                           "attack_energy": shaped["attack_energy"]}
+        del shaped
 
     tune = float(job.get("air_tune", air.DEFAULT_TUNE_HZ))
     guide, air_note = None, None
@@ -236,9 +333,9 @@ def prepare(job: dict, bundle: Path, separate=None) -> dict:
         if name in layers:
             files[name] = f"{name}.wav"
             _write(bundle / files[name], layers[name])
-    found = staged["found"]
-    if found is not None:
-        np.save(bundle / "kicks.npy", np.asarray(found[0]))
+    if drum_found is not None:
+        np.save(bundle / "kicks.npy", np.asarray(drum_found[0]))
+    np.save(bundle / "mix_kicks.npy", np.asarray(mix_found[0]))
     info = _plain({
         "version": VERSION, "key": stems.audio_key(original),
         "path": str(source), "name": job.get("name"), "rate": rate,
@@ -246,10 +343,16 @@ def prepare(job: dict, bundle: Path, separate=None) -> dict:
         "seconds": round(original.shape[0] / rate, 3),
         "files": files, "stems": list(STEMS),
         "limits": {"floor_db": FLOOR_DB, "level_max_db": LEVEL_MAX_DB,
-                   "sub_max_db": SUB_MAX_DB, "air_max_db": AIR_MAX_DB},
-        "defaults": {"sub_db": min(max(asked_sub, 0.0), SUB_MAX_DB),
-                     "air_db": min(max(asked_air, 0.0), AIR_MAX_DB)},
-        "sub": {**sub_info, "freq": staged["freq"], "decay": staged["decay"]},
+                   "sub_max_db": SUB_MAX_DB, "air_max_db": AIR_MAX_DB,
+                   "punch_max_db": PUNCH_MAX_DB},
+        "defaults": {"sub_db": _clamp(asked_sub, SUB_MAX_DB),
+                     "air_db": _clamp(asked_air, AIR_MAX_DB),
+                     "punch_db": _clamp(job.get("punch", 0.0), PUNCH_MAX_DB),
+                     "kicks": "drums" if job.get("stem_kicks") else "mix",
+                     "bassline": bool(job.get("stem_kicks") and job.get("bass_sub"))},
+        "sub": {**sub_info, "freq": staged["freq"], "decay": staged["decay"],
+                "mix_freq": job["freq"], "mix_decay": job["decay"]},
+        "punch": punch_info,
         "air": air_info,
         "front": {"clip": staged["clip"], "range": staged["ranged"],
                   "transient": staged["shaped"], "mud": staged["cleared"],
@@ -266,9 +369,14 @@ def describe(choice: dict) -> str:
     def one(name):
         db = float(levels.get(name, 0.0))
         return f"{name} {'off' if level_gain(db) == 0 else f'{db:+.1f}'}"
+    kicks = kicks_of(choice)
+    follows = ("kicks on the full mix" if kicks == "mix"
+               else "kicks on the drum track"
+               + (" and the bass line" if choice.get("bassline", True) else ""))
     return ("stem mix: " + ", ".join(one(n) for n in STEMS)
-            + f"; sub {float(choice.get('sub_db', 0.0)):+.1f}, "
-              f"air {float(choice.get('air_db', 0.0)):+.1f}")
+            + f"; sub {_clamp(choice.get('sub_db', 0.0), SUB_MAX_DB):+.1f} under "
+              f"{follows}, punch {_clamp(choice.get('punch_db', 0.0), PUNCH_MAX_DB):+.1f}, "
+              f"air {_clamp(choice.get('air_db', 0.0), AIR_MAX_DB):+.1f}")
 
 
 def commit(job: dict, original: np.ndarray, measure=None) -> dict:
@@ -289,16 +397,25 @@ def commit(job: dict, original: np.ndarray, measure=None) -> dict:
     unity = {name: 1.0 for name in stem_part}
     base = mix(layers, unity, stem_part)
     levelled = mix(layers, gains, stem_part)
-    with_sub = mix(layers, gains, stem_part + ("sub_tone", "sub_kick"))
+    with_sub = mix(layers, gains, stem_part + SUB_LAYERS)
     after = mix(layers, gains)
 
-    sub_db = min(max(float(choice.get("sub_db", 0.0)), 0.0), SUB_MAX_DB)
-    air_db = min(max(float(choice.get("air_db", 0.0)), 0.0), AIR_MAX_DB)
+    sub_db = _clamp(choice.get("sub_db", 0.0), SUB_MAX_DB)
+    air_db = _clamp(choice.get("air_db", 0.0), AIR_MAX_DB)
+    by_mix = kicks_of(choice) == "mix"
     report = subbass._blank_report(sub_db)
     report["note"] = describe(choice)
-    report["kicks_per_minute"] = float(info["sub"].get("kicks_per_minute") or 0.0)
-    report["bass_share"] = float(info["sub"].get("bass_share") or 0.0)
-    if gains["sub_tone"] or gains["sub_kick"]:
+    report["kicks_per_minute"] = float(info["sub"].get(
+        "mix_kicks_per_minute" if by_mix else "kicks_per_minute") or 0.0)
+    report["bass_share"] = (float(info["sub"].get("bass_share") or 0.0)
+                            if gains["sub_tone"] else 0.0)
+    attack = gains["punch_mix_kicks" if by_mix else "punch_drum_kicks"]
+    if attack:
+        punch_db = _clamp(choice.get("punch_db", 0.0), PUNCH_MAX_DB)
+        k = 10 ** (punch_db / 20) - 1.0
+        trim = attack / gains["drums"] / k
+        report.update(punch_db=punch_db, sustain_trim_db=float(20 * np.log10(trim)))
+    if any(gains[name] for name in SUB_LAYERS):
         was = subbass._band_power(levelled, rate, subbass.SUB_LOW_HZ, subbass.SUB_HIGH_HZ)
         now = subbass._band_power(with_sub, rate, subbass.SUB_LOW_HZ, subbass.SUB_HIGH_HZ)
         if was > 0 and now > 0:
@@ -312,13 +429,13 @@ def commit(job: dict, original: np.ndarray, measure=None) -> dict:
         aired.update(applied=True, amount_db=air_db, tune_hz=lift["tune_hz"],
                      guided=lift["guided"], note=None,
                      measured_db=float(10 * np.log10(now / lift["before"])))
-    kicks = bundle / "kicks.npy"
+    kicks = bundle / ("mix_kicks.npy" if by_mix else "kicks.npy")
     front = info["front"]
     return {"audio": base, "amount": sub_db, "skip": None, "note_skip": None,
             "clip": front["clip"], "drums": None,
             "found": (np.load(kicks), None) if kicks.exists() else None,
-            "selection": None, "freq": info["sub"]["freq"],
-            "decay": info["sub"]["decay"], "voice": None, "following": None,
+            "selection": None, "freq": info["sub"]["mix_freq" if by_mix else "freq"],
+            "decay": info["sub"]["mix_decay" if by_mix else "decay"], "voice": None, "following": None,
             "bass_note": None, "ranged": front["range"],
             "shaped": front["transient"], "cleared": front["mud"],
             "bodied": front["body"], "after": after, "info": report,

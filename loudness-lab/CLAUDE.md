@@ -367,8 +367,15 @@ by `StemMix.quadraticGain`). Commit runs `subbass --stem-mix choice.json`,
 which builds the track from the same layers at the same gains and then
 levels and writes as usual. `tests/test_stemmix.py` holds commit == preview
 (to the FLAC's quantisation) and fails on a neighbouring setting;
-`StemMixTests.swift` holds the app's gains to the Python's. Punch and the
-sub's safety trim are not part of it. The `_sub_plan`/`_air_plan` split was
+`StemMixTests.swift` holds the app's gains to the Python's. Kicks from
+(drum track / full mix) and "follows the bass line" are live too: preview
+always lays out both kick sets and the bass line (`sub_kick`, `sub_tone`,
+`sub_mix_kick`); bass line off is the tone's gain at zero, which IS a run
+without `--bass-sub` (the kicks are sized to the full amount either way).
+Punch is `subbass.punch_layers` -- shape_attacks is linear in two layers
+(band, band x attack envelope) with a closed-form renormalising trim
+(`punch_gains`) -- but on the DRUM STEM only and scaled by the drum fader,
+unlike a run's whole-mix 2-6 kHz. The sub's safety trim is not part of it. The `_sub_plan`/`_air_plan` split was
 checked bit-identical against the previous `enhance`/`excite` -- keep it
 so: `subbass.gain_from_stats` must return numpy's float64, not a Python
 float -- under NumPy 2 a Python float leaves `sub * gain` in float32 where

@@ -78,25 +78,70 @@ class TestMapping(unittest.TestCase):
         got = [round(subbass.gain_from_stats(*v), 9) for v in VECTORS]
         self.assertEqual(got, [1.959172344, 1.905663659, 6.092809681, 0.0, 0.0])
 
+    INFO = {"sub": {"available": True, "energy": 2.5e-3,
+                    "tone": {"available": True, "cross": 4.0e-4, "energy": 1.0e-3},
+                    "kicks": {"available": True, "cross": -3.0e-4, "energy": 1.0e-3},
+                    "mix_kicks": {"available": True, "cross": 1.0e-4, "energy": 2.0e-3}},
+            "punch": {"energy": 1.0e-4,
+                      "kicks": {"available": True, "cross": 2.0e-5, "attack_energy": 3.0e-5},
+                      "mix_kicks": {"available": True, "cross": 1.0e-5,
+                                    "attack_energy": 1.0e-5}},
+            "air": {"available": False}}
+
     def test_layer_gains_follow_the_choice(self):
-        info = {"sub": {"available": True, "kick": True, "energy": 2.5e-3,
-                        "tone_cross": 4.0e-4, "tone_energy": 1.0e-3,
-                        "kick_cross": -3.0e-4, "kick_energy": 1.0e-3},
-                "air": {"available": False}}
+        info = self.INFO
         gains = stemmix.layer_gains(info, {"levels_db": {"drums": -6, "vocals": -40},
                                            "sub_db": 5, "air_db": 3})
+        self.assertEqual(set(gains), set(stemmix.LAYERS))
         self.assertEqual(gains["residual"], 1.0)
         self.assertAlmostEqual(gains["drums"], 0.501187, places=5)
         self.assertEqual(gains["bass"], 1.0)
         self.assertEqual(gains["vocals"], 0.0)
         self.assertAlmostEqual(gains["sub_tone"], 1.959172344, places=8)
         self.assertGreater(gains["sub_kick"], 0.0)
+        self.assertEqual(gains["sub_mix_kick"], 0.0)
         self.assertEqual(gains["air"], 0.0)       # nothing to make air from
+        self.assertEqual([gains[n] for n in stemmix.PUNCH_LAYERS], [0.0] * 3)
         off = stemmix.layer_gains(info, {"sub_db": 0})
         self.assertEqual((off["sub_tone"], off["sub_kick"]), (0.0, 0.0))
         capped = stemmix.layer_gains(info, {"sub_db": 99})
         self.assertEqual(capped["sub_tone"], stemmix.layer_gains(
             info, {"sub_db": stemmix.SUB_MAX_DB})["sub_tone"])
+
+    def test_the_kicks_and_the_bass_line(self):
+        info = self.INFO
+        both = stemmix.layer_gains(info, {"sub_db": 5})
+        alone = stemmix.layer_gains(info, {"sub_db": 5, "bassline": False})
+        mixed = stemmix.layer_gains(info, {"sub_db": 5, "kicks": "mix",
+                                           "bassline": True})
+        # Not following the bass line takes the tone out and nothing else:
+        # the kicks carry the whole amount either way.
+        self.assertEqual(alone["sub_tone"], 0.0)
+        self.assertEqual(alone["sub_kick"], both["sub_kick"])
+        # Kicks in the full mix: their own sub, and no bass line.
+        self.assertEqual((mixed["sub_tone"], mixed["sub_kick"]), (0.0, 0.0))
+        self.assertAlmostEqual(mixed["sub_mix_kick"], subbass.gain_from_stats(
+            2.5e-3, 1.0e-4, 2.0e-3, 5.0), places=12)
+
+    def test_punch_gains(self):
+        info = self.INFO
+        g = stemmix.layer_gains(info, {"punch_db": 6, "levels_db": {"drums": -6}})
+        band, attack = subbass.punch_gains(1.0e-4, 2.0e-5, 3.0e-5, 6.0)
+        self.assertAlmostEqual(g["punch_band"], g["drums"] * band, places=12)
+        self.assertAlmostEqual(g["punch_drum_kicks"], g["drums"] * attack, places=12)
+        self.assertEqual(g["punch_mix_kicks"], 0.0)
+        # The band comes out with the energy it went in with.
+        k = 10 ** 0.3 - 1
+        trim, B, C, D = 1 + band, 1.0e-4, 2.0e-5, 3.0e-5
+        self.assertAlmostEqual(attack, trim * k, places=12)
+        self.assertAlmostEqual(trim * trim * (B + 2 * k * C + k * k * D), B, places=15)
+        m = stemmix.layer_gains(info, {"punch_db": 6, "kicks": "mix"})
+        self.assertEqual(m["punch_drum_kicks"], 0.0)
+        self.assertGreater(m["punch_mix_kicks"], 0.0)
+        self.assertEqual(stemmix.layer_gains(info, {"punch_db": 99})["punch_band"],
+                         stemmix.layer_gains(info, {"punch_db": 10})["punch_band"])
+        self.assertEqual(stemmix.layer_gains(
+            info, {"punch_db": 6, "levels_db": {"drums": -40}})["punch_band"], 0.0)
 
 
 class TestTheLayersAreTheChain(unittest.TestCase):
@@ -135,15 +180,48 @@ class TestTheLayersAreTheChain(unittest.TestCase):
         out, report = subbass.enhance(mix, RATE, amount_db=4.0, kicks=kicks,
                                       bassline=(tone, 0.4))
         out = out / 10 ** (report["safety_trim_db"] / 20)
-        info = {"sub": {"available": True, "kick": True,
-                        **{k: layers[k] for k in ("energy", "tone_cross", "tone_energy",
-                                                  "kick_cross", "kick_energy")}},
+        info = {"sub": {"available": True, "energy": layers["energy"],
+                        "tone": {"available": True, "cross": layers["tone_cross"],
+                                 "energy": layers["tone_energy"]},
+                        "kicks": {"available": True, "cross": layers["kick_cross"],
+                                  "energy": layers["kick_energy"]},
+                        "mix_kicks": {"available": False}},
+                "punch": {"kicks": {"available": False}},
                 "air": {"available": False}}
         gains = stemmix.layer_gains(info, {"sub_db": 4.0})
         self.assertAlmostEqual(gains["sub_kick"], report["kick_gain"], places=6)
         built = (mix + gains["sub_tone"] * stemmix._stereo(layers["tone"])
                  + gains["sub_kick"] * stemmix._stereo(layers["kick"]))
         self.assertSameAudio(built, out)
+
+    def test_the_kicks_alone_are_a_run_without_the_bass_line(self):
+        from loudnesslab import bassline
+        n = self.x.shape[0]
+        bass, _ = _line(repeats=1)
+        bass = np.pad(bass, ((0, max(0, n - bass.shape[0])), (0, 0)))[:n]
+        tone, _ = bassline.tone(bass, RATE, n)
+        mix = (0.7 * self.x + 0.3 * bass).astype(np.float32)
+        kicks = subbass.detect_kicks(mix, RATE)
+        layers = subbass.sub_layers(mix, RATE, kicks=kicks, bassline=(tone, 0.4))
+        out, report = subbass.enhance(mix, RATE, amount_db=4.0, kicks=kicks)
+        out = out / 10 ** (report["safety_trim_db"] / 20)
+        g = subbass.gain_from_stats(layers["energy"], layers["kick_cross"],
+                                    layers["kick_energy"], 4.0)
+        self.assertSameAudio(mix + g * stemmix._stereo(layers["kick"]), out)
+
+    def test_punch(self):
+        kicks, strengths = subbass.detect_kicks(self.x, RATE)
+        for boost, decay in ((3.0, 8.0), (8.0, 20.0)):
+            with self.subTest(boost=boost):
+                out, report = subbass.shape_attacks(self.x, RATE, kicks, strengths,
+                                                    boost, decay)
+                layers = subbass.punch_layers(self.x, RATE, kicks, strengths, decay)
+                band, attack = subbass.punch_gains(
+                    layers["energy"], layers["cross"], layers["attack_energy"], boost)
+                self.assertAlmostEqual(20 * np.log10(1 + band),
+                                       report["sustain_trim_db"], places=6)
+                self.assertSameAudio(self.x + band * layers["band"]
+                                     + attack * layers["attack"], out)
 
     def test_air(self):
         for guide in (None, np.linspace(0.2, 1.0, self.x.shape[0])):
@@ -183,7 +261,8 @@ class TestCommitIsWhatWasHeard(unittest.TestCase):
         cls.listing.write_text(str(cls.track) + "\n")
         cls.bundle = cls.dir / "bundle"
         code, cls.events = cls._cli(
-            "--stem-preview", str(cls.bundle), "--amount", "4", "--air", "3")
+            "--stem-preview", str(cls.bundle), "--amount", "4", "--air", "3",
+            "--punch", "2", "--stem-kicks")
         assert code == 0, cls.events
         cls.info = stemmix.read_info(cls.bundle)
 
@@ -221,45 +300,69 @@ class TestCommitIsWhatWasHeard(unittest.TestCase):
         self.assertEqual(self.events[-1]["event"], "stem_preview")
         self.assertFalse((self.dir / "out").exists()
                          and any((self.dir / "out").iterdir()))
-        self.assertEqual(set(self.info["files"]) - {"sub_kick"},
+        self.assertEqual(set(self.info["files"]) - {"sub_tone"},
                          {"residual", "drums", "bass", "other", "vocals",
-                          "sub_tone", "air"})
+                          "sub_kick", "sub_mix_kick", "punch_band",
+                          "punch_drum_kicks", "punch_mix_kicks", "air"})
         self.assertTrue(self.info["sub"]["available"])
+        self.assertTrue(self.info["sub"]["kicks"]["available"])
+        self.assertTrue(self.info["sub"]["mix_kicks"]["available"])
+        self.assertTrue(self.info["punch"]["kicks"]["available"])
         self.assertTrue(self.info["air"]["available"])
-        self.assertEqual(self.info["defaults"], {"sub_db": 4.0, "air_db": 3.0})
+        self.assertEqual(self.info["defaults"],
+                         {"sub_db": 4.0, "air_db": 3.0, "punch_db": 2.0,
+                          "kicks": "drums", "bassline": False})
 
     def test_at_unity_the_stems_sum_back_to_the_track(self):
         decoded = decode.decode(self.track)
         heard = self.preview({"sub_db": 0, "air_db": 0})
         self.assertLess(float(np.max(np.abs(heard - decoded))), 1e-6)
 
-    def test_the_committed_track_is_the_preview(self):
-        choice = {"bundle": str(self.bundle), "sub_db": 5.0, "air_db": 2.0,
-                  "levels_db": {"drums": -4.0, "bass": 3.0, "other": 0.0,
-                                "vocals": -60.0}}
-        chosen = self.dir / "choice.json"
-        chosen.write_text(json.dumps(choice))
+    def commit(self, choice, name):
+        chosen = self.dir / f"{name}.json"
+        chosen.write_text(json.dumps({"bundle": str(self.bundle), **choice}))
         code, events = self._cli("--stem-mix", str(chosen), "--no-compare",
                                  "--peak-limit", "0", "--amount", "0",
-                                 "--air", "0", out="committed")
+                                 "--air", "0", "--punch", "0", out=name)
         self.assertEqual(code, 0, events)
-        manifest = json.loads((self.dir / "committed" / "manifest.json").read_text())
+        manifest = json.loads((self.dir / name / "manifest.json").read_text())
         track = manifest["tracks"][0]
         written = decode.decode(Path(track["variants"][0]["path"]))
-        unlevelled = written / 10 ** (track["gain_db"] / 20)
+        return written / 10 ** (track["gain_db"] / 20), track
 
+    def test_the_committed_track_is_the_preview(self):
+        choice = {"sub_db": 5.0, "air_db": 2.0, "punch_db": 4.0,
+                  "kicks": "drums", "bassline": True,
+                  "levels_db": {"drums": -4.0, "bass": 3.0, "other": 0.0,
+                                "vocals": -60.0}}
+        unlevelled, track = self.commit(choice, "committed")
         heard = self.preview(choice)
         error = float(np.max(np.abs(unlevelled - heard)))
         self.assertLess(error, 2e-4)
         # And not the preview at a neighbouring setting: a test that every
         # mix passed would prove nothing.
         for near in ({**choice, "levels_db": {**choice["levels_db"], "drums": -3.0}},
-                     {**choice, "sub_db": 4.5}, {**choice, "air_db": 2.5}):
+                     {**choice, "sub_db": 4.5}, {**choice, "air_db": 2.5},
+                     {**choice, "punch_db": 3.0}, {**choice, "kicks": "mix"}):
             other = float(np.max(np.abs(unlevelled - self.preview(near))))
-            self.assertGreater(other, 10 * error)
+            self.assertGreater(other, 10 * error, near)
         # What the results row says was done.
         self.assertIn("stem mix", track["sub_note"] or "")
+        self.assertIn("kicks on the drum track", track["sub_note"])
         self.assertAlmostEqual(track["air_db"], 2.0, places=1)
+        self.assertAlmostEqual(track["punch_db"], 4.0, places=3)
+
+    def test_kicks_from_the_full_mix(self):
+        choice = {"sub_db": 6.0, "air_db": 0.0, "punch_db": 5.0, "kicks": "mix",
+                  "levels_db": {"drums": 2.0}}
+        unlevelled, track = self.commit(choice, "by-mix")
+        heard = self.preview(choice)
+        error = float(np.max(np.abs(unlevelled - heard)))
+        self.assertLess(error, 2e-4)
+        other = float(np.max(np.abs(unlevelled - self.preview(
+            {**choice, "kicks": "drums"}))))
+        self.assertGreater(other, 10 * error)
+        self.assertIn("kicks on the full mix", track["sub_note"])
 
     def test_a_bundle_for_other_audio_is_refused(self):
         other = self.dir / "other-src"

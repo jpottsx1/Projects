@@ -1,7 +1,8 @@
 import SwiftUI
 
-/// The stem mix, as a sheet over the window: four stem faders, Bass and
-/// Air, a transport, and Commit or Cancel. See `StemMixSession` and
+/// The stem mix, as a sheet over the window: four stem faders, Bass,
+/// where the kicks come from and whether the sub follows the bass line,
+/// Punch and Air, a transport, and Commit or Cancel. See `StemMixSession` and
 /// `Help.stemMix` for what happens underneath.
 struct StemMixPanel: View {
     @StateObject private var session: StemMixSession
@@ -100,7 +101,7 @@ struct StemMixPanel: View {
         HStack {
             Button("Reset") { session.reset() }
                 .disabled(!ready || !session.hasChanged)
-                .help("Every stem back to 0 dB, Bass and Air back to what the settings give this track.")
+                .help("Every stem back to 0 dB; Bass, Punch, Air and the kicks back to what the settings give this track.")
             Spacer()
             Button("Cancel") { session.cancel(); close() }
                 .keyboardShortcut(.cancelAction)
@@ -111,7 +112,7 @@ struct StemMixPanel: View {
             .keyboardShortcut(.defaultAction)
             .disabled(!ready || busy)
             .help(busy ? "A run is going; Commit when it has finished."
-                  : "Write this track with these levels, this Bass and this Air.")
+                  : "Write this track with these levels, this Bass, Punch and Air.")
         }
     }
 
@@ -137,6 +138,15 @@ struct StemMixPanel: View {
                             zero: bundle.defaults.subDB, enabled: bundle.sub.available)
                     if !bundle.sub.available {
                         note("No sub for this track: \(bundle.sub.note ?? "nothing to put it under").")
+                    }
+                    kickControls(bundle)
+                    control("Punch", value: amount(\.punchDB), range: 0...limits.punchMaxDB,
+                            readout: String(format: "+%.1f dB", session.choice?.punchDB ?? 0),
+                            zero: bundle.defaults.punchDB,
+                            enabled: bundle.punchPart(kicks).available)
+                        .help(Help.punch.summary + " Here it shapes the drum track only.")
+                    if let why = bundle.punchPart(kicks).note, !bundle.punchPart(kicks).available {
+                        note("No punch with these kicks: \(why).")
                     }
                     control("Air", value: amount(\.airDB), range: 0...limits.airMaxDB,
                             readout: String(format: "+%.1f dB", session.choice?.airDB ?? 0),
@@ -165,6 +175,42 @@ struct StemMixPanel: View {
         }
         .disabled(!enabled)
         .opacity(enabled ? 1 : 0.5)
+    }
+
+    private var kicks: StemMix.Kicks { session.choice?.kicks ?? .drums }
+
+    /// Where the kicks are found, and whether the sub follows the bass
+    /// line too -- the settings' two switches, heard live.
+    @ViewBuilder private func kickControls(_ bundle: StemMix.Bundle) -> some View {
+        HStack(spacing: 10) {
+            Text("Kicks from").frame(width: 90, alignment: .leading)
+            Picker("Kicks from", selection: Binding(
+                get: { kicks }, set: { session.choice?.kicks = $0 })) {
+                ForEach(StemMix.Kicks.allCases) { Text($0.label).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .fixedSize()
+            Spacer()
+        }
+        .help(Help.stemKicks.summary)
+        if bundle.sub.available, let why = bundle.subPart(kicks).note,
+           !bundle.subPart(kicks).available {
+            note("No sub under these kicks: \(why).")
+        }
+        HStack(spacing: 10) {
+            Spacer().frame(width: 90)
+            Toggle("Sub follows the bass line too", isOn: Binding(
+                get: { (session.choice?.bassline ?? false) && kicks == .drums },
+                set: { session.choice?.bassline = $0 }))
+            Spacer()
+        }
+        .disabled(kicks != .drums || !bundle.sub.tone.available || !bundle.sub.available)
+        .help(kicks == .drums ? Help.bassSub.summary
+              : "Following the bass line needs the kicks from the drum track.")
+        if kicks == .drums, bundle.sub.available, !bundle.sub.tone.available {
+            note("No bass line to follow: \(bundle.sub.tone.note ?? "none found").")
+        }
     }
 
     private func note(_ text: String) -> some View {

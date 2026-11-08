@@ -624,6 +624,19 @@ def attack_contrast(x: np.ndarray, rate: int, kicks: np.ndarray,
     return float(20 * np.log10(np.median(peaks) / baseline))
 
 
+def _punch_shape(rate: int, decay_ms: float, scale: float) -> np.ndarray:
+    """One kick's attack emphasis: `scale` falling away over `decay_ms`,
+    ramped in. `shape_attacks` adds one per kick to an envelope of 1."""
+    decay = decay_ms / 1000.0
+    length = max(2, int(decay * 5 * rate))
+    t = np.arange(length) / rate
+    shape = scale * np.exp(-t / decay)
+    ramp = int(PUNCH_RAMP_S * rate)
+    if ramp > 1:
+        shape[:ramp] *= 0.5 - 0.5 * np.cos(np.pi * np.arange(ramp) / ramp)
+    return shape
+
+
 def shape_attacks(x: np.ndarray, rate: int, kicks: np.ndarray,
                   strengths: np.ndarray, boost_db: float,
                   decay_ms: float = DEFAULT_PUNCH_DECAY_MS,
@@ -656,13 +669,8 @@ def shape_attacks(x: np.ndarray, rate: int, kicks: np.ndarray,
     rest = x - band
 
     envelope = np.ones(x.shape[0], dtype=np.float64)
-    decay = decay_ms / 1000.0
-    length = max(2, int(decay * 5 * rate))
-    t = np.arange(length) / rate
-    shape = (10 ** (boost_db / 20) - 1.0) * np.exp(-t / decay)
-    ramp = int(PUNCH_RAMP_S * rate)
-    if ramp > 1:
-        shape[:ramp] *= 0.5 - 0.5 * np.cos(np.pi * np.arange(ramp) / ramp)
+    shape = _punch_shape(rate, decay_ms, 10 ** (boost_db / 20) - 1.0)
+    length = shape.size
     for offset, strength in zip(kicks, strengths):
         end = min(x.shape[0], offset + length)
         if end > offset:
@@ -678,6 +686,45 @@ def shape_attacks(x: np.ndarray, rate: int, kicks: np.ndarray,
         info["band_level_change_db"] = float(
             10 * np.log10(np.mean(shaped.astype(np.float64) ** 2) / before))
     return (rest + shaped).astype(np.float32), info
+
+
+def punch_layers(x: np.ndarray, rate: int, kicks: np.ndarray,
+                 strengths: np.ndarray,
+                 decay_ms: float = DEFAULT_PUNCH_DECAY_MS,
+                 low: float = PUNCH_LOW_HZ, high: float = PUNCH_HIGH_HZ) -> dict:
+    """`shape_attacks` as two layers whose gains are a function of the
+    boost alone -- for the stem mix, which turns punch up and down live.
+
+    With k = 10^(boost/20) - 1 and E the attack envelope at k = 1,
+    shape_attacks returns  x - band + trim * (band + k * band * E),  and
+    trim = sqrt(B / (B + 2kC + k^2 D)) from the band's energy B, its cross
+    term with the attack layer C, and the attack layer's energy D. So
+    x + (trim - 1) * band + trim * k * attack, gains from `punch_gains`."""
+    sos = butter(4, [low, high], btype="band", fs=rate, output="sos")
+    band = sosfiltfilt(sos, x, axis=0)
+    envelope = np.zeros(x.shape[0], dtype=np.float64)
+    shape = _punch_shape(rate, decay_ms, 1.0)
+    for offset, strength in zip(kicks, strengths):
+        end = min(x.shape[0], offset + shape.size)
+        if end > offset:
+            envelope[offset:end] += shape[:end - offset] * strength
+    attack = band * (envelope[:, None] if band.ndim == 2 else envelope)
+    return {"band": band.astype(np.float32), "attack": attack.astype(np.float32),
+            "energy": float(np.mean(band.astype(np.float64) ** 2)),
+            "cross": float(np.mean(band.astype(np.float64) * attack)),
+            "attack_energy": float(np.mean(attack.astype(np.float64) ** 2))}
+
+
+def punch_gains(energy: float, cross: float, attack_energy: float,
+                boost_db: float) -> tuple[float, float]:
+    """(band gain, attack gain) for `punch_layers` at `boost_db`: what
+    shape_attacks does, the band renormalised to the energy it had."""
+    if boost_db <= 0 or energy <= 0:
+        return 0.0, 0.0
+    k = 10 ** (boost_db / 20) - 1.0
+    after = energy + 2 * k * cross + k * k * attack_energy
+    trim = float(np.sqrt(energy / after)) if after > 0 else 1.0
+    return trim - 1.0, trim * k
 
 
 def _blank_report(amount_db: float) -> dict:
@@ -917,7 +964,12 @@ def sub_layers(x: np.ndarray, rate: int, freq: float = DEFAULT_FREQ_HZ,
            "tone_cross": float(np.mean(track_band * sub_band)),
            "tone_energy": float(np.mean(sub_band ** 2)),
            "tone": sub.astype(np.float32), "kick": None,
-           "kick_cross": 0.0, "kick_energy": 0.0}
+           "kick_cross": 0.0, "kick_energy": 0.0,
+           # What the `tone` layer is: the bass line's tone (with the kicks
+           # apart in `kick`, or with too few kicks to have any), or the
+           # kicks' bursts alone.
+           "tone_kind": ("bass" if plan["has_tone"]
+                         and (plan["kicks"].size < 8 or share > 0) else "kicks")}
     if plan["has_tone"] and plan["kicks"].size >= 8 and share > 0:
         # As `_kicks_at_full_lift`: the kicks' share of the mixed sub comes
         # out of the tone layer and goes back in as a layer of its own,

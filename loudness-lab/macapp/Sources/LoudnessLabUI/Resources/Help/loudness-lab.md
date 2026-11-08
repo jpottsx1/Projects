@@ -798,13 +798,15 @@ Knowing which is the processed one biases you toward hearing what you expected. 
 
 ### Stem Mix
 
-*Split one track into drums, bass, melody and vocals, set their levels and the Bass and Air by ear, then Commit.*
+*Split one track into drums, bass, melody and vocals, set their levels, the Bass, Punch and Air by ear, then Commit.*
 
-Highlight a track in the list and press Stem Mix… (or right-click it). The track is split into four stems -- drums, bass guitar, melody (everything else that is not a voice) and vocals -- which takes about a minute. Then it plays, and every control is heard the moment it moves: the four faders, Bass (the sub under the kicks and the bass notes) and Air (the harmonics in the top octave).
+Highlight a track in the list and press Stem Mix… (or right-click it). The track is split into four stems -- drums, bass guitar, melody (everything else that is not a voice) and vocals -- which takes about a minute. Then it plays, and every control is heard the moment it moves: the four faders, Bass (the sub under the kicks and the bass notes), where the kicks are found, whether the sub follows the bass line, Punch and Air (the harmonics in the top octave).
+
+Kicks from is the setting "Find kicks on the drum track", switched live: Drum track finds them on the separated drums, Full mix in the whole track, and the sub and Punch both follow the choice. "Sub follows the bass line too" adds the tone under the bass notes; the kicks get their full amount either way, and it needs the kicks from the drum track, as in a processing run.
 
 Nothing is re-rendered while you listen. The stems, the sub and the air are separate layers held in memory, and each control is only a gain on one of them. Commit then writes the track from those same layers at those same gains, so what is written is what you heard -- then levelled to the target, as every finished track is. Cancel throws the layers away; nothing reaches the output folder until Commit.
 
-The stages before the sub (de-clipping, range, attack, mud, body) run as the settings ask when the mix opens. Bass and Air start at what the settings would give this track and are sized the same way: Bass +5 is the 31.5-63 Hz octave five dB above where the track had it. A fader at the bottom is off, not merely quiet. Punch is not part of the stem mix.
+The stages before the sub (de-clipping, range, attack, mud, body) run as the settings ask when the mix opens. Bass and Air start at what the settings would give this track and are sized the same way: Bass +5 is the 31.5-63 Hz octave five dB above where the track had it. A fader at the bottom is off, not merely quiet. Punch here shapes the drum track's 2-6 kHz only, not the whole mix's, so the hi-hats ride with the kicks and the vocals and guitars are left alone; it moves with the Drums fader. Punch Decay is the setting's.
 
 The layers wait in ~/Music/LoudnessLab/stem-mix while the mix is open -- about 115 MB each for five minutes of music -- and are removed on Cancel and after Commit.
 

@@ -365,7 +365,8 @@ the app is a gain on one layer (`ABPlayer.setMix`); Bass and Air gains are
 the stages' own quadratic from sums in mix.json (`gain_from_stats`, mirrored
 by `StemMix.quadraticGain`). Commit runs `subbass --stem-mix choice.json`,
 which builds the track from the same layers at the same gains and then
-levels and writes as usual. `tests/test_stemmix.py` holds commit == preview
+levels and writes as usual. Save As runs the same commit with no A/B pair into a
+scratch `--out` and moves the finished file to the name chosen. `tests/test_stemmix.py` holds commit == preview
 (to the FLAC's quantisation) and fails on a neighbouring setting;
 `StemMixTests.swift` holds the app's gains to the Python's. Kicks from
 (drum track / full mix) and "follows the bass line" are live too: preview

@@ -549,17 +549,40 @@ struct ContentView: View {
             },
             bassSub: profile.bassSub,
             busy: engine.isRunning,
-            commit: { choice in
+            saveDirectory: outputDirectory,
+            format: format,
+            commit: { choice, saveAs in
                 player.stop()
                 chosen = nil
+                // Save As writes one finished file (no A/B pair) into a
+                // scratch folder, then moves it where it was asked for.
+                let scratch = saveAs.map { _ in
+                    StemMixSession.scratch.appendingPathComponent("save-\(UUID().uuidString)",
+                                                                 isDirectory: true)
+                }
+                defer { if let scratch { try? FileManager.default.removeItem(at: scratch) } }
                 await engine.run(folders: scope, profile: profile, limit: Int.max,
-                                 compare: compare, dryRun: false,
-                                 outputDirectory: outputDirectory,
+                                 compare: saveAs == nil ? compare : false, dryRun: false,
+                                 outputDirectory: scratch ?? outputDirectory,
                                  databaseURL: databaseURL, format: format,
-                                 only: [path], stemMix: choice)
+                                 only: [path], report: saveAs == nil, stemMix: choice)
                 if let failure = engine.failure { return failure }
                 guard let track = engine.manifest?.tracks.first else {
                     return "Nothing was written. The log in the main window says why."
+                }
+                if let saveAs {
+                    guard let made = track.variants.first(where: { $0.kind == "processed" }) else {
+                        return "The track was processed but no finished file came back."
+                    }
+                    do {
+                        let files = FileManager.default
+                        if files.fileExists(atPath: saveAs.path) { try files.removeItem(at: saveAs) }
+                        try files.moveItem(at: made.url, to: saveAs)
+                    } catch {
+                        return "Could not save to \(saveAs.path): \(error.localizedDescription)"
+                    }
+                    engine.clearResults()
+                    return nil
                 }
                 chosen = track
                 rightTab = .results

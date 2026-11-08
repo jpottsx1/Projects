@@ -1,4 +1,7 @@
+import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
+import LoudnessKit
 
 /// The stem mix, as a sheet over the window: four stem faders, Bass,
 /// where the kicks come from and whether the sub follows the bass line,
@@ -11,17 +14,24 @@ struct StemMixPanel: View {
     let bassSub: Bool
     /// A processing run is already going: Commit waits for it.
     let busy: Bool
-    /// Processes this track with the choice file attached; nil once
+    /// Processes this track with the choice file attached -- into the
+    /// output folder, or to the Save As file when there is one; nil once
     /// written, or why not.
-    let commit: (URL) async -> String?
+    let commit: (URL, URL?) async -> String?
     let close: () -> Void
+    /// Where Save As starts, and the format it writes.
+    let saveDirectory: URL
+    let format: AudioWriter.Format
 
     init(path: String, arguments: @escaping () -> [String], bassSub: Bool, busy: Bool,
-         commit: @escaping (URL) async -> String?, close: @escaping () -> Void) {
+         saveDirectory: URL, format: AudioWriter.Format,
+         commit: @escaping (URL, URL?) async -> String?, close: @escaping () -> Void) {
         _session = StateObject(wrappedValue: StemMixSession(path: path))
         self.arguments = arguments
         self.bassSub = bassSub
         self.busy = busy
+        self.saveDirectory = saveDirectory
+        self.format = format
         self.commit = commit
         self.close = close
     }
@@ -88,10 +98,21 @@ struct StemMixPanel: View {
             }
             buttons(ready: session.phase == .ready)
         case .committed:
-            Text("Written. It is in the Results tab, ready to compare.")
-                .font(.callout)
+            if let saved = session.savedTo {
+                Text("Saved as \(saved.lastPathComponent) in \(saved.deletingLastPathComponent().path).")
+                    .font(.callout).textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                Text("Written. It is in the Results tab, ready to compare.")
+                    .font(.callout)
+            }
             HStack {
                 Spacer()
+                if let saved = session.savedTo {
+                    Button("Show in Finder") {
+                        NSWorkspace.shared.activateFileViewerSelecting([saved])
+                    }
+                }
                 Button("Done") { close() }.keyboardShortcut(.defaultAction)
             }
         }
@@ -106,6 +127,11 @@ struct StemMixPanel: View {
             Button("Cancel") { session.cancel(); close() }
                 .keyboardShortcut(.cancelAction)
                 .help("Close without writing anything. The stems are thrown away.")
+            Button("Save As…") { saveAs() }
+                .disabled(!ready || busy)
+                .help(busy ? "A run is going; save when it has finished."
+                      : "Write this mix to a file you name, in \(format.rawValue), "
+                        + "instead of the output folder.")
             Button("Commit") {
                 Task { await session.commit(run: commit) }
             }
@@ -114,6 +140,22 @@ struct StemMixPanel: View {
             .help(busy ? "A run is going; Commit when it has finished."
                   : "Write this track with these levels, this Bass, Punch and Air.")
         }
+    }
+
+    /// Ask where, then commit there.
+    private func saveAs() {
+        let panel = NSSavePanel()
+        panel.title = "Save Stem Mix"
+        panel.prompt = "Save"
+        panel.directoryURL = saveDirectory
+        panel.nameFieldStringValue = "\(session.name) (stem mix).\(format.fileExtension)"
+        if let type = UTType(filenameExtension: format.fileExtension) {
+            panel.allowedContentTypes = [type]
+        }
+        panel.canCreateDirectories = true
+        panel.isExtensionHidden = false
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        Task { await session.commit(saveAs: url, run: commit) }
     }
 
     private func mixer(_ bundle: StemMix.Bundle) -> some View {

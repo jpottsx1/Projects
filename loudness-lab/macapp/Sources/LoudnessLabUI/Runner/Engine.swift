@@ -20,6 +20,10 @@ final class Engine: ObservableObject {
     @Published private(set) var isRunning = false
     @Published private(set) var log = ""
     @Published private(set) var manifest: Manifest?
+
+    /// Forget the last run's results -- a stem mix saved elsewhere has
+    /// moved its file away, and a row pointing at nothing helps no one.
+    func clearResults() { manifest = nil }
     @Published private(set) var failure: String?
     @Published private(set) var progress: Double?
 

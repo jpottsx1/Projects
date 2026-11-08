@@ -806,6 +806,8 @@ Kicks from is the setting "Find kicks on the drum track", switched live: Drum tr
 
 Nothing is re-rendered while you listen. The stems, the sub and the air are separate layers held in memory, and each control is only a gain on one of them. Commit then writes the track from those same layers at those same gains, so what is written is what you heard -- then levelled to the target, as every finished track is. Cancel throws the layers away; nothing reaches the output folder until Commit.
 
+Save As… writes the same track to a file you name instead: one finished file, levelled, in the format the settings choose, and nothing in the output folder or the Results tab.
+
 The stages before the sub (de-clipping, range, attack, mud, body) run as the settings ask when the mix opens. Bass and Air start at what the settings would give this track and are sized the same way: Bass +5 is the 31.5-63 Hz octave five dB above where the track had it. A fader at the bottom is off, not merely quiet. Punch here shapes the drum track's 2-6 kHz only, not the whole mix's, so the hi-hats ride with the kicks and the vocals and guitars are left alone; it moves with the Drums fader. Punch Decay is the setting's.
 
 The layers wait in ~/Music/LoudnessLab/stem-mix while the mix is open -- about 115 MB each for five minutes of music -- and are removed on Cancel and after Commit.

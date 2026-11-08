@@ -927,6 +927,10 @@ enum Help {
         throws the layers away; nothing reaches the output folder until \
         Commit.
 
+        Save As… writes the same track to a file you name instead: one \
+        finished file, levelled, in the format the settings choose, and \
+        nothing in the output folder or the Results tab.
+
         The stages before the sub (de-clipping, range, attack, mud, body) \
         run as the settings ask when the mix opens. Bass and Air start at \
         what the settings would give this track and are sized the same way: \

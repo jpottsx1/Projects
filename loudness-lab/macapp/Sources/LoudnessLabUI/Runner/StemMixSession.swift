@@ -25,6 +25,8 @@ final class StemMixSession: ObservableObject {
     @Published private(set) var bundle: StemMix.Bundle?
     /// Why the last Commit wrote nothing, said in the sheet.
     @Published private(set) var problem: String?
+    /// Where Save As put the track; nil after a plain Commit.
+    @Published private(set) var savedTo: URL?
     /// What the faders say. Every change is heard at once.
     @Published var choice: StemMix.Choice? {
         didSet { if choice != oldValue { applyMix() } }
@@ -101,23 +103,26 @@ final class StemMixSession: ObservableObject {
     /// Write the chosen mix as a finished track. `run` is the app's
     /// processing run for this one track with the choice file attached
     /// (`Engine.run(..., stemMix:)`); it returns nil once the track is
-    /// written, or why it was not.
-    func commit(run: (URL) async -> String?) async {
+    /// written, or why it was not. With `saveAs`, the track goes to that
+    /// file instead of the output folder.
+    func commit(saveAs: URL? = nil, run: (URL, URL?) async -> String?) async {
         guard phase == .ready, let folder, let choice else { return }
         player.pause()
         phase = .committing
         problem = nil
+        savedTo = nil
         do {
             let file = folder.appendingPathComponent("choice.json")
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             try encoder.encode(choice).write(to: file)
-            if let failure = await run(file) {
+            if let failure = await run(file, saveAs) {
                 // Kept: the mix can be tried again, or cancelled.
                 problem = failure
                 phase = .ready
             } else {
                 discardLayers()
+                savedTo = saveAs
                 phase = .committed
             }
         } catch {

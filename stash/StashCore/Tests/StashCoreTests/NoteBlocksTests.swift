@@ -76,3 +76,37 @@ final class NoteBlocksTests: XCTestCase {
         XCTAssertEqual(blocks.last, .paragraph("After"))
     }
 }
+
+final class SlashCommandTests: XCTestCase {
+    func testCommands() throws {
+        let text = "Intro\n  /tog"
+        let context = try XCTUnwrap(SlashCommands.context(in: text, cursor: text.endIndex))
+        XCTAssertEqual(context.query, "tog")
+        XCTAssertEqual(SlashCommands.matching("tog").map(\.name), ["Toggle"])
+        XCTAssertEqual(SlashCommands.matching("h").first?.name, "Heading 1")
+        let toggle = try XCTUnwrap(SlashCommands.matching("toggle").first)
+        let done = SlashCommands.apply(toggle, to: text, context: context, today: "2026-10-15")
+        XCTAssertEqual(done.text, "Intro\n  <details>\n<summary></summary>\n\n\n\n</details>")
+        XCTAssertEqual(done.cursor, "Intro\n  <details>\n<summary>".count)
+        XCTAssertNil(SlashCommands.context(in: "a /b", cursor: "a /b".endIndex))
+        XCTAssertNil(SlashCommands.context(in: "/two words", cursor: "/two words".endIndex))
+        let date = try XCTUnwrap(SlashCommands.all.first { $0.name == "Today’s Date" })
+        XCTAssertEqual(SlashCommands.apply(date, to: "/date", context: SlashCommands.context(in: "/date", cursor: "/date".endIndex)!,
+                                           today: "2026-10-15").text, "2026-10-15")
+    }
+
+    func testMovingTheCursorsBlock() throws {
+        let text = "# Title\n\nFirst\n\n- a\n- b"
+        let moved = try XCTUnwrap(NoteBlocks.movingBlock(at: 2, by: -1, in: text))
+        XCTAssertEqual(moved.text, "First\n\n# Title\n\n- a\n- b")
+        XCTAssertEqual(moved.line, 0)
+        XCTAssertNil(NoteBlocks.movingBlock(at: 0, by: -1, in: text))
+        XCTAssertEqual(NoteBlocks.movingBlock(at: 4, by: 1, in: text)?.text, "# Title\n\nFirst\n\n- b\n- a")
+    }
+
+    func testTogglesWhileWriting() {
+        let spans = MarkdownStyling.spans(in: "<details>\n<summary>More</summary>\nText\n</details>")
+        XCTAssertTrue(spans.contains { $0.style == .toggleTitle && $0.range == 19..<23 })
+        XCTAssertEqual(spans.first?.style, .marker)
+    }
+}

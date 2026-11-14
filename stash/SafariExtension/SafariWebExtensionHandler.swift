@@ -30,6 +30,18 @@ final class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
             return ["saved": false, "reason": "This page can’t be saved."]
         }
         let title = (message?["title"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        // A picture on the page: Stash saves its biggest version.
+        if let image = (message?["imageURL"] as? String).flatMap(URL.init(string:)), ["http", "https"].contains(image.scheme?.lowercased() ?? "") {
+            var entry = SharedEntry(kind: .image, title: "", url: image.absoluteString)
+            entry.pageURL = url.absoluteString
+            do {
+                try inbox.add(entry)
+                ShareSignal.post()
+                return ["saved": true]
+            } catch {
+                return ["saved": false, "reason": error.localizedDescription]
+            }
+        }
         var entry = SharedEntry(kind: .link, title: title, url: url.absoluteString)
         // From the button's menu: Save to Stash as PDF, and so on.
         entry.saveAs = (message?["format"] as? String).flatMap(PageFormat.init(rawValue:)).map(\.rawValue)

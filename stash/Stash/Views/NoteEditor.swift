@@ -34,6 +34,8 @@ struct NoteEditor: View {
     /// Most recently edited first, which is the order suggestions keep.
     @Query(sort: \Item.modifiedAt, order: .reverse) private var allItems: [Item]
     @State private var completion: WikiLinkCompletion.Context?
+    /// A `/command` being typed at the start of a line.
+    @State private var slash: SlashCommands.Context?
     @State private var highlighted = 0
     @State private var select: Range<String.Index>?
     /// The selection as character offsets, for the formatting buttons.
@@ -182,7 +184,19 @@ struct NoteEditor: View {
                 selection = range
             }, pictureURL: { library.pictureURL($0, in: item) },
                addPicture: { data, ext in library.addPicture(data, fileExtension: ext, to: item) },
-               focusMode: focusMode, margin: margin, onIndent: { outward in indent(outward: outward) })
+               focusMode: focusMode, margin: margin, onIndent: { outward in indent(outward: outward) },
+               onSuggestionKey: { key in
+                   switch key {
+                   case .up: return moveHighlight(by: -1) == .handled
+                   case .down: return moveHighlight(by: 1) == .handled
+                   case .accept: return acceptHighlighted() == .handled
+                   case .cancel:
+                       guard completion != nil || slash != nil else { return false }
+                       completion = nil
+                       slash = nil
+                       return true
+                   }
+               })
             .overlay(alignment: .bottomTrailing) { wordCount }
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 let choices = self.choices
@@ -223,8 +237,9 @@ struct NoteEditor: View {
             .onKeyPress(.return) { acceptHighlighted() }
             .onKeyPress(.tab) { acceptHighlighted() }
             .onKeyPress(.escape) {
-                guard completion != nil else { return .ignored }
+                guard completion != nil || slash != nil else { return .ignored }
                 completion = nil
+                slash = nil
                 return .handled
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -319,6 +334,15 @@ struct NoteEditor: View {
         return (index, String(item.body[lineStart..<lineEnd]), column)
     }
 
+    /// The block the cursor's in, moved up or down past the next, the cursor going with it.
+    private func moveBlock(by offset: Int) {
+        guard let moved = NoteBlocks.movingBlock(at: cursorLine.index, by: offset, in: item.body) else { return }
+        item.body = moved.text
+        let lines = moved.text.components(separatedBy: "\n")
+        let offsetInText = lines.prefix(moved.line).reduce(0) { $0 + $1.count + 1 }
+        jump(to: offsetInText)
+    }
+
     private func changeTable(_ change: MarkdownTable.Change) {
         let cursor = cursorLine
         guard let changed = MarkdownTable.change(item.body, line: cursor.index,
@@ -374,6 +398,18 @@ struct NoteEditor: View {
             }
         }
         #endif
+        Button {
+            moveBlock(by: -1)
+        } label: {
+            Label("Move Block Up", systemImage: "arrow.up.to.line.compact").labelStyle(.iconOnly)
+        }
+        .help("Move the paragraph, list item or toggle the cursor's in up a place")
+        Button {
+            moveBlock(by: 1)
+        } label: {
+            Label("Move Block Down", systemImage: "arrow.down.to.line.compact").labelStyle(.iconOnly)
+        }
+        .help("Move the paragraph, list item or toggle the cursor's in down a place")
         Button {
             indent(outward: true)
         } label: {
@@ -479,6 +515,7 @@ struct NoteEditor: View {
     /// What to offer for the link being typed: items whose titles match,
     /// then -- if none is called exactly that -- a new note by that name.
     private var choices: [LinkChoice] {
+        if let slash { return SlashCommands.matching(slash.query).map(LinkChoice.command) }
         guard let completion else { return [] }
         let candidates = allItems.filter { $0 != item && !$0.title.isEmpty && !$0.isTrashed }
         let byKey = Dictionary(candidates.map { (WikiLinks.key($0.title), $0) }, uniquingKeysWith: { first, _ in first })
@@ -493,8 +530,10 @@ struct NoteEditor: View {
 
     private func updateCompletion(at cursor: String.Index?) {
         let found = cursor.flatMap { WikiLinkCompletion.context(in: item.body, cursor: $0) }
-        if found?.query != completion?.query { highlighted = 0 }
+        let command = cursor.flatMap { SlashCommands.context(in: item.body, cursor: $0) }
+        if found?.query != completion?.query || command?.query != slash?.query { highlighted = 0 }
         completion = found
+        slash = command
     }
 
     private func moveHighlight(by step: Int) -> KeyPress.Result {
@@ -514,6 +553,14 @@ struct NoteEditor: View {
     /// Writes the link in. A new note isn't made here: following the link
     /// in the preview makes it, as for any link to a missing item.
     private func accept(_ choice: LinkChoice) {
+        if case .command(let command) = choice, let slash {
+            let done = SlashCommands.apply(command, to: item.body, context: slash, today: CustomField.storedDate(.now))
+            item.body = done.text
+            let cursor = item.body.index(item.body.startIndex, offsetBy: min(done.cursor, item.body.count))
+            select = cursor..<cursor
+            self.slash = nil
+            return
+        }
         guard let completion else { return }
         let done = WikiLinkCompletion.complete(item.body, context: completion, with: choice.title)
         item.body = done.text

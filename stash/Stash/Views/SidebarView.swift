@@ -230,11 +230,11 @@ struct SidebarView: View {
         .contextMenu {
             Button("New Category Inside…") { startNaming(.new(parent: category)) }
             if Sharing.shared != nil, library.isMain, category.parent == nil {
-                Button(category.sharedZoneName.isEmpty ? "Share…" : "Sharing…") { library.sharingCategory = category }
+                Button(category.sharedZoneName.isEmpty ? "Share…" : "Sharing…") { library.sharingTarget = .category(category) }
             }
             if library.isShared, category.parent == nil, Sharing.TheirZone(category.sharedZoneName) != nil {
                 Button("Leave This Share", role: .destructive) {
-                    Task { try? await Sharing.shared?.leave(category) }
+                    Task { try? await Sharing.shared?.leave(category.sharedZoneName) }
                 }
             }
             Button("New Smart Filter Here…") { editingFilter = FilterEditing(filter: nil, scope: .category(category)) }

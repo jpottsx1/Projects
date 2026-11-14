@@ -134,6 +134,20 @@ class Command(unittest.TestCase):
             self.assertEqual(cli.main(["restore", str(batch)]), 0)
         self.assertEqual(self.song.read_bytes(), self.before)
 
+    def test_every_copy_of_a_song_is_replaced(self):
+        """--skip-duplicates saves a lossy generation on a preview, but a
+        replace is the library: the copy skipped stays at its old level
+        while its twin is levelled (2026-11-14, four songs on the SSD)."""
+        twin = self.library / "Compilation" / "groove.mp3"
+        twin.parent.mkdir()
+        shutil.copyfile(self.song, twin)
+        code, text = self.run_subbass("--format", "mp3", "--no-compare",
+                                      "--skip-duplicates",
+                                      "--replace-originals", "--yes")
+        self.assertEqual(code, 0, text)
+        self.assertNotEqual(self.song.read_bytes(), self.before)
+        self.assertNotEqual(twin.read_bytes(), self.before)
+
     def test_a_different_format_leaves_the_original_where_it_is(self):
         code, text = self.run_subbass("--format", "flac", "--no-compare",
                                       "--replace-originals", "--yes")

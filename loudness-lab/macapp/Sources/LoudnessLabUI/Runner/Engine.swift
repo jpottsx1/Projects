@@ -516,10 +516,6 @@ final class Engine: ObservableObject {
             "--out", outputDirectory.path,
             "--format", format.cliName,
             "--porcelain",
-            // The app's list is already deduplicated by the eye; the
-            // batch is not. A library of compilations is mostly the
-            // same forty songs.
-            "--skip-duplicates",
             "--limit", String(limit == Int.max ? Int(Int32.max) : limit),
             "--target", String(profile.target),
             "--estimator", profile.estimator,
@@ -541,6 +537,11 @@ final class Engine: ObservableObject {
             "--body", String(profile.body),
             "--air-tune", String(profile.airTune),
         ]
+        // The app's list is already deduplicated by the eye; the batch is
+        // not. A library of compilations is mostly the same forty songs.
+        // But replacing originals levels the library itself, and there a
+        // skipped copy is one left at its old level: every copy is done.
+        if !replaceOriginals { arguments += ["--skip-duplicates"] }
         if profile.auto { arguments += ["--auto"] }
         if let reference = profile.reference, !reference.isEmpty {
             arguments += ["--reference", reference]

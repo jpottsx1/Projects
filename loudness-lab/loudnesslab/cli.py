@@ -1184,7 +1184,13 @@ def cmd_subbass(args: argparse.Namespace) -> int:
         # differ only by which compilation they came off. A library of
         # disco compilations is mostly the same forty songs, so this is the
         # normal case rather than an odd one.
-        if args.skip_duplicates:
+        #
+        # Not when replacing originals, though: then every copy IS the
+        # library, and the copy skipped stays at its old level while its
+        # twin is levelled -- the one that plays is as likely to be either.
+        # 2026-11-14: four songs left 2-3 dB hot on Extreme SSD because a
+        # Downloads copy came first in the batch.
+        if args.skip_duplicates and not getattr(args, "replace_originals", False):
             key = _identity(row["artist"], row["title"], row["path"])
             if key in seen:
                 duplicates += 1
@@ -2145,7 +2151,9 @@ def build_parser() -> argparse.ArgumentParser:
                      help="do a record only once per batch, matching on "
                           "artist and title with case and punctuation "
                           "ignored. A library of compilations is mostly the "
-                          "same songs twice")
+                          "same songs twice. Ignored with "
+                          "--replace-originals: there every copy is the "
+                          "library, and the one skipped stays unlevelled")
     sub.add_argument("--jobs", type=int, default=None,
                      help=f"tracks at a time (default: {render.default_jobs()} "
                           "here). Each one holds several decoded copies in "
